@@ -17,6 +17,7 @@ import nlp from 'compromise';
 
 // Add the correct type import
 import type { TextContent, TextItem } from 'pdfjs-dist/types/src/display/api';
+import { useConfig } from '@/contexts/ConfigContext';
 
 // Set worker from public directory
 pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.mjs';
@@ -43,28 +44,30 @@ interface PDFContextType {
 const PDFContext = createContext<PDFContextType | undefined>(undefined);
 
 export function PDFProvider({ children }: { children: ReactNode }) {
+  const { isDBReady } = useConfig();
   const [documents, setDocuments] = useState<PDFDocument[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Load documents from IndexedDB on mount
+  // Load documents from IndexedDB once DB is ready
   useEffect(() => {
     const loadDocuments = async () => {
+      if (!isDBReady) return;
+      
       try {
         setError(null);
-        await indexedDBService.init();
         const docs = await indexedDBService.getAllDocuments();
         setDocuments(docs);
       } catch (error) {
         console.error('Failed to load documents:', error);
-        setError('Failed to initialize document storage. Please check if your browser supports IndexedDB.');
+        setError('Failed to load documents. Please try again.');
       } finally {
         setIsLoading(false);
       }
     };
 
     loadDocuments();
-  }, []);
+  }, [isDBReady]);
 
   // Add a new document to IndexedDB
   const addDocument = useCallback(async (file: File): Promise<string> => {

@@ -1,5 +1,5 @@
 const DB_NAME = 'openreader-db';
-const DB_VERSION = 2;
+const DB_VERSION = 1;
 const PDF_STORE_NAME = 'pdf-documents';
 const CONFIG_STORE_NAME = 'config';
 
@@ -18,13 +18,18 @@ export interface Config {
 
 class IndexedDBService {
   private db: IDBDatabase | null = null;
+  private initPromise: Promise<void> | null = null;
 
   async init(): Promise<void> {
-    if (!window.indexedDB) {
-      throw new Error('IndexedDB is not supported in this browser');
+    if (this.initPromise) {
+      return this.initPromise;
     }
 
-    return new Promise((resolve, reject) => {
+    if (this.db) {
+      return Promise.resolve();
+    }
+
+    this.initPromise = new Promise((resolve, reject) => {
       console.log('Initializing IndexedDB...');
       const request = indexedDB.open(DB_NAME, DB_VERSION);
 
@@ -55,6 +60,8 @@ class IndexedDBService {
         }
       };
     });
+
+    return this.initPromise;
   }
 
   // PDF Document Methods
@@ -298,7 +305,9 @@ class IndexedDBService {
   }
 }
 
-export const indexedDBService = new IndexedDBService();
+// Make sure we export a singleton instance
+const indexedDBServiceInstance = new IndexedDBService();
+export const indexedDBService = indexedDBServiceInstance;
 
 // Helper functions for the ConfigContext
 export async function getItem(key: string): Promise<string | null> {

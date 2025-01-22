@@ -1,12 +1,14 @@
 'use client';
 
 import { createContext, useContext, useEffect, useState } from 'react';
-import { getItem, setItem } from '@/services/indexedDB';
+import { getItem, indexedDBService, setItem } from '@/services/indexedDB';
 
 interface ConfigContextType {
   apiKey: string;
   baseUrl: string;
   updateConfig: (newConfig: Partial<{ apiKey: string; baseUrl: string }>) => Promise<void>;
+  isLoading: boolean;
+  isDBReady: boolean;
 }
 
 const ConfigContext = createContext<ConfigContextType | undefined>(undefined);
@@ -14,13 +16,26 @@ const ConfigContext = createContext<ConfigContextType | undefined>(undefined);
 export function ConfigProvider({ children }: { children: React.ReactNode }) {
   const [apiKey, setApiKey] = useState<string>('');
   const [baseUrl, setBaseUrl] = useState<string>('');
+  const [isLoading, setIsLoading] = useState(true);
+  const [isDBReady, setIsDBReady] = useState(false);
 
   useEffect(() => {
-    const loadConfig = async () => {
+    const initializeDB = async () => {
       try {
-        // Try to load from IndexedDB first
+        setIsLoading(true);
+        await indexedDBService.init();
+        setIsDBReady(true);
+        
+        // Now load config
         const cachedApiKey = await getItem('apiKey');
         const cachedBaseUrl = await getItem('baseUrl');
+
+        if (cachedApiKey) {
+          console.log('Cached API key found:', cachedApiKey);
+        }
+        if (cachedBaseUrl) {
+          console.log('Cached base URL found:', cachedBaseUrl);
+        }
 
         // If not in cache, use env variables
         const defaultApiKey = process.env.NEXT_PUBLIC_OPENAI_API_KEY || '';
@@ -30,19 +45,22 @@ export function ConfigProvider({ children }: { children: React.ReactNode }) {
         setApiKey(cachedApiKey || defaultApiKey);
         setBaseUrl(cachedBaseUrl || defaultBaseUrl);
 
-        // If we used default values and they're not empty, store them in IndexedDB
-        if (!cachedApiKey && defaultApiKey) {
+        // If not in cache, save to cache
+        if (!cachedApiKey) {
           await setItem('apiKey', defaultApiKey);
         }
-        if (!cachedBaseUrl && defaultBaseUrl) {
+        if (!cachedBaseUrl) {
           await setItem('baseUrl', defaultBaseUrl);
         }
+        
       } catch (error) {
-        console.error('Error loading config:', error);
+        console.error('Error initializing:', error);
+      } finally {
+        setIsLoading(false);
       }
     };
 
-    loadConfig();
+    initializeDB();
   }, []);
 
   const updateConfig = async (newConfig: Partial<{ apiKey: string; baseUrl: string }>) => {
@@ -62,7 +80,7 @@ export function ConfigProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <ConfigContext.Provider value={{ apiKey, baseUrl, updateConfig }}>
+    <ConfigContext.Provider value={{ apiKey, baseUrl, updateConfig, isLoading, isDBReady }}>
       {children}
     </ConfigContext.Provider>
   );
