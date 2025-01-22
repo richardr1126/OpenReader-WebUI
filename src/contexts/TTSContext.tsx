@@ -11,6 +11,7 @@ import React, {
 import nlp from 'compromise';
 import OpenAI from 'openai';
 import { LRUCache } from 'lru-cache'; // Import LRUCache directly
+import { useConfig } from './ConfigContext';
 
 // Add type declarations
 declare global {
@@ -50,6 +51,12 @@ interface TTSContextType {
 const TTSContext = createContext<TTSContextType | undefined>(undefined);
 
 export function TTSProvider({ children }: { children: React.ReactNode }) {
+  const { apiKey: openApiKey, baseUrl: openApiBaseUrl, isLoading: configIsLoading } = useConfig();
+  
+  // Move openai initialization to a ref to avoid breaking hooks rules
+  const openaiRef = useRef<OpenAI | null>(null);
+  
+  // All existing state declarations and refs stay at the top
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentText, setCurrentText] = useState('');
   const [sentences, setSentences] = useState<string[]>([]);
@@ -66,19 +73,41 @@ export function TTSProvider({ children }: { children: React.ReactNode }) {
   const [speed, setSpeed] = useState(1);
   const [voice, setVoice] = useState('alloy');
   const [availableVoices, setAvailableVoices] = useState<string[]>([]);
-
-  // Create OpenAI instance
-  const [openai] = useState(
-    () =>
-      new OpenAI({
-        apiKey: process.env.NEXT_PUBLIC_OPENAI_API_KEY,
-        baseURL: process.env.NEXT_PUBLIC_OPENAI_API_BASE,
-        dangerouslyAllowBrowser: true,
-      })
-  );
-
+  
   // Audio cache using LRUCache with a maximum size of 50 entries
   const audioCacheRef = useRef(new LRUCache<string, AudioBuffer>({ max: 50 }));
+
+  // Initialize OpenAI instance when config loads
+  useEffect(() => {
+    const fetchVoices = async () => {
+      try {
+        const response = await fetch(`${openApiBaseUrl}/audio/voices`, {
+          headers: {
+            'Authorization': `Bearer ${openApiKey}`,
+            'Content-Type': 'application/json',
+          },
+        });
+        if (!response.ok) throw new Error('Failed to fetch voices');
+        const data = await response.json();
+        setAvailableVoices(data.voices || []);
+      } catch (error) {
+        console.error('Error fetching voices:', error);
+
+        // Set available voices to default openai voices
+        // Supported voices are alloy, ash, coral, echo, fable, onyx, nova, sage and shimmer
+        setAvailableVoices(['alloy', 'ash', 'coral', 'echo', 'fable', 'onyx', 'nova', 'sage', 'shimmer']);
+      }
+    };
+
+    if (!configIsLoading && openApiKey && openApiBaseUrl) {
+      openaiRef.current = new OpenAI({
+        apiKey: openApiKey,
+        baseURL: openApiBaseUrl,
+        dangerouslyAllowBrowser: true,
+      });
+      fetchVoices();
+    }
+  }, [configIsLoading, openApiKey, openApiBaseUrl]);
 
   useEffect(() => {
     /*
@@ -100,31 +129,6 @@ export function TTSProvider({ children }: { children: React.ReactNode }) {
       }
     }
   }, [audioContext]);
-
-  useEffect(() => {
-    // Fetch available voices when component mounts
-    const fetchVoices = async () => {
-      try {
-        const response = await fetch(`${openai.baseURL}/audio/voices`, {
-          headers: {
-            'Authorization': `Bearer ${process.env.NEXT_PUBLIC_OPENAI_API_KEY}`,
-            'Content-Type': 'application/json',
-          },
-        });
-        if (!response.ok) throw new Error('Failed to fetch voices');
-        const data = await response.json();
-        setAvailableVoices(data.voices || []);
-      } catch (error) {
-        console.error('Error fetching voices:', error);
-
-        // Set available voices to default openai voices
-        // Supported voices are alloy, ash, coral, echo, fable, onyx, nova, sage and shimmer
-        setAvailableVoices(['alloy', 'ash', 'coral', 'echo', 'fable', 'onyx', 'nova', 'sage', 'shimmer']);
-      }
-    };
-
-    fetchVoices();
-  }, [openai.baseURL]);
 
   // Text preprocessing function to clean and normalize text
   const preprocessText = (text: string): string => {
@@ -165,7 +169,7 @@ export function TTSProvider({ children }: { children: React.ReactNode }) {
   }, [isPlaying, currentIndex, sentences]);
 
   const processAndPlaySentence = async (sentence: string) => {
-    if (!audioContext || isProcessing) return;
+    if (!audioContext || isProcessing || !openaiRef.current) return;
 
     try {
       // Only set processing if we need to fetch from API
@@ -193,7 +197,7 @@ export function TTSProvider({ children }: { children: React.ReactNode }) {
       if (!audioBuffer) {
         console.log(' Processing TTS for sentence:', cleanedSentence.substring(0, 50) + '...');
         const startTime = Date.now();
-        const response = await openai.audio.speech.create({
+        const response = await openaiRef.current.audio.speech.create({
           model: 'tts-1',
           voice: voice as "alloy",
           input: cleanedSentence,
@@ -414,13 +418,13 @@ export function TTSProvider({ children }: { children: React.ReactNode }) {
   }, [isPlaying, currentIndex, sentences, isProcessing]);
 
   const preloadSentence = async (sentence: string) => {
-    if (!audioContext) return;
+    if (!audioContext || !openaiRef.current) return;
     if (audioCacheRef.current.has(sentence)) return; // Already cached
 
     try {
       console.log(' Preloading TTS for sentence:', sentence.substring(0, 50) + '...');
       const startTime = Date.now();
-      const response = await openai.audio.speech.create({
+      const response = await openaiRef.current.audio.speech.create({
         model: 'tts-1',
         voice: voice as "alloy",
         input: sentence,
@@ -564,6 +568,10 @@ export function TTSProvider({ children }: { children: React.ReactNode }) {
     setVoiceAndRestart,
     availableVoices,
   };
+
+  if (configIsLoading) {
+    return null;
+  }
 
   return (
     <TTSContext.Provider value={value}>
