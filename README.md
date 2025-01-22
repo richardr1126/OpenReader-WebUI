@@ -37,7 +37,7 @@ https://github.com/user-attachments/assets/7a3457ba-feda-4939-928a-cb587b1c0884
 1. Clone the repository:
 ```bash
 git clone [repository-url]
-cd openreader-webui
+cd OpenReader-WebUI
 ```
 
 2. Install dependencies:
