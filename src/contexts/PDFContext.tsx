@@ -276,48 +276,26 @@ export function PDFProvider({ children }: { children: ReactNode }) {
       text: (node.textContent || '').trim(),
     })).filter((node) => node.text.length > 0);
 
-    // Calculate the visible area of the container
-    const containerRect = container.getBoundingClientRect();
-    const visibleTop = container.scrollTop;
-    const visibleBottom = visibleTop + containerRect.height;
-
-    // Find nodes within the visible area and a buffer zone
-    const bufferSize = containerRect.height; // One screen height buffer
-    const visibleNodes = allText.filter(({ element }) => {
-      const rect = element.getBoundingClientRect();
-      const elementTop = rect.top - containerRect.top + container.scrollTop;
-      return elementTop >= (visibleTop - bufferSize) && elementTop <= (visibleBottom + bufferSize);
-    });
-
-    // Search for the best match within the visible area first
-    let bestMatch = findBestTextMatch(visibleNodes, cleanPattern, cleanPattern.length * 2);
-    
-    // If no good match found in visible area, search the entire document
-    if (bestMatch.rating < 0.3) {
-      bestMatch = findBestTextMatch(allText, cleanPattern, cleanPattern.length * 2);
-    }
-
+    // Search for the best match in the entire document
+    const bestMatch = findBestTextMatch(allText, cleanPattern, cleanPattern.length * 2);
     const similarityThreshold = bestMatch.lengthDiff < cleanPattern.length * 0.3 ? 0.3 : 0.5;
 
-    if (bestMatch.rating >= similarityThreshold) {
+    if (bestMatch.rating >= similarityThreshold && bestMatch.elements.length > 0) {
+      // Highlight all matching elements
       bestMatch.elements.forEach((element) => {
         element.style.backgroundColor = 'grey';
         element.style.opacity = '0.4';
       });
 
-      if (bestMatch.elements.length > 0) {
-        const element = bestMatch.elements[0];
-        const elementRect = element.getBoundingClientRect();
-        const elementTop = elementRect.top - containerRect.top + container.scrollTop;
-
-        // Only scroll if the element is outside the visible area
-        if (elementTop < visibleTop || elementTop > visibleBottom) {
-          container.scrollTo({
-            top: elementTop - containerRect.height / 3, // Position the highlight in the top third
-            behavior: 'smooth',
-          });
-        }
-      }
+      // Get the first element to scroll to
+      const firstElement = bestMatch.elements[0];
+      
+      // Scroll the element into view with smooth behavior
+      firstElement.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center',
+        inline: 'nearest'
+      });
     }
   }, [clearHighlights, findBestTextMatch]);
 

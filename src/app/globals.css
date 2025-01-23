@@ -35,3 +35,7 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+.pdf-list > div {
+  padding: 0 !important;
+}

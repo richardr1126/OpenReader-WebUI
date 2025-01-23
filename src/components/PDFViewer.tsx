@@ -1,18 +1,61 @@
 'use client';
 
-import { RefObject } from 'react';
+import { RefObject, useCallback, useState, useEffect, useRef } from 'react';
 import { Document, Page } from 'react-pdf';
+import { FixedSizeList } from 'react-window';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
-import { useState, useEffect, useRef } from 'react';
 import { PDFSkeleton } from './PDFSkeleton';
 import { useTTS } from '@/contexts/TTSContext';
 import { usePDF } from '@/contexts/PDFContext';
+import { pdfjs } from 'react-pdf';
 
 interface PDFViewerProps {
   pdfData: Blob | undefined;
   zoomLevel: number;
 }
+
+interface PageItemData {
+  numPages: number;
+  scale: number;
+  containerWidth: number;
+  pageWidth: number;
+  pageHeight: number;
+}
+
+const PageComponent = ({ index, style, data }: { index: number; style: any; data: PageItemData }) => {
+  const { numPages, scale, pageHeight } = data;
+  
+  return (
+    <div style={{
+      ...style,
+      height: pageHeight,
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center'
+    }}>
+      {index==0 ? (<div className="bg-offbase m-4 px-2 py-0.5 rounded-full w-fit">
+        <p className="text-xs">
+          {index + 1} / {numPages}
+        </p>
+      </div>) :
+      (<div className="bg-offbase m-4 px-2 py-0.5 rounded-full w-fit">
+        <p className="text-xs">
+          {index + 1} / {numPages}
+        </p>
+      </div>)}
+      <div className="flex justify-center">
+        <Page
+          pageNumber={index + 1}
+          renderAnnotationLayer={true}
+          renderTextLayer={true}
+          className="shadow-lg"
+          scale={scale}
+        />
+      </div>
+    </div>
+  );
+};
 
 export function PDFViewer({ pdfData, zoomLevel }: PDFViewerProps) {
   const [numPages, setNumPages] = useState<number>();
@@ -23,6 +66,8 @@ export function PDFViewer({ pdfData, zoomLevel }: PDFViewerProps) {
   const [loadingError, setLoadingError] = useState<string>();
   const containerRef = useRef<HTMLDivElement>(null);
   const { extractTextFromPDF, highlightPattern, clearHighlights, handleTextClick } = usePDF();
+  const [pageHeight, setPageHeight] = useState(800); // Default height
+  const [pageSize, setPageSize] = useState({ width: 595, height: 842 }); // A4 default
 
   // Add static styles once during component initialization
   const styleElement = document.createElement('style');
@@ -146,12 +191,18 @@ export function PDFViewer({ pdfData, zoomLevel }: PDFViewerProps) {
   }, [pdfText, currentSentence, highlightPattern, clearHighlights]);
 
   // Add scale calculation function
-  const calculateScale = (pageWidth: number = 595) => {  // 595 is default PDF width in points
-    const margin = 24; // 24px padding on each side
-    const targetWidth = containerWidth - margin;
-    const baseScale = targetWidth / pageWidth;
+  const calculateScale = useCallback(() => {
+    //const margin = 48; // 24px padding on each side
+    //const targetWidth = containerWidth - margin;
+    const baseScale = containerWidth / pageSize.width;
     return baseScale * (zoomLevel / 100);
-  };
+  }, [containerWidth, zoomLevel, pageSize.width]);
+
+  const calculatePageHeight = useCallback((viewport: { width: number; height: number }) => {
+    const scale = calculateScale();
+    const scaledHeight = viewport.height * scale;
+    return scaledHeight + 55; // 40px padding top and bottom
+  }, [calculateScale]);
 
   // Add resize observer effect
   useEffect(() => {
@@ -168,9 +219,37 @@ export function PDFViewer({ pdfData, zoomLevel }: PDFViewerProps) {
     return () => observer.disconnect();
   }, []);
 
-  function onDocumentLoadSuccess({ numPages }: { numPages: number }): void {
+  const handleLoadSuccess = useCallback(async ({ numPages }: { numPages: number }) => {
     setNumPages(numPages);
-  }
+    
+    if (pdfData) {
+      try {
+        // Convert Blob to ArrayBuffer
+        const arrayBuffer = await pdfData.arrayBuffer();
+        const pdf = await pdfjs.getDocument(arrayBuffer).promise;
+        const page = await pdf.getPage(1);
+        const viewport = page.getViewport({ scale: 1 });
+        
+        setPageSize({
+          width: viewport.width,
+          height: viewport.height
+        });
+
+        const newPageHeight = calculatePageHeight(viewport);
+        setPageHeight(newPageHeight);
+      } catch (error) {
+        console.error('Error measuring page:', error);
+      }
+    }
+  }, [pdfData, calculatePageHeight]);
+
+  // Update page height when zoom level changes
+  useEffect(() => {
+    if (pageSize.width && pageSize.height) {
+      const newPageHeight = calculatePageHeight(pageSize);
+      setPageHeight(newPageHeight);
+    }
+  }, [zoomLevel, pageSize, calculatePageHeight]);
 
   return (
     <div
@@ -185,30 +264,28 @@ export function PDFViewer({ pdfData, zoomLevel }: PDFViewerProps) {
         loading={<PDFSkeleton />}
         noData={<PDFSkeleton />}
         file={pdfDataUrl}
-        onLoadSuccess={onDocumentLoadSuccess}
-        className="flex flex-col items-center m-0" 
+        onLoadSuccess={handleLoadSuccess}
+        className="flex flex-col items-center" 
       >
-        {Array.from(
-          new Array(numPages),
-          (el, index) => (
-            <div key={`page_${index + 1}`}>
-              <div className="bg-offbase my-4 px-2 py-0.5 rounded-full w-fit">
-                <p className="text-xs">
-                  {index + 1} / {numPages}
-                </p>
-              </div>
-              <div className="flex justify-center">
-                <Page
-                  pageNumber={index + 1}
-                  renderAnnotationLayer={true}
-                  renderTextLayer={true}
-                  className="shadow-lg"
-                  scale={calculateScale()}
-                />
-              </div>
-            </div>
-          ),
-        )}
+        {numPages && containerWidth ? (
+          <FixedSizeList
+            height={Math.min(window.innerHeight - 100, numPages * pageHeight)}
+            width={containerWidth}
+            itemCount={numPages}
+            itemSize={pageHeight}
+            itemData={{
+              numPages,
+              scale: calculateScale(),
+              containerWidth,
+              pageWidth: pageSize.width,
+              pageHeight: pageHeight,
+            }}
+            className="pdf-list"
+            overscanCount={2} // Add overscanning for smoother scrolling
+          >
+            {PageComponent}
+          </FixedSizeList>
+        ) : null}
       </Document>
     </div>
   );
