@@ -8,6 +8,8 @@ import { useState, useEffect, useRef } from 'react';
 import { PDFSkeleton } from './PDFSkeleton';
 import { useTTS } from '@/contexts/TTSContext';
 import { usePDF } from '@/contexts/PDFContext';
+import { pdfjs } from 'react-pdf';
+import type { TextItem } from 'pdfjs-dist/types/src/display/api';
 
 interface PDFViewerProps {
   pdfData: Blob | undefined;
@@ -17,7 +19,7 @@ interface PDFViewerProps {
 export function PDFViewer({ pdfData, zoomLevel }: PDFViewerProps) {
   const [numPages, setNumPages] = useState<number>();
   const [containerWidth, setContainerWidth] = useState<number>(0);
-  const { setText, currentSentence, stopAndPlayFromIndex, isProcessing } = useTTS();
+  const { setText, currentSentence, stopAndPlayFromIndex, isProcessing, isPlaying, currentIndex, sentences } = useTTS();
   const [pdfText, setPdfText] = useState('');
   const [pdfDataUrl, setPdfDataUrl] = useState<string>();
   const [loadingError, setLoadingError] = useState<string>();
@@ -172,6 +174,85 @@ export function PDFViewer({ pdfData, zoomLevel }: PDFViewerProps) {
     setNumPages(numPages);
   }
 
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageText, setPageText] = useState('');
+
+  const handlePageChange = async (pageNumber: number) => {
+    if (pageNumber < 1 || pageNumber > (numPages || 1)) return;
+    setCurrentPage(pageNumber);
+    
+    // Extract text from the new page
+    if (pdfData) {
+      try {
+        const pdf = await pdfjs.getDocument(pdfDataUrl!).promise;
+        const page = await pdf.getPage(pageNumber);
+        const textContent = await page.getTextContent();
+        const textItems = textContent.items.filter((item): item is TextItem => 
+          'str' in item && 'transform' in item
+        );
+        
+        // Process text items to maintain reading order
+        const lines: TextItem[][] = [];
+        let currentLine: TextItem[] = [];
+        let currentY: number | null = null;
+        const tolerance = 2;
+
+        textItems.forEach((item) => {
+          const y = item.transform[5];
+          if (currentY === null) {
+            currentY = y;
+            currentLine.push(item);
+          } else if (Math.abs(y - currentY) < tolerance) {
+            currentLine.push(item);
+          } else {
+            lines.push(currentLine);
+            currentLine = [item];
+            currentY = y;
+          }
+        });
+        lines.push(currentLine);
+
+        // Build page text
+        let fullText = '';
+        for (const line of lines) {
+          line.sort((a, b) => a.transform[4] - b.transform[4]);
+          let lineText = '';
+          let prevItem: TextItem | null = null;
+
+          for (const item of line) {
+            if (!prevItem) {
+              lineText = item.str;
+            } else {
+              const prevEndX = prevItem.transform[4] + (prevItem.width ?? 0);
+              const currentStartX = item.transform[4];
+              const space = currentStartX - prevEndX;
+
+              if (space > ((item.width ?? 0) * 0.3)) {
+                lineText += ' ' + item.str;
+              } else {
+                lineText += item.str;
+              }
+            }
+            prevItem = item;
+          }
+          fullText += lineText + ' ';
+        }
+
+        setPageText(fullText.trim());
+        setText(fullText.trim()); // Update TTS with current page text
+      } catch (error) {
+        console.error('Error extracting page text:', error);
+      }
+    }
+  };
+
+  // Auto-advance to next page when TTS reaches the end
+  useEffect(() => {
+    if (!isPlaying && currentIndex >= sentences.length - 1) {
+      handlePageChange(currentPage + 1);
+    }
+  }, [isPlaying, currentIndex, sentences.length, currentPage]);
+
   return (
     <div
       ref={containerRef}
@@ -185,30 +266,44 @@ export function PDFViewer({ pdfData, zoomLevel }: PDFViewerProps) {
         loading={<PDFSkeleton />}
         noData={<PDFSkeleton />}
         file={pdfDataUrl}
-        onLoadSuccess={onDocumentLoadSuccess}
+        onLoadSuccess={(pdf) => {
+          onDocumentLoadSuccess(pdf);
+          handlePageChange(1); // Load first page text
+        }}
         className="flex flex-col items-center m-0" 
       >
-        {Array.from(
-          new Array(numPages),
-          (el, index) => (
-            <div key={`page_${index + 1}`}>
-              <div className="bg-offbase my-4 px-2 py-0.5 rounded-full w-fit">
-                <p className="text-xs">
-                  {index + 1} / {numPages}
-                </p>
-              </div>
-              <div className="flex justify-center">
-                <Page
-                  pageNumber={index + 1}
-                  renderAnnotationLayer={true}
-                  renderTextLayer={true}
-                  className="shadow-lg"
-                  scale={calculateScale()}
-                />
-              </div>
+        <div>
+          <div className="flex items-center justify-center gap-4 mb-4">
+            <button
+              onClick={() => handlePageChange(currentPage - 1)}
+              disabled={currentPage <= 1}
+              className="bg-offbase px-4 py-2 rounded-full disabled:opacity-50"
+            >
+              Previous
+            </button>
+            <div className="bg-offbase px-2 py-0.5 rounded-full">
+              <p className="text-xs">
+                {currentPage} / {numPages}
+              </p>
             </div>
-          ),
-        )}
+            <button
+              onClick={() => handlePageChange(currentPage + 1)}
+              disabled={currentPage >= (numPages || 1)}
+              className="bg-offbase px-4 py-2 rounded-full disabled:opacity-50"
+            >
+              Next
+            </button>
+          </div>
+          <div className="flex justify-center">
+            <Page
+              pageNumber={currentPage}
+              renderAnnotationLayer={true}
+              renderTextLayer={true}
+              className="shadow-lg"
+              scale={calculateScale()}
+            />
+          </div>
+        </div>
       </Document>
     </div>
   );
