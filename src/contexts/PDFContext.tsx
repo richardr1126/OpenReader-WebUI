@@ -324,12 +324,12 @@ export function PDFProvider({ children }: { children: ReactNode }) {
   // Handle text click events in the PDF viewer
   const handleTextClick = useCallback((
     event: MouseEvent,
-    pdfText: string,
+    pageText: string, // Renamed from pdfText to pageText for clarity
     containerRef: React.RefObject<HTMLDivElement>,
     stopAndPlayFromIndex: (index: number) => void,
     isProcessing: boolean
   ) => {
-    if (isProcessing) return; // Don't process clicks while TTS is processing
+    if (isProcessing) return;
 
     const target = event.target as HTMLElement;
     if (!target.matches('.react-pdf__Page__textContent span')) return;
@@ -361,7 +361,8 @@ export function PDFProvider({ children }: { children: ReactNode }) {
 
     if (bestMatch.rating >= similarityThreshold) {
       const matchText = bestMatch.text;
-      const sentences = nlp(pdfText).sentences().out('array') as string[];
+      // Use pageText instead of full PDF text for sentence splitting
+      const sentences = nlp(pageText).sentences().out('array') as string[];
       let bestSentenceMatch = { sentence: '', rating: 0 };
 
       for (const sentence of sentences) {
@@ -375,7 +376,7 @@ export function PDFProvider({ children }: { children: ReactNode }) {
         const sentenceIndex = sentences.findIndex((sentence) => sentence === bestSentenceMatch.sentence);
         if (sentenceIndex !== -1) {
           stopAndPlayFromIndex(sentenceIndex);
-          highlightPattern(pdfText, bestSentenceMatch.sentence, containerRef);
+          highlightPattern(pageText, bestSentenceMatch.sentence, containerRef);
         }
       }
     }

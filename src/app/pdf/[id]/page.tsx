@@ -6,7 +6,6 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { PDFSkeleton } from '@/components/PDFSkeleton';
-import TTSPlayer from '@/components/TTSPlayer';
 import { useTTS } from '@/contexts/TTSContext';
 
 // Dynamic import for client-side rendering only
@@ -73,7 +72,6 @@ export default function PDFViewerPage() {
 
   return (
     <>
-      <TTSPlayer />
       <div className="p-2 pb-2 border-b border-offbase">
         <div className="flex flex-wrap items-center justify-between">
           <div className="flex items-center gap-4">

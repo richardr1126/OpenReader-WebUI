@@ -10,6 +10,7 @@ import { useTTS } from '@/contexts/TTSContext';
 import { usePDF } from '@/contexts/PDFContext';
 import { pdfjs } from 'react-pdf';
 import type { TextItem } from 'pdfjs-dist/types/src/display/api';
+import TTSPlayer from '@/components/player/TTSPlayer';
 
 interface PDFViewerProps {
   pdfData: Blob | undefined;
@@ -19,7 +20,7 @@ interface PDFViewerProps {
 export function PDFViewer({ pdfData, zoomLevel }: PDFViewerProps) {
   const [numPages, setNumPages] = useState<number>();
   const [containerWidth, setContainerWidth] = useState<number>(0);
-  const { setText, currentSentence, stopAndPlayFromIndex, isProcessing, isPlaying, currentIndex, sentences } = useTTS();
+  const { setText, currentSentence, stopAndPlayFromIndex, isProcessing, isPlaying, currentIndex, sentences, stop } = useTTS();
   const [pdfText, setPdfText] = useState('');
   const [pdfDataUrl, setPdfDataUrl] = useState<string>();
   const [loadingError, setLoadingError] = useState<string>();
@@ -179,6 +180,14 @@ export function PDFViewer({ pdfData, zoomLevel }: PDFViewerProps) {
 
   const handlePageChange = async (pageNumber: number) => {
     if (pageNumber < 1 || pageNumber > (numPages || 1)) return;
+    
+    const wasPlaying = isPlaying;
+    
+    // Stop current playback and reset states
+    if (isPlaying) {
+      stop();
+    }
+    
     setCurrentPage(pageNumber);
     
     // Extract text from the new page
@@ -240,6 +249,13 @@ export function PDFViewer({ pdfData, zoomLevel }: PDFViewerProps) {
 
         setPageText(fullText.trim());
         setText(fullText.trim()); // Update TTS with current page text
+        
+        // // Wait for text processing before resuming playback
+        // await new Promise(resolve => setTimeout(resolve, 300));
+        
+        // if (wasPlaying) {
+        //   stopAndPlayFromIndex(0);
+        // }
       } catch (error) {
         console.error('Error extracting page text:', error);
       }
@@ -248,17 +264,16 @@ export function PDFViewer({ pdfData, zoomLevel }: PDFViewerProps) {
 
   // Auto-advance to next page when TTS reaches the end
   useEffect(() => {
-    if (!isPlaying && currentIndex >= sentences.length - 1) {
-      handlePageChange(currentPage + 1);
+    if (!isPlaying && currentIndex >= sentences.length - 1 && currentPage < (numPages || 1)) {
+      const timer = setTimeout(() => {
+        handlePageChange(currentPage + 1);
+      }, 500); // Longer delay to ensure states are settled
+      return () => clearTimeout(timer);
     }
-  }, [isPlaying, currentIndex, sentences.length, currentPage]);
+  }, [isPlaying, currentIndex, sentences.length, currentPage, numPages]);
 
   return (
-    <div
-      ref={containerRef}
-      className="flex flex-col items-center overflow-auto max-h-[calc(100vh-100px)] w-full px-6"
-      style={{ WebkitTapHighlightColor: 'transparent' }}
-    >
+    <div ref={containerRef} className="flex flex-col items-center overflow-auto max-h-[calc(100vh-100px)] w-full px-6">
       {loadingError ? (
         <div className="text-red-500 mb-4">{loadingError}</div>
       ) : null}
@@ -273,27 +288,6 @@ export function PDFViewer({ pdfData, zoomLevel }: PDFViewerProps) {
         className="flex flex-col items-center m-0" 
       >
         <div>
-          <div className="flex items-center justify-center gap-4 mb-4">
-            <button
-              onClick={() => handlePageChange(currentPage - 1)}
-              disabled={currentPage <= 1}
-              className="bg-offbase px-4 py-2 rounded-full disabled:opacity-50"
-            >
-              Previous
-            </button>
-            <div className="bg-offbase px-2 py-0.5 rounded-full">
-              <p className="text-xs">
-                {currentPage} / {numPages}
-              </p>
-            </div>
-            <button
-              onClick={() => handlePageChange(currentPage + 1)}
-              disabled={currentPage >= (numPages || 1)}
-              className="bg-offbase px-4 py-2 rounded-full disabled:opacity-50"
-            >
-              Next
-            </button>
-          </div>
           <div className="flex justify-center">
             <Page
               pageNumber={currentPage}
@@ -305,6 +299,11 @@ export function PDFViewer({ pdfData, zoomLevel }: PDFViewerProps) {
           </div>
         </div>
       </Document>
+      <TTSPlayer 
+        currentPage={currentPage}
+        numPages={numPages}
+        onPageChange={handlePageChange}
+      />
     </div>
   );
 }
