@@ -1,6 +1,6 @@
 'use client';
 
-import { RefObject } from 'react';
+import { RefObject, useCallback } from 'react';
 import { Document, Page } from 'react-pdf';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
@@ -176,13 +176,9 @@ export function PDFViewer({ pdfData, zoomLevel }: PDFViewerProps) {
   }
 
   const [currentPage, setCurrentPage] = useState(1);
-  const [pageText, setPageText] = useState('');
-
-  const handlePageChange = async (pageNumber: number) => {
+  const handlePageChange = useCallback(async (pageNumber: number) => {
     if (pageNumber < 1 || pageNumber > (numPages || 1)) return;
-    
-    const wasPlaying = isPlaying;
-    
+        
     // Stop current playback and reset states
     if (isPlaying) {
       stop();
@@ -247,7 +243,6 @@ export function PDFViewer({ pdfData, zoomLevel }: PDFViewerProps) {
           fullText += lineText + ' ';
         }
 
-        setPageText(fullText.trim());
         setText(fullText.trim()); // Update TTS with current page text
         
         // // Wait for text processing before resuming playback
@@ -260,7 +255,7 @@ export function PDFViewer({ pdfData, zoomLevel }: PDFViewerProps) {
         console.error('Error extracting page text:', error);
       }
     }
-  };
+  }, [isPlaying, pdfData, pdfDataUrl, numPages, setText, stop]);
 
   // Auto-advance to next page when TTS reaches the end
   useEffect(() => {
@@ -270,7 +265,7 @@ export function PDFViewer({ pdfData, zoomLevel }: PDFViewerProps) {
       }, 500); // Longer delay to ensure states are settled
       return () => clearTimeout(timer);
     }
-  }, [isPlaying, currentIndex, sentences.length, currentPage, numPages]);
+  }, [isPlaying, currentIndex, sentences.length, currentPage, numPages, handlePageChange]);
 
   return (
     <div ref={containerRef} className="flex flex-col items-center overflow-auto max-h-[calc(100vh-100px)] w-full px-6">
