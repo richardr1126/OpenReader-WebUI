@@ -271,6 +271,8 @@ export function TTSProvider({ children }: { children: React.ReactNode }) {
       const cleanedSentence = preprocessSentenceForAudio(sentence);
       currentRequestRef.current = new AbortController();
 
+      console.log('Requesting audio for sentence:', cleanedSentence);
+
       const audioBuffer = await getAudio(cleanedSentence);
       if (!currentRequestRef.current) throw new Error('Request cancelled');
 
@@ -285,7 +287,7 @@ export function TTSProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const playSentence = async (sentence: string) => {
+  const playSentenceWithHowl = async (sentence: string) => {
     try {
       const audioUrl = await processSentence(sentence);
       setIsProcessing(false);
@@ -308,7 +310,7 @@ export function TTSProvider({ children }: { children: React.ReactNode }) {
           URL.revokeObjectURL(audioUrl);
           setActiveHowl(null);
           if (isPlaying && !isPausingRef.current) {
-            advance();
+            //advance();
           }
           isPausingRef.current = false;
         },
@@ -317,7 +319,7 @@ export function TTSProvider({ children }: { children: React.ReactNode }) {
           setIsProcessing(false);
           setActiveHowl(null);
           URL.revokeObjectURL(audioUrl);
-          advance();
+          //advance();
         },
       });
 
@@ -365,7 +367,7 @@ export function TTSProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const playAudio = async () => {
       if (isPlaying && sentences[currentIndex] && !isProcessing) {
-        await playSentence(sentences[currentIndex]);
+        await playSentenceWithHowl(sentences[currentIndex]);
       }
     };
 
