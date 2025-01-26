@@ -8,8 +8,6 @@ import { useState, useEffect, useRef } from 'react';
 import { PDFSkeleton } from './PDFSkeleton';
 import { useTTS } from '@/contexts/TTSContext';
 import { usePDF } from '@/contexts/PDFContext';
-import { pdfjs } from 'react-pdf';
-import type { TextItem } from 'pdfjs-dist/types/src/display/api';
 import TTSPlayer from '@/components/player/TTSPlayer';
 
 interface PDFViewerProps {

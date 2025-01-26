@@ -51,7 +51,6 @@ interface PDFContextType {
     isProcessing: boolean
   ) => void;
   onDocumentLoadSuccess: ({ numPages }: { numPages: number }) => void;
-  convertPDFDataToURL: (pdfData: Blob) => Promise<string>;
   setCurrentDocument: (id: string) => Promise<void>;
   currDocURL: string | undefined;
   currDocName: string | undefined;
@@ -267,7 +266,7 @@ export function PDFProvider({ children }: { children: ReactNode }) {
       console.error('Failed to get document URL:', error);
       setError('Failed to retrieve the document. Please try again.');
     }
-  }, [getDocument, convertPDFDataToURL, loadCurrDocText]);
+  }, [getDocument, loadCurrDocText]);
 
   // Clear all highlights in the PDF viewer
   const clearHighlights = useCallback(() => {
@@ -458,7 +457,6 @@ export function PDFProvider({ children }: { children: ReactNode }) {
       clearHighlights,
       handleTextClick,
       onDocumentLoadSuccess,
-      convertPDFDataToURL,
       setCurrentDocument,
       currDocURL,
       currDocName,
@@ -478,7 +476,6 @@ export function PDFProvider({ children }: { children: ReactNode }) {
       clearHighlights,
       handleTextClick,
       onDocumentLoadSuccess,
-      convertPDFDataToURL,
       setCurrentDocument,
       currDocURL,
       currDocName,

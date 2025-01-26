@@ -4,7 +4,7 @@ import dynamic from 'next/dynamic';
 import { usePDF } from '@/contexts/PDFContext';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { use, useCallback, useEffect, useState } from 'react';
 import { PDFSkeleton } from '@/components/PDFSkeleton';
 import { useTTS } from '@/contexts/TTSContext';
 
@@ -25,24 +25,26 @@ export default function PDFViewerPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [zoomLevel, setZoomLevel] = useState<number>(100);
 
-  useEffect(() => {
-    async function loadDocument() {
-      try {
-        if (!id) {
-          setError('Document not found');
-          return;
-        }
-        setCurrentDocument(id as string);
-      } catch (err) {
-        console.error('Error loading document:', err);
-        setError('Failed to load document');
-      } finally {
-        setIsLoading(false);
+  const loadDocument = useCallback(async () => {
+    if (!isLoading) return; // Prevent calls when not loading new doc
+    console.log('Loading new document (from page.tsx)');
+    try {
+      if (!id) {
+        setError('Document not found');
+        return;
       }
+      setCurrentDocument(id as string);
+    } catch (err) {
+      console.error('Error loading document:', err);
+      setError('Failed to load document');
+    } finally {
+      setIsLoading(false);
     }
+  }, [isLoading, id, setCurrentDocument]);
 
+  useEffect(() => {
     loadDocument();
-  }, [id, setCurrentDocument]);
+  }, [loadDocument]);
 
   const handleZoomIn = () => setZoomLevel(prev => Math.min(prev + 10, 200));
   const handleZoomOut = () => setZoomLevel(prev => Math.max(prev - 10, 50));

@@ -89,11 +89,9 @@ export function TTSProvider({ children }: { children: React.ReactNode }) {
     console.log('Setting page text:', text);
     const newSentences = splitIntoSentences(text);
     setSentences(newSentences);
-    //setCurrentIndex(0);
-    //setIsPlaying(false);
 
     // Clear audio cache
-    audioCacheRef.current.clear();
+    //audioCacheRef.current.clear();
 
     setNextPageLoading(false);
   }, []);
@@ -115,6 +113,31 @@ export function TTSProvider({ children }: { children: React.ReactNode }) {
       }
     });
   }, [abortAudio]);
+
+  const advance = useCallback(async (backwards = false) => {
+    setCurrentIndex((prev) => {
+      const nextIndex = prev + (backwards ? -1 : 1);
+      if (nextIndex < sentences.length && nextIndex >= 0) {
+        console.log('Advancing to next sentence:', sentences[nextIndex]);
+        return nextIndex;
+      } else if (nextIndex >= sentences.length && currDocPage < currDocPages!) {
+        console.log('Advancing to next page:', currDocPage + 1);
+
+        setNextPageLoading(true);
+        setCurrDocPage(currDocPage + 1);
+
+        return 0;
+      } else if (nextIndex < 0 && currDocPage > 1) {
+        console.log('Advancing to previous page:', currDocPage - 1);
+
+        setNextPageLoading(true);
+        setCurrDocPage(currDocPage - 1);
+
+        return 0;
+      }
+      return prev;
+    });
+  }, [sentences, currDocPage, currDocPages]);
   
 
   const skipForward = useCallback(() => {
@@ -122,29 +145,20 @@ export function TTSProvider({ children }: { children: React.ReactNode }) {
 
     abortAudio();
 
-    setCurrentIndex((prev) => {
-      const nextIndex = Math.min(prev + 1, sentences.length - 1);
-      console.log('Skipping forward to:', sentences[nextIndex]);
-      return nextIndex;
-    });
+    advance();
 
     setIsProcessing(false);
-  }, [sentences, abortAudio]);
+  }, [abortAudio, advance]);
 
   const skipBackward = useCallback(() => {
     setIsProcessing(true);
 
     abortAudio();
 
-    setCurrentIndex((prev) => {
-      const nextIndex = Math.max(prev - 1, 0);
-      console.log('Skipping backward to:', sentences[nextIndex]);
-      return nextIndex;
-    });
-    
+    advance(true); // Pass true to go backwards
 
     setIsProcessing(false);
-  }, [sentences, abortAudio]);
+  }, [abortAudio, advance]);
 
   // Initialize OpenAI instance when config loads
   useEffect(() => {
@@ -229,30 +243,12 @@ export function TTSProvider({ children }: { children: React.ReactNode }) {
     }
   }, [togglePlay, skipForward, skipBackward]);
 
-  const advance = useCallback(async () => {
-    setCurrentIndex((prev) => {
-      const nextIndex = prev + 1;
-      if (nextIndex < sentences.length) {
-        console.log('Auto-advancing to next sentence:', sentences[nextIndex]);
-        return nextIndex;
-      } else if (currDocPage < currDocPages!) {
-        console.log('Auto-advancing to next page:', currDocPage + 1);
-
-        setNextPageLoading(true);
-        setCurrDocPage(currDocPage + 1);
-
-        return 0;
-      }
-      return prev;
-    });
-  }, [sentences, currDocPage, currDocPages]);
-
   //new function to return audio buffer with caching
   const getAudio = useCallback(async (sentence: string): Promise<AudioBuffer | undefined> => {
     // Check if the audio is already cached
     const cachedAudio = audioCacheRef.current.get(sentence);
     if (cachedAudio) {
-      console.log('Using cached audio for sentence:', sentence);
+      console.log('Using cached audio for sentence:', sentence.substring(0, 20));
       return cachedAudio;
     }
 
@@ -350,7 +346,6 @@ export function TTSProvider({ children }: { children: React.ReactNode }) {
   const preloadNextAudio = useCallback(() => {
     try {
       if (sentences[currentIndex + 1] && !audioCacheRef.current.has(sentences[currentIndex + 1])) {
-        //await new Promise((resolve) => setTimeout(resolve, 200)); // Add small delay
         processSentence(sentences[currentIndex + 1], true); // True indicates preloading
       }
     } catch (error) {
