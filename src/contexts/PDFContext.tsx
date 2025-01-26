@@ -18,9 +18,20 @@ import nlp from 'compromise';
 // Add the correct type import
 import type { TextItem } from 'pdfjs-dist/types/src/display/api';
 import { useConfig } from '@/contexts/ConfigContext';
+import { useTTS } from '@/contexts/TTSContext';
 
 // Set worker from public directory
 pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.mjs';
+
+// Convert PDF data to PDF data URL
+const convertPDFDataToURL = (pdfData: Blob): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(pdfData);
+  });
+};
 
 interface PDFContextType {
   documents: PDFDocument[];
@@ -29,7 +40,7 @@ interface PDFContextType {
   removeDocument: (id: string) => Promise<void>;
   isLoading: boolean;
   error: string | null;
-  extractTextFromPDF: (pdfData: Blob) => Promise<string>;
+  extractTextFromPDF: (pdfURL: string, currDocPage: number) => Promise<string>;
   highlightPattern: (text: string, pattern: string, containerRef: React.RefObject<HTMLDivElement>) => void;
   clearHighlights: () => void;
   handleTextClick: (
@@ -39,21 +50,41 @@ interface PDFContextType {
     stopAndPlayFromIndex: (index: number) => void,
     isProcessing: boolean
   ) => void;
+  onDocumentLoadSuccess: ({ numPages }: { numPages: number }) => void;
+  convertPDFDataToURL: (pdfData: Blob) => Promise<string>;
+  setCurrentDocument: (id: string) => Promise<void>;
+  currDocURL: string | undefined;
+  currDocName: string | undefined;
+  currDocPages: number | undefined;
+  currDocPage: number;
+  currDocText: string | undefined;
 }
 
 const PDFContext = createContext<PDFContextType | undefined>(undefined);
 
 export function PDFProvider({ children }: { children: ReactNode }) {
-  const { isDBReady } = useConfig();
   const [documents, setDocuments] = useState<PDFDocument[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const { isDBReady } = useConfig();
+  const {
+    setText: setTTSText,
+    currDocPage,
+    currDocPages,
+    setCurrDocPages,
+  } = useTTS();
+
+  // Current document state
+  const [currDocURL, setCurrDocURL] = useState<string>();
+  const [currDocName, setCurrDocName] = useState<string>();
+  const [currDocText, setCurrDocText] = useState<string>();
 
   // Load documents from IndexedDB once DB is ready
   useEffect(() => {
     const loadDocuments = async () => {
       if (!isDBReady) return;
-      
+
       try {
         setError(null);
         const docs = await indexedDBService.getAllDocuments();
@@ -117,33 +148,30 @@ export function PDFProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  function onDocumentLoadSuccess({ numPages }: { numPages: number }): void {
+    console.log('Document loaded:', numPages);
+    setCurrDocPages(numPages);
+  }
+
   // Extract text from a PDF file
-  const extractTextFromPDF = useCallback(async (pdfData: Blob): Promise<string> => {
-    try {
-      const reader = new FileReader();
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = () => reject(reader.error);
-        reader.readAsDataURL(pdfData);
-      });
-
-      const base64Data = dataUrl.split(',')[1];
-      const binaryData = atob(base64Data);
-      const bytes = new Uint8Array(binaryData.length);
-      for (let i = 0; i < binaryData.length; i++) {
-        bytes[i] = binaryData.charCodeAt(i);
-      }
-
-      const loadingTask = pdfjs.getDocument({ data: bytes });
-      const pdf = await loadingTask.promise;
-      let fullText = '';
-
-      for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
-        const textContent = await page.getTextContent();
+    const extractTextFromPDF = useCallback(async (pdfURL: string, currDocPage: number): Promise<string> => {
+      try {
+        const base64Data = pdfURL.split(',')[1];
+        const binaryData = atob(base64Data);
+        const bytes = new Uint8Array(binaryData.length);
+        for (let i = 0; i < binaryData.length; i++) {
+          bytes[i] = binaryData.charCodeAt(i);
+        }
+  
+        const loadingTask = pdfjs.getDocument({ data: bytes });
+        const pdf = await loadingTask.promise;
         
+        // Get only the specified page
+        const page = await pdf.getPage(currDocPage);
+        const textContent = await page.getTextContent();
+  
         // Filter out non-text items and assert proper type
-        const textItems = textContent.items.filter((item): item is TextItem => 
+        const textItems = textContent.items.filter((item): item is TextItem =>
           'str' in item && 'transform' in item
         );
   
@@ -173,7 +201,7 @@ export function PDFProvider({ children }: { children: ReactNode }) {
         for (const line of lines) {
           // Sort items horizontally within the line
           line.sort((a, b) => a.transform[4] - b.transform[4]);
-          
+  
           let lineText = '';
           let prevItem: TextItem | null = null;
   
@@ -196,16 +224,50 @@ export function PDFProvider({ children }: { children: ReactNode }) {
           }
           pageText += lineText + ' ';
         }
-        
-        fullText += pageText + '\n';
+  
+        return pageText.replace(/\s+/g, ' ').trim();
+      } catch (error) {
+        console.error('Error extracting text from PDF:', error);
+        throw new Error('Failed to extract text from PDF');
       }
+    }, []);
 
-      return fullText.replace(/\s+/g, ' ').trim();
+  // Load curr doc text
+  const loadCurrDocText = useCallback(async () => {
+    try {
+      if (!currDocURL) return;
+      const text = await extractTextFromPDF(currDocURL, currDocPage);
+      setCurrDocText(text);
+      setTTSText(text);
     } catch (error) {
-      console.error('Error extracting text from PDF:', error);
-      throw new Error('Failed to extract text from PDF');
+      console.error('Error loading PDF text:', error);
+      setError('Failed to extract PDF text');
     }
-  }, []);
+  }, [currDocURL, currDocPage, extractTextFromPDF, setTTSText]);
+
+  // Update the current document text when the page changes
+  useEffect(() => {
+    if (currDocURL) {
+      loadCurrDocText();
+    }
+  }, [currDocPage, currDocURL, loadCurrDocText]);
+
+  // Set curr document
+  const setCurrentDocument = useCallback(async (id: string): Promise<void> => {
+    setError(null);
+    try {
+      const doc = await getDocument(id);
+      if (doc) {
+        const url = await convertPDFDataToURL(doc.data);
+        setCurrDocName(doc.name);
+        setCurrDocURL(url);
+        //await loadCurrDocText();
+      }
+    } catch (error) {
+      console.error('Failed to get document URL:', error);
+      setError('Failed to retrieve the document. Please try again.');
+    }
+  }, [getDocument, convertPDFDataToURL, loadCurrDocText]);
 
   // Clear all highlights in the PDF viewer
   const clearHighlights = useCallback(() => {
@@ -291,7 +353,7 @@ export function PDFProvider({ children }: { children: ReactNode }) {
 
     // Search for the best match within the visible area first
     let bestMatch = findBestTextMatch(visibleNodes, cleanPattern, cleanPattern.length * 2);
-    
+
     // If no good match found in visible area, search the entire document
     if (bestMatch.rating < 0.3) {
       bestMatch = findBestTextMatch(allText, cleanPattern, cleanPattern.length * 2);
@@ -395,6 +457,14 @@ export function PDFProvider({ children }: { children: ReactNode }) {
       highlightPattern,
       clearHighlights,
       handleTextClick,
+      onDocumentLoadSuccess,
+      convertPDFDataToURL,
+      setCurrentDocument,
+      currDocURL,
+      currDocName,
+      currDocPages,
+      currDocPage,
+      currDocText,
     }),
     [
       documents,
@@ -407,6 +477,14 @@ export function PDFProvider({ children }: { children: ReactNode }) {
       highlightPattern,
       clearHighlights,
       handleTextClick,
+      onDocumentLoadSuccess,
+      convertPDFDataToURL,
+      setCurrentDocument,
+      currDocURL,
+      currDocName,
+      currDocPages,
+      currDocPage,
+      currDocText,
     ]
   );
 

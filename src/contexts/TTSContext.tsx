@@ -51,6 +51,9 @@ interface TTSContextType {
   availableVoices: string[];
   currentIndex: number;
   setCurrentIndex: (index: number) => void;
+  currDocPage: number;
+  currDocPages: number | undefined;
+  setCurrDocPages: (pages: number) => void;
 }
 
 const TTSContext = createContext<TTSContextType | undefined>(undefined);
@@ -67,7 +70,6 @@ export function TTSProvider({ children }: { children: React.ReactNode }) {
   const [sentences, setSentences] = useState<string[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [audioContext, setAudioContext] = useState<AudioContextType>();
-  const currentRequestRef = useRef<AbortController | null>(null);
   const [activeHowl, setActiveHowl] = useState<Howl | null>(null);
   const [audioQueue] = useState<AudioBuffer[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -75,31 +77,33 @@ export function TTSProvider({ children }: { children: React.ReactNode }) {
   const [voice, setVoice] = useState('alloy');
   const [availableVoices, setAvailableVoices] = useState<string[]>([]);
 
+  const [currDocPage, setCurrDocPage] = useState<number>(1);
+  const [currDocPages, setCurrDocPages] = useState<number>();
+  const [nextPageLoading, setNextPageLoading] = useState(false);
+
   // Audio cache using LRUCache with a maximum size of 50 entries
   const audioCacheRef = useRef(new LRUCache<string, AudioBuffer>({ max: 50 }));
 
   const setText = useCallback((text: string) => {
     setCurrentText(text);
+    console.log('Setting page text:', text);
     const newSentences = splitIntoSentences(text);
     setSentences(newSentences);
-    setCurrentIndex(0);
-    setIsPlaying(false);
+    //setCurrentIndex(0);
+    //setIsPlaying(false);
 
     // Clear audio cache
     audioCacheRef.current.clear();
+
+    setNextPageLoading(false);
   }, []);
 
   const abortAudio = useCallback(() => {
-    if (currentRequestRef.current) {
-      currentRequestRef.current.abort();
-      currentRequestRef.current = null;
-    }
-
     if (activeHowl) {
       activeHowl.stop();
       setActiveHowl(null);
     }
-  }, [currentRequestRef, activeHowl]);
+  }, [activeHowl]);
 
   const togglePlay = useCallback(() => {
     setIsPlaying((prev) => {
@@ -231,10 +235,17 @@ export function TTSProvider({ children }: { children: React.ReactNode }) {
       if (nextIndex < sentences.length) {
         console.log('Auto-advancing to next sentence:', sentences[nextIndex]);
         return nextIndex;
+      } else if (currDocPage < currDocPages!) {
+        console.log('Auto-advancing to next page:', currDocPage + 1);
+
+        setNextPageLoading(true);
+        setCurrDocPage(currDocPage + 1);
+
+        return 0;
       }
       return prev;
     });
-  }, [sentences]);
+  }, [sentences, currDocPage, currDocPages]);
 
   //new function to return audio buffer with caching
   const getAudio = useCallback(async (sentence: string): Promise<AudioBuffer | undefined> => {
@@ -273,23 +284,10 @@ export function TTSProvider({ children }: { children: React.ReactNode }) {
     // Only set processing state if not preloading
     if (!preload) setIsProcessing(true);
   
-    try {
-      const cleanedSentence = preprocessSentenceForAudio(sentence);
-      currentRequestRef.current = new AbortController();
-  
-      const audioBuffer = await getAudio(cleanedSentence);
-      if (!currentRequestRef.current) throw new Error('Request was cancelled');
-      
-  
-      return audioBufferToURL(audioBuffer!);
-    } catch (error) {
-      if (error instanceof Error && error.name === 'AbortError') {
-        console.log('Request was cancelled');
-      }
-      throw error;
-    } finally {
-      currentRequestRef.current = null;
-    }
+    const cleanedSentence = preprocessSentenceForAudio(sentence);
+    const audioBuffer = await getAudio(cleanedSentence);
+    
+    return audioBufferToURL(audioBuffer!);
   }, [isProcessing, audioContext, getAudio]);
 
   const playSentenceWithHowl = useCallback(async (sentence: string) => {
@@ -298,9 +296,6 @@ export function TTSProvider({ children }: { children: React.ReactNode }) {
       if (!audioUrl) {
         throw new Error('No audio URL generated');
       }
-  
-      // Set processing to false before creating the Howl instance
-      setIsProcessing(false);
   
       const howl = new Howl({
         src: [audioUrl],
@@ -335,28 +330,28 @@ export function TTSProvider({ children }: { children: React.ReactNode }) {
   
       setActiveHowl(howl);
       howl.play();
+      setIsProcessing(false);
   
     } catch (error) {
       console.error('Error playing TTS:', error);
       setActiveHowl(null);
       setIsProcessing(false);
-      setIsPlaying(false); // Stop playback on error
+      //setIsPlaying(false); // Stop playback on error
       
       if (error instanceof Error && 
          (error.message.includes('Unable to decode audio data') || 
           error.message.includes('EncodingError'))) {
-        console.log('Skipping problematic sentence:', sentence.substring(0, 50) + '...');
-        advance();
+        console.log('Skipping problematic sentence:', sentence);
+        advance(); // Skip problematic sentence
       }
     }
   }, [isPlaying, processSentence, advance]);
 
-  const preloadNextAudio = useCallback(async () => {
+  const preloadNextAudio = useCallback(() => {
     try {
-      // Only preload next sentence to reduce API load
       if (sentences[currentIndex + 1] && !audioCacheRef.current.has(sentences[currentIndex + 1])) {
-        await new Promise((resolve) => setTimeout(resolve, 200)); // Add small delay
-        await processSentence(sentences[currentIndex + 1], true); // True indicates preloading
+        //await new Promise((resolve) => setTimeout(resolve, 200)); // Add small delay
+        processSentence(sentences[currentIndex + 1], true); // True indicates preloading
       }
     } catch (error) {
       console.error('Error preloading next sentence:', error);
@@ -364,24 +359,23 @@ export function TTSProvider({ children }: { children: React.ReactNode }) {
   }, [currentIndex, sentences, audioCacheRef, processSentence]);
 
   const playAudio = useCallback(async () => {
-    //if (isPlaying && sentences[currentIndex] && !isProcessing) {
     await playSentenceWithHowl(sentences[currentIndex]);
-    //}
   }, [sentences, currentIndex, playSentenceWithHowl]);
 
   // main driver useEffect
   useEffect(() => {
-    if (!sentences[currentIndex]) {
-      return; // Don't proceed if no valid sentence
+    if (!isPlaying) return; // Don't proceed if stopped
+    if (isProcessing) return; // Don't proceed if processing audio
+    if (!sentences[currentIndex]) return; // Don't proceed if no sentence to play
+    if (nextPageLoading) return; // Don't proceed if loading next page
+    if (activeHowl) return; // Don't proceed if audio is already playing
+
+    // Play the current sentence and preload the next one if available
+    playAudio();
+    if (sentences[currentIndex + 1]) {
+      preloadNextAudio();
     }
-  
-    if (isPlaying && !isProcessing && !activeHowl) {
-      playAudio();
-      if (isPlaying) { // Only preload if still playing
-        preloadNextAudio().catch(console.error);
-      }
-    }
-  
+    
     return () => {
       abortAudio();
     };
@@ -390,6 +384,8 @@ export function TTSProvider({ children }: { children: React.ReactNode }) {
     isProcessing,
     currentIndex,
     sentences,
+    activeHowl,
+    nextPageLoading,
     playAudio,
     preloadNextAudio,
     abortAudio
@@ -477,6 +473,9 @@ export function TTSProvider({ children }: { children: React.ReactNode }) {
     setVoiceAndRestart,
     availableVoices,
     currentIndex,
+    currDocPage,
+    currDocPages,
+    setCurrDocPages,
   };
 
   if (configIsLoading) {

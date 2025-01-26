@@ -19,9 +19,8 @@ const PDFViewer = dynamic(
 
 export default function PDFViewerPage() {
   const { id } = useParams();
-  const { getDocument } = usePDF();
+  const { setCurrentDocument, currDocName } = usePDF();
   const { setText, stop } = useTTS();
-  const [document, setDocument] = useState<{ name: string; data: Blob } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [zoomLevel, setZoomLevel] = useState<number>(100);
@@ -29,12 +28,11 @@ export default function PDFViewerPage() {
   useEffect(() => {
     async function loadDocument() {
       try {
-        const doc = await getDocument(id as string);
-        if (!doc) {
+        if (!id) {
           setError('Document not found');
           return;
         }
-        setDocument(doc);
+        setCurrentDocument(id as string);
       } catch (err) {
         console.error('Error loading document:', err);
         setError('Failed to load document');
@@ -44,7 +42,7 @@ export default function PDFViewerPage() {
     }
 
     loadDocument();
-  }, [id, getDocument]);
+  }, [id, setCurrentDocument]);
 
   const handleZoomIn = () => setZoomLevel(prev => Math.min(prev + 10, 200));
   const handleZoomOut = () => setZoomLevel(prev => Math.max(prev - 10, 50));
@@ -107,7 +105,7 @@ export default function PDFViewerPage() {
             </div>
           </div>
           <h1 className="mr-2 text-md font-semibold text-foreground">
-            {isLoading ? 'Loading...' : document?.name}
+            {isLoading ? 'Loading...' : currDocName}
           </h1>
         </div>
       </div>
@@ -116,7 +114,7 @@ export default function PDFViewerPage() {
           <PDFSkeleton />
         </div>
       ) : (
-        <PDFViewer pdfData={document?.data} zoomLevel={zoomLevel} />
+        <PDFViewer zoomLevel={zoomLevel} />
       )}
     </>
   );
