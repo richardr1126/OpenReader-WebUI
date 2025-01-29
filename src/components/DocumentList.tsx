@@ -1,3 +1,5 @@
+'use client';
+
 import { usePDF } from '@/contexts/PDFContext';
 import Link from 'next/link';
 import { Button, Dialog } from '@headlessui/react';

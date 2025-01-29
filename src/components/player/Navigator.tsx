@@ -1,3 +1,5 @@
+'use client';
+
 import { Button } from '@headlessui/react';
 
 export const Navigator = ({ currentPage, numPages, skipToPage }: {

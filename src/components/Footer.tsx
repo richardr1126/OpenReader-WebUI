@@ -1,3 +1,5 @@
+'use client';
+
 import { Popover, PopoverButton, PopoverPanel } from '@headlessui/react'
 
 export function Footer() {
@@ -10,8 +12,8 @@ export function Footer() {
               Privacy info
             </PopoverButton>
             <PopoverPanel anchor="top" className="bg-base p-4 rounded-lg shadow-lg w-64">
-              <p>No data collection. Documents are uploaded to your local browser cache.</p>
-              <p className='mt-3'>Each sentence of the document you are viewing is sent to my FastAPI server for audio generation, no requests or data is collected.</p>
+              <p>PDF files are processed entirely in your browser and stored locally in IndexedDB. Word documents (.doc/.docx) require temporary server-side conversion but are then stored locally.</p>
+              <p className='mt-3'>For text-to-speech, only the current text segment is sent to my server. Audio is cached locally for reuse.</p>
             </PopoverPanel>
           </Popover>
           <span className='w-full sm:w-fit'>•</span>
