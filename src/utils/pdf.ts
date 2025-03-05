@@ -1,345 +1,427 @@
-import { pdfjs } from 'react-pdf';
-import nlp from 'compromise';
-import stringSimilarity from 'string-similarity';
-import type { TextItem } from 'pdfjs-dist/types/src/display/api';
-import type { PDFDocumentProxy } from 'pdfjs-dist';
+/**
+ * PDF utility functions for handling PDF documents in OpenReader
+ */
 
-// Function to detect if we need to use legacy build
-function shouldUseLegacyBuild() {
-  try {
-    if (typeof window === 'undefined') return false;
-    
-    const ua = window.navigator.userAgent;
-    const isSafari = /^((?!chrome|android).)*safari/i.test(ua);
-    
-    console.log(isSafari ? 'Running on Safari' : 'Not running on Safari');
-    if (!isSafari) return false;
-    
-    // Extract Safari version - matches "Version/18" format
-    const match = ua.match(/Version\/(\d+)/i);
-    console.log('Safari version:', match);
-    if (!match || !match[1]) return true; // If we can't determine version, use legacy to be safe
-    
-    const version = parseInt(match[1]);
-    return version < 18; // Use legacy build for Safari versions equal or below 18
-  } catch (e) {
-    console.error('Error detecting Safari version:', e);
-    return false;
-  }
+import * as pdfjs from 'pdfjs-dist';
+import { TextContent, TextItem, PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist/types/src/display/api';
+import { RefObject } from 'react';
+
+// For workers in Next.js we need to set the worker source path correctly
+if (typeof window !== 'undefined' && 'Worker' in window) {
+  // Set worker source using CDN path based on pdfjs version
+  (pdfjs as any).GlobalWorkerOptions.workerSrc = `//cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.js`;
 }
 
-// Function to initialize PDF worker
-function initPDFWorker() {
-  try {
-    if (typeof window !== 'undefined') {
-      const useLegacy = shouldUseLegacyBuild();
-      // Use local worker file instead of unpkg
-      const workerSrc = useLegacy 
-        ? new URL('pdfjs-dist/legacy/build/pdf.worker.min.mjs', import.meta.url).href
-        : new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).href;
-      console.log('Setting PDF worker to:', workerSrc);
-      pdfjs.GlobalWorkerOptions.workerSrc = workerSrc;
-      pdfjs.GlobalWorkerOptions.workerPort = null;
+/**
+ * Generic debounce function
+ * 
+ * @param fn Function to debounce
+ * @param delay Delay in milliseconds
+ * @returns Debounced function
+ */
+export function debounce<T extends (...args: any[]) => any>(
+  fn: T,
+  delay: number
+): (...args: Parameters<T>) => void {
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  
+  return function(this: any, ...args: Parameters<T>) {
+    if (timeout !== null) {
+      clearTimeout(timeout);
     }
-  } catch (e) {
-    console.error('Error setting PDF worker:', e);
-  }
+    
+    timeout = setTimeout(() => {
+      fn.apply(this, args);
+      timeout = null;
+    }, delay);
+  };
 }
 
-// Initialize the worker
-initPDFWorker();
-
-interface TextMatch {
-  elements: HTMLElement[];
-  rating: number;
-  text: string;
-  lengthDiff: number;
+/**
+ * Type guard to check if an item is a TextItem
+ */
+function isTextItem(item: any): item is TextItem {
+  return item && typeof item.str === 'string' && Array.isArray(item.transform);
 }
 
-// Text Processing functions
+/**
+ * Safely extracts text from a PDF document
+ *
+ * @param pdfDocument The PDF document proxy
+ * @param pageNum The page number to extract text from
+ * @param margins Configuration for text extraction margins
+ * @returns Promise resolving to the extracted text
+ */
 export async function extractTextFromPDF(
-  pdf: PDFDocumentProxy, 
-  pageNumber: number, 
-  margins = { header: 0.07, footer: 0.07, left: 0.07, right: 0.07 }
+  pdfDocument: PDFDocumentProxy | null,
+  pageNum: number,
+  margins = {
+    top: 0.07,
+    bottom: 0.07,
+    left: 0.07,
+    right: 0.07,
+  }
 ): Promise<string> {
   try {
-    // Log pdf worker version
-    //console.log('PDF worker version:', pdfjs.GlobalWorkerOptions.workerSrc);
-
-    const page = await pdf.getPage(pageNumber);
-    const textContent = await page.getTextContent();
-    
-    const viewport = page.getViewport({ scale: 1.0 });
-    const pageHeight = viewport.height;
-    const pageWidth = viewport.width;
-
-    const textItems = textContent.items.filter((item): item is TextItem => {
-      if (!('str' in item && 'transform' in item)) return false;
-      
-      const [scaleX, skewX, skewY, scaleY, x, y] = item.transform;
-      
-      // Basic text filtering
-      if (Math.abs(scaleX) < 1 || Math.abs(scaleX) > 20) return false;
-      if (Math.abs(scaleY) < 1 || Math.abs(scaleY) > 20) return false;
-      if (Math.abs(skewX) > 0.5 || Math.abs(skewY) > 0.5) return false;
-      
-      // Calculate margins in PDF coordinate space (y=0 is at bottom)
-      const headerY = pageHeight * (1 - margins.header); // Convert from top margin to bottom-based Y
-      const footerY = pageHeight * margins.footer; // Footer Y stays as is since it's already bottom-based
-      const leftX = pageWidth * margins.left;
-      const rightX = pageWidth * (1 - margins.right);
-      
-      // Check margins - remember y=0 is at bottom of page in PDF coordinates
-      if (y > headerY || y < footerY) { // Y greater than headerY means it's in header area, less than footerY means footer area
-        return false;
-      }
-
-      // Check horizontal margins
-      if (x < leftX || x > rightX) {
-        return false;
-      }
-      
-      // Sanity check for coordinates
-      if (x < 0 || x > pageWidth) return false;
-      
-      return item.str.trim().length > 0;
-    });
-
-    //console.log('Filtered text items:', textItems);
-
-    const tolerance = 2;
-    const lines: TextItem[][] = [];
-    let currentLine: TextItem[] = [];
-    let currentY: number | null = null;
-
-    textItems.forEach((item) => {
-      const y = item.transform[5];
-      if (currentY === null) {
-        currentY = y;
-        currentLine.push(item);
-      } else if (Math.abs(y - currentY) < tolerance) {
-        currentLine.push(item);
-      } else {
-        lines.push(currentLine);
-        currentLine = [item];
-        currentY = y;
-      }
-    });
-    lines.push(currentLine);
-
-    let pageText = '';
-    for (const line of lines) {
-      line.sort((a, b) => a.transform[4] - b.transform[4]);
-      let lineText = '';
-      let prevItem: TextItem | null = null;
-
-      for (const item of line) {
-        if (!prevItem) {
-          lineText = item.str;
-        } else {
-          const prevEndX = prevItem.transform[4] + (prevItem.width ?? 0);
-          const currentStartX = item.transform[4];
-          const space = currentStartX - prevEndX;
-
-          if (space > ((item.width ?? 0) * 0.3)) {
-            lineText += ' ' + item.str;
-          } else {
-            lineText += item.str;
-          }
-        }
-        prevItem = item;
-      }
-      pageText += lineText + ' ';
+    // Handle null document case
+    if (!pdfDocument) {
+      console.warn('PDF document is null or undefined');
+      return '';
     }
 
-    return pageText.replace(/\s+/g, ' ').trim();
+    // Safely get page with error handling
+    let page: PDFPageProxy;
+    try {
+      page = await pdfDocument.getPage(pageNum);
+    } catch (err) {
+      console.error('Error getting PDF page:', err);
+      return '';
+    }
+
+    // If page is null or undefined, return empty string
+    if (!page) {
+      console.warn('PDF page is null or undefined');
+      return '';
+    }
+
+    const viewport = page.getViewport({ scale: 1.0 });
+    const pageWidth = viewport.width;
+    const pageHeight = viewport.height;
+
+    // Define margins based on page dimensions
+    const topMargin = pageHeight * margins.top;
+    const bottomMargin = pageHeight * margins.bottom;
+    const leftMargin = pageWidth * margins.left;
+    const rightMargin = pageWidth * margins.right;
+
+    // Extract text content from the page with a safety timeout
+    const textContent = await Promise.race([
+      page.getTextContent(),
+      new Promise<TextContent>((_, reject) => 
+        setTimeout(() => reject(new Error('PDF text extraction timeout')), 10000)
+      )
+    ]) as TextContent;
+
+    if (!textContent || !textContent.items) {
+      console.warn('No text content found in PDF page');
+      return '';
+    }
+
+    // Process text content with margin filtering
+    let lastY: number | null = null;
+    let text = '';
+
+    // Filter items based on margins
+    textContent.items.forEach((item) => {
+      // Skip if not a TextItem
+      if (!isTextItem(item)) return;
+      
+      const x = item.transform[4];
+      const y = item.transform[5];
+      
+      // Skip content in margins
+      if (
+        x < leftMargin ||
+        x > pageWidth - rightMargin ||
+        y < bottomMargin ||
+        y > pageHeight - topMargin
+      ) {
+        return;
+      }
+
+      // Add newlines between different y-positions
+      if (lastY !== null && Math.abs(y - lastY) > 5) {
+        text += '\n';
+      }
+      
+      lastY = y;
+      text += item.str + ' ';
+    });
+
+    // Clean and normalize the text
+    text = text.replace(/\s+/g, ' ').trim();
+    
+    // Add paragraph breaks where appropriate
+    text = text.replace(/\.\s+/g, '.\n\n');
+    
+    return text;
   } catch (error) {
     console.error('Error extracting text from PDF:', error);
     throw new Error('Failed to extract text from PDF');
   }
 }
 
-// Highlighting functions
-export function clearHighlights() {
-  const textNodes = document.querySelectorAll('.react-pdf__Page__textContent span');
-  textNodes.forEach((node) => {
-    const element = node as HTMLElement;
-    element.style.backgroundColor = '';
-    element.style.opacity = '1';
-  });
-}
-
-export function findBestTextMatch(
-  elements: Array<{ element: HTMLElement; text: string }>,
-  targetText: string,
-  maxCombinedLength: number
-): TextMatch {
-  let bestMatch = {
-    elements: [] as HTMLElement[],
-    rating: 0,
-    text: '',
-    lengthDiff: Infinity,
-  };
-
-  const SPAN_SEARCH_LIMIT = 10;
-
-  for (let i = 0; i < elements.length; i++) {
-    let combinedText = '';
-    const currentElements = [];
-    for (let j = i; j < Math.min(i + SPAN_SEARCH_LIMIT, elements.length); j++) {
-      const node = elements[j];
-      const newText = combinedText ? `${combinedText} ${node.text}` : node.text;
-      if (newText.length > maxCombinedLength) break;
-
-      combinedText = newText;
-      currentElements.push(node.element);
-
-      const similarity = stringSimilarity.compareTwoStrings(targetText, combinedText);
-      const lengthDiff = Math.abs(combinedText.length - targetText.length);
-      const lengthPenalty = lengthDiff / targetText.length;
-      const adjustedRating = similarity * (1 - lengthPenalty * 0.5);
-
-      if (adjustedRating > bestMatch.rating) {
-        bestMatch = {
-          elements: [...currentElements],
-          rating: adjustedRating,
-          text: combinedText,
-          lengthDiff,
-        };
-      }
-    }
-  }
-
-  return bestMatch;
-}
-
-export function highlightPattern(
-  text: string,
-  pattern: string,
-  containerRef: React.RefObject<HTMLDivElement>
-) {
-  clearHighlights();
-
-  if (!pattern?.trim()) return;
-
-  const cleanPattern = pattern.trim().replace(/\s+/g, ' ');
-  const container = containerRef.current;
-  if (!container) return;
-
-  const textNodes = container.querySelectorAll('.react-pdf__Page__textContent span');
-  const allText = Array.from(textNodes).map((node) => ({
-    element: node as HTMLElement,
-    text: (node.textContent || '').trim(),
-  })).filter((node) => node.text.length > 0);
-
-  const containerRect = container.getBoundingClientRect();
-  const visibleTop = container.scrollTop;
-  const visibleBottom = visibleTop + containerRect.height;
-  const bufferSize = containerRect.height;
-
-  const visibleNodes = allText.filter(({ element }) => {
-    const rect = element.getBoundingClientRect();
-    const elementTop = rect.top - containerRect.top + container.scrollTop;
-    return elementTop >= (visibleTop - bufferSize) && elementTop <= (visibleBottom + bufferSize);
-  });
-
-  let bestMatch = findBestTextMatch(visibleNodes, cleanPattern, cleanPattern.length * 2);
-
-  if (bestMatch.rating < 0.3) {
-    bestMatch = findBestTextMatch(allText, cleanPattern, cleanPattern.length * 2);
-  }
-
-  const similarityThreshold = bestMatch.lengthDiff < cleanPattern.length * 0.3 ? 0.3 : 0.5;
-
-  if (bestMatch.rating >= similarityThreshold) {
-    bestMatch.elements.forEach((element) => {
-      element.style.backgroundColor = 'grey';
-      element.style.opacity = '0.4';
+/**
+ * Safely loads a PDF document from a URL
+ * 
+ * @param url URL of the PDF to load
+ * @returns Promise resolving to the PDF document proxy
+ */
+export async function loadPDFDocumentSafely(url: string): Promise<PDFDocumentProxy | null> {
+  try {
+    // Use the appropriate options for worker URLs in both dev and prod
+    const loadingTask = pdfjs.getDocument({
+      url,
+      cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/',
+      cMapPacked: true,
+    });
+    
+    // Add proper timeout and error handling
+    const timeoutPromise = new Promise<null>((resolve) => {
+      setTimeout(() => {
+        loadingTask.destroy().catch(e => console.error('Error destroying PDF loading task:', e));
+        resolve(null);
+      }, 30000); // 30 second timeout
     });
 
-    if (bestMatch.elements.length > 0) {
-      const element = bestMatch.elements[0];
-      const elementRect = element.getBoundingClientRect();
-      const elementTop = elementRect.top - containerRect.top + container.scrollTop;
-
-      if (elementTop < visibleTop || elementTop > visibleBottom) {
-        container.scrollTo({
-          top: elementTop - containerRect.height / 3,
-          behavior: 'smooth',
-        });
-      }
-    }
+    // Race between loading and timeout
+    const result = await Promise.race([loadingTask.promise, timeoutPromise]);
+    return result;
+  } catch (error) {
+    console.error('Error loading PDF document:', error);
+    return null;
   }
 }
 
-// Text Click Handler
+/**
+ * CSS class used for text highlighting
+ */
+const HIGHLIGHT_CLASS = 'pdf-text-highlight';
+
+/**
+ * Highlights text in a PDF container based on a pattern
+ * 
+ * @param text The text content to search through
+ * @param pattern The pattern to highlight
+ * @param containerRef Reference to the container element
+ */
+export function highlightPattern(text: string, pattern: string, containerRef: RefObject<HTMLDivElement>): void {
+  if (!containerRef.current || !pattern || !text) return;
+  
+  clearHighlights();
+  
+  // Create a RegExp for the pattern with case insensitivity
+  try {
+    const regex = new RegExp(pattern, 'gi');
+    
+    // Get all text nodes in the container
+    const textNodes = getAllTextNodes(containerRef.current);
+    
+    // Highlight matching text in each text node
+    textNodes.forEach(node => {
+      const nodeText = node.textContent || '';
+      const matches = [...nodeText.matchAll(regex)];
+      
+      if (matches.length > 0) {
+        highlightTextNode(node, matches);
+      }
+    });
+  } catch (error) {
+    console.error('Error highlighting pattern:', error);
+  }
+}
+
+/**
+ * Clears all text highlights
+ */
+export function clearHighlights(): void {
+  if (typeof window === 'undefined') return;
+  
+  // Remove all highlight spans
+  const highlights = document.querySelectorAll(`.${HIGHLIGHT_CLASS}`);
+  highlights.forEach(highlight => {
+    const parent = highlight.parentNode;
+    if (parent) {
+      // Replace highlight with its text content
+      parent.replaceChild(
+        document.createTextNode(highlight.textContent || ''),
+        highlight
+      );
+      // Normalize the parent to merge adjacent text nodes
+      parent.normalize();
+    }
+  });
+}
+
+/**
+ * Handles text click events to find and play from the clicked position
+ * 
+ * @param event The mouse click event
+ * @param pdfText The full text content of the PDF
+ * @param containerRef Reference to the container element
+ * @param stopAndPlayFromIndex Callback to start playback from an index
+ * @param isProcessing Whether the system is currently processing a request
+ */
 export function handleTextClick(
   event: MouseEvent,
   pdfText: string,
-  containerRef: React.RefObject<HTMLDivElement>,
+  containerRef: RefObject<HTMLDivElement>,
   stopAndPlayFromIndex: (index: number) => void,
   isProcessing: boolean
-) {
-  if (isProcessing) return;
-
-  const target = event.target as HTMLElement;
-  if (!target.matches('.react-pdf__Page__textContent span')) return;
-
-  const parentElement = target.closest('.react-pdf__Page__textContent');
-  if (!parentElement) return;
-
-  const spans = Array.from(parentElement.querySelectorAll('span'));
-  const clickedIndex = spans.indexOf(target);
-  const contextWindow = 3;
-  const startIndex = Math.max(0, clickedIndex - contextWindow);
-  const endIndex = Math.min(spans.length - 1, clickedIndex + contextWindow);
-  const contextText = spans
-    .slice(startIndex, endIndex + 1)
-    .map((span) => span.textContent)
-    .join(' ')
-    .trim();
-
-  if (!contextText?.trim()) return;
-
-  const cleanContext = contextText.trim().replace(/\s+/g, ' ');
-  const allText = Array.from(parentElement.querySelectorAll('span')).map((node) => ({
-    element: node as HTMLElement,
-    text: (node.textContent || '').trim(),
-  })).filter((node) => node.text.length > 0);
-
-  const bestMatch = findBestTextMatch(allText, cleanContext, cleanContext.length * 2);
-  const similarityThreshold = bestMatch.lengthDiff < cleanContext.length * 0.3 ? 0.3 : 0.5;
-
-  if (bestMatch.rating >= similarityThreshold) {
-    const matchText = bestMatch.text;
-    const sentences = nlp(pdfText).sentences().out('array') as string[];
-    let bestSentenceMatch = { sentence: '', rating: 0 };
-
-    for (const sentence of sentences) {
-      const rating = stringSimilarity.compareTwoStrings(matchText, sentence);
-      if (rating > bestSentenceMatch.rating) {
-        bestSentenceMatch = { sentence, rating };
-      }
-    }
-
-    if (bestSentenceMatch.rating >= 0.5) {
-      const sentenceIndex = sentences.findIndex((sentence) => sentence === bestSentenceMatch.sentence);
-      if (sentenceIndex !== -1) {
-        stopAndPlayFromIndex(sentenceIndex);
-        highlightPattern(pdfText, bestSentenceMatch.sentence, containerRef);
-      }
-    }
+): void {
+  if (isProcessing || !containerRef.current || !pdfText) return;
+  
+  // Get the click target and verify it's a text node or element
+  const target = event.target as Node;
+  if (!target) return;
+  
+  // Find the text node that was clicked
+  const textNode = findTextNodeFromClick(target);
+  if (!textNode || !textNode.textContent) return;
+  
+  // Get the clicked position within the text node
+  const clickedText = textNode.textContent;
+  const clickedTextStart = findTextNodePosition(textNode, containerRef.current);
+  
+  if (clickedTextStart !== -1) {
+    // Calculate the relative click position and find it in the full text
+    const clickPosition = clickedTextStart + Math.floor(clickedText.length / 2);
+    const textBeforeClick = pdfText.substring(0, clickPosition);
+    
+    // Find the sentence start position
+    let sentenceStart = textBeforeClick.lastIndexOf('. ');
+    if (sentenceStart === -1) sentenceStart = 0;
+    else sentenceStart += 2; // Move past the period and space
+    
+    // Use the callback to start playback from this position
+    stopAndPlayFromIndex(sentenceStart);
   }
 }
 
-// Debounce for PDF viewer
-export function debounce<T extends (...args: unknown[]) => unknown>(
-  func: T,
-  wait: number
-): (...args: Parameters<T>) => void {
-  let timeout: NodeJS.Timeout;
-  return (...args: Parameters<T>) => {
-    clearTimeout(timeout);
-    timeout = setTimeout(() => func(...args), wait);
-  };
+/**
+ * Helper function to get all text nodes in an element
+ * 
+ * @param element The container element
+ * @returns Array of text nodes
+ */
+function getAllTextNodes(element: HTMLElement): Node[] {
+  const textNodes: Node[] = [];
+  
+  // Skip invisible elements
+  if (element.style.display === 'none' || element.style.visibility === 'hidden') {
+    return textNodes;
+  }
+  
+  // Collect all text nodes using TreeWalker
+  const treeWalker = document.createTreeWalker(
+    element,
+    NodeFilter.SHOW_TEXT,
+    {
+      acceptNode: (node) => {
+        // Skip empty text nodes
+        return node.textContent?.trim() 
+          ? NodeFilter.FILTER_ACCEPT 
+          : NodeFilter.FILTER_REJECT;
+      }
+    }
+  );
+  
+  let currentNode = treeWalker.currentNode;
+  while (currentNode) {
+    if (currentNode.nodeType === Node.TEXT_NODE && currentNode.textContent?.trim()) {
+      textNodes.push(currentNode);
+    }
+    currentNode = treeWalker.nextNode() as Node;
+  }
+  
+  return textNodes;
+}
+
+/**
+ * Highlights matches in a text node
+ * 
+ * @param textNode The text node to highlight
+ * @param matches Array of RegExpMatchArray matches
+ */
+function highlightTextNode(textNode: Node, matches: RegExpMatchArray[]): void {
+  const parent = textNode.parentNode;
+  if (!parent) return;
+  
+  let nodeText = textNode.textContent || '';
+  let lastIndex = 0;
+  
+  // Create a document fragment to hold the new nodes
+  const fragment = document.createDocumentFragment();
+  
+  // Process each match
+  matches.forEach(match => {
+    if (match.index === undefined || !match[0]) return;
+    
+    // Add text before the match
+    if (match.index > lastIndex) {
+      fragment.appendChild(
+        document.createTextNode(nodeText.substring(lastIndex, match.index))
+      );
+    }
+    
+    // Create a highlighted span for the match
+    const highlightSpan = document.createElement('span');
+    highlightSpan.textContent = match[0];
+    highlightSpan.className = HIGHLIGHT_CLASS;
+    fragment.appendChild(highlightSpan);
+    
+    lastIndex = match.index + match[0].length;
+  });
+  
+  // Add any remaining text after the last match
+  if (lastIndex < nodeText.length) {
+    fragment.appendChild(
+      document.createTextNode(nodeText.substring(lastIndex))
+    );
+  }
+  
+  // Replace the original text node with the new fragment
+  parent.replaceChild(fragment, textNode);
+}
+
+/**
+ * Finds the clicked text node
+ * 
+ * @param target The clicked element or node
+ * @returns The text node that was clicked, or null
+ */
+function findTextNodeFromClick(target: Node): Node | null {
+  // If target is already a text node, return it
+  if (target.nodeType === Node.TEXT_NODE) {
+    return target;
+  }
+  
+  // If target is an element with a highlight class, get its text content
+  if (target.nodeType === Node.ELEMENT_NODE && 
+      (target as Element).classList?.contains(HIGHLIGHT_CLASS)) {
+    return target.firstChild;
+  }
+  
+  // If target has child nodes, return the first text node
+  if (target.hasChildNodes()) {
+    for (let i = 0; i < target.childNodes.length; i++) {
+      const child = target.childNodes[i];
+      if (child.nodeType === Node.TEXT_NODE && child.textContent?.trim()) {
+        return child;
+      }
+    }
+  }
+  
+  return null;
+}
+
+/**
+ * Finds the position of a text node within the full text
+ * 
+ * @param textNode The text node to find
+ * @param container The container element
+ * @returns The position of the text node in the full text, or -1 if not found
+ */
+function findTextNodePosition(textNode: Node, container: HTMLElement): number {
+  const allTextNodes = getAllTextNodes(container);
+  let position = 0;
+  
+  for (const node of allTextNodes) {
+    if (node === textNode) {
+      return position;
+    }
+    position += (node.textContent || '').length;
+  }
+  
+  return -1;
 }

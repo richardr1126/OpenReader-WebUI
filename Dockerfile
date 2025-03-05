@@ -16,7 +16,11 @@ RUN npm install
 # Copy project files
 COPY . .
 
-# Build the Next.js application
+# Install TypeScript globally for builds
+RUN npm install -g typescript
+
+# Build the Next.js application with extra memory allocation to handle larger builds
+ENV NODE_OPTIONS="--max-old-space-size=4096"
 RUN npm run build
 
 # Expose the port the app runs on

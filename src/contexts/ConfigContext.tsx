@@ -1,10 +1,14 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react';
+import { ProviderType, VoiceProviderType, ProviderSettings, DocumentProviderOverride } from '@/providers/types';
 import { getItem, indexedDBService, setItem, removeItem } from '@/utils/indexedDB';
 
 /** Represents the possible view types for document display */
 export type ViewType = 'single' | 'dual' | 'scroll';
+
+// Map of document IDs to provider overrides
+type DocumentOverridesMap = Map<string, DocumentProviderOverride>;
 
 /** Configuration values for the application */
 type ConfigValues = {
@@ -20,6 +24,11 @@ type ConfigValues = {
   footerMargin: number;
   leftMargin: number;
   rightMargin: number;
+  // New settings for provider system
+  provider: ProviderType;
+  voiceProvider: VoiceProviderType;
+  providerSettings: ProviderSettings;
+  documentProviderOverrides: Record<string, DocumentProviderOverride>;
 };
 
 /** Interface defining the configuration context shape and functionality */
@@ -36,8 +45,25 @@ interface ConfigContextType {
   footerMargin: number;
   leftMargin: number;
   rightMargin: number;
-  updateConfig: (newConfig: Partial<{ apiKey: string; baseUrl: string; viewType: ViewType }>) => Promise<void>;
+  // New properties for provider system
+  provider: ProviderType;
+  voiceProvider: VoiceProviderType;
+  providerSettings: ProviderSettings;
+  documentProviderOverrides: Record<string, DocumentProviderOverride>;
+  // Updated updateConfig to include provider settings
+  updateConfig: (newConfig: Partial<{
+    apiKey: string;
+    baseUrl: string;
+    viewType: ViewType;
+    provider: ProviderType;
+    voiceProvider: VoiceProviderType;
+    providerSettings: ProviderSettings;
+  }>) => Promise<void>;
   updateConfigKey: <K extends keyof ConfigValues>(key: K, value: ConfigValues[K]) => Promise<void>;
+  // New methods for document-specific overrides
+  getDocumentProviderOverride: (documentId: string) => DocumentProviderOverride | undefined;
+  setDocumentProviderOverride: (documentId: string, override: DocumentProviderOverride) => Promise<void>;
+  removeDocumentProviderOverride: (documentId: string) => Promise<void>;
   isLoading: boolean;
   isDBReady: boolean;
 }
@@ -63,6 +89,29 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   const [headerMargin, setHeaderMargin] = useState<number>(0.07);
   const [footerMargin, setFooterMargin] = useState<number>(0.07);
   const [leftMargin, setLeftMargin] = useState<number>(0.07);
+  
+  // New state for provider system
+  const [provider, setProvider] = useState<ProviderType>('openai');
+  const [voiceProvider, setVoiceProvider] = useState<VoiceProviderType>('openai');
+  const [providerSettings, setProviderSettings] = useState<ProviderSettings>({
+    openai: {
+      apiKey: '',
+      baseUrl: 'https://api.openai.com/v1',
+      model: 'tts-1',
+    },
+    ollama: {
+      baseUrl: 'http://localhost:11434',
+      model: 'llama3:8b',
+    },
+    openrouter: {
+      apiKey: '',
+      model: 'openai/whisper',
+    },
+    elevenlabs: {
+      apiKey: '',
+    },
+  });
+  const [documentProviderOverrides, setDocumentProviderOverrides] = useState<Record<string, DocumentProviderOverride>>({});
   const [rightMargin, setRightMargin] = useState<number>(0.07);
 
   const [isLoading, setIsLoading] = useState(true);
@@ -87,6 +136,12 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
         const cachedHeaderMargin = await getItem('headerMargin');
         const cachedFooterMargin = await getItem('footerMargin');
         const cachedLeftMargin = await getItem('leftMargin');
+        
+        // Load new provider settings
+        const cachedProvider = await getItem('provider');
+        const cachedVoiceProvider = await getItem('voiceProvider');
+        const cachedProviderSettings = await getItem('providerSettings');
+        const cachedDocumentOverrides = await getItem('documentProviderOverrides');
         const cachedRightMargin = await getItem('rightMargin');
 
         // Only set API key and base URL if they were explicitly saved by the user
@@ -109,6 +164,26 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
         setHeaderMargin(parseFloat(cachedHeaderMargin || '0.07'));
         setFooterMargin(parseFloat(cachedFooterMargin || '0.07'));
         setLeftMargin(parseFloat(cachedLeftMargin || '0.07'));
+        
+        // Set provider settings with defaults
+        setProvider((cachedProvider || 'openai') as ProviderType);
+        setVoiceProvider((cachedVoiceProvider || 'openai') as VoiceProviderType);
+        
+        if (cachedProviderSettings) {
+          try {
+            const parsedSettings = JSON.parse(cachedProviderSettings);
+            setProviderSettings({
+              ...providerSettings,
+              ...parsedSettings
+            });
+          } catch (e) {
+            console.error('Error parsing provider settings:', e);
+          }
+        }
+        
+        if (cachedDocumentOverrides) {
+          setDocumentProviderOverrides(JSON.parse(cachedDocumentOverrides));
+        }
         setRightMargin(parseFloat(cachedRightMargin || '0.07'));
 
         // Only save non-sensitive settings by default
@@ -129,6 +204,16 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
         if (cachedLeftMargin === null) await setItem('leftMargin', '0.0');
         if (cachedRightMargin === null) await setItem('rightMargin', '0.0');
         
+        // Save new default settings
+        if (cachedProvider === null) await setItem('provider', 'openai');
+        if (cachedVoiceProvider === null) await setItem('voiceProvider', 'openai');
+        if (cachedProviderSettings === null) {
+          await setItem('providerSettings', JSON.stringify(providerSettings));
+        }
+        if (cachedDocumentOverrides === null) {
+          await setItem('documentProviderOverrides', JSON.stringify({}));
+        }
+        
       } catch (error) {
         console.error('Error initializing:', error);
       } finally {
@@ -143,7 +228,13 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
    * Updates multiple configuration values simultaneously
    * Only saves API credentials if they are explicitly set
    */
-  const updateConfig = async (newConfig: Partial<{ apiKey: string; baseUrl: string }>) => {
+  const updateConfig = async (newConfig: Partial<{
+    apiKey: string;
+    baseUrl: string;
+    provider: ProviderType;
+    voiceProvider: VoiceProviderType;
+    providerSettings: ProviderSettings;
+  }>) => {
     try {
       if (newConfig.apiKey !== undefined || newConfig.apiKey !== '') {
         // Only save API key to IndexedDB if it's different from env default
@@ -154,6 +245,24 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
         // Only save base URL to IndexedDB if it's different from env default
         await setItem('baseUrl', newConfig.baseUrl!);
         setBaseUrl(newConfig.baseUrl!);
+      }
+      
+      // Handle provider settings
+      if (newConfig.provider !== undefined) {
+        await setItem('provider', newConfig.provider);
+        setProvider(newConfig.provider);
+      }
+      
+      if (newConfig.voiceProvider !== undefined) {
+        await setItem('voiceProvider', newConfig.voiceProvider);
+        setVoiceProvider(newConfig.voiceProvider);
+      }
+      
+      if (newConfig.providerSettings !== undefined) {
+        await setItem('providerSettings', JSON.stringify(newConfig.providerSettings));
+        setProviderSettings((prevSettings: ProviderSettings) => ({
+          ...prevSettings, ...newConfig.providerSettings
+        }));
       }
 
       // Delete completely if '' is passed
@@ -217,9 +326,70 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
         case 'rightMargin':
           setRightMargin(value as number);
           break;
+        case 'provider':
+          setProvider(value as ProviderType);
+          break;
+        case 'voiceProvider':
+          setVoiceProvider(value as VoiceProviderType);
+          break;
+        case 'providerSettings':
+          setProviderSettings(value as ProviderSettings);
+          break;
+        case 'documentProviderOverrides':
+          setDocumentProviderOverrides(value as Record<string, DocumentProviderOverride>);
+          break;
       }
     } catch (error) {
       console.error(`Error updating config key ${key}:`, error);
+      throw error;
+    }
+  };
+
+  /**
+   * Gets document-specific provider override if it exists
+   * 
+   * @param documentId The document ID to check for overrides
+   * @returns The document override or undefined if none exists
+   */
+  const getDocumentProviderOverride = useCallback((documentId: string): DocumentProviderOverride | undefined => {
+    return documentProviderOverrides[documentId];
+  }, [documentProviderOverrides]);
+
+  /**
+   * Sets document-specific provider override
+   * 
+   * @param documentId The document ID to set override for
+   * @param override The provider override settings
+   */
+  const setDocumentProviderOverride = async (documentId: string, override: DocumentProviderOverride): Promise<void> => {
+    try {
+      const newOverrides = {
+        ...documentProviderOverrides,
+        [documentId]: override
+      };
+      
+      await setItem('documentProviderOverrides', JSON.stringify(newOverrides));
+      setDocumentProviderOverrides(newOverrides);
+    } catch (error) {
+      console.error(`Error setting document provider override for ${documentId}:`, error);
+      throw error;
+    }
+  };
+
+  /**
+   * Removes document-specific provider override
+   * 
+   * @param documentId The document ID to remove override for
+   */
+  const removeDocumentProviderOverride = async (documentId: string): Promise<void> => {
+    try {
+      const newOverrides = { ...documentProviderOverrides };
+      delete newOverrides[documentId];
+      
+      await setItem('documentProviderOverrides', JSON.stringify(newOverrides));
+      setDocumentProviderOverrides(newOverrides);
+    } catch (error) {
+      console.error(`Error removing document provider override for ${documentId}:`, error);
       throw error;
     }
   };
@@ -238,8 +408,15 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
       footerMargin,
       leftMargin,
       rightMargin,
+      provider,
+      voiceProvider,
+      providerSettings,
+      documentProviderOverrides,
       updateConfig, 
       updateConfigKey,
+      getDocumentProviderOverride,
+      setDocumentProviderOverride,
+      removeDocumentProviderOverride,
       isLoading, 
       isDBReady 
     }}>

@@ -1,255 +1,102 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { spawn } from 'child_process';
-import { writeFile, readFile, mkdir, unlink, rmdir, readdir } from 'fs/promises';
-import { existsSync, createReadStream } from 'fs';
-import { join } from 'path';
-import { randomUUID } from 'crypto';
+/**
+ * Audio Conversion API Endpoint
+ * 
+ * This endpoint handles converting text to speech when direct TTS is not available from a provider.
+ * It is primarily used as a fallback for providers like Ollama that don't have native TTS capabilities.
+ */
 
-interface ConversionRequest {
-  chapterTitle: string;
-  buffer: number[];
-  bookId?: string;
-}
+import { NextRequest } from 'next/server';
+import { createVoiceProvider } from '@/providers/factory';
+import { ProviderSettings, VoiceProviderType, ProviderType } from '@/providers/types';
 
-async function getAudioDuration(filePath: string): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const ffprobe = spawn('ffprobe', [
-      '-i', filePath,
-      '-show_entries', 'format=duration',
-      '-v', 'quiet',
-      '-of', 'csv=p=0'
-    ]);
-
-    let output = '';
-    ffprobe.stdout.on('data', (data) => {
-      output += data.toString();
-    });
-
-    ffprobe.on('close', (code) => {
-      if (code === 0) {
-        const duration = parseFloat(output.trim());
-        resolve(duration);
-      } else {
-        reject(new Error(`ffprobe process exited with code ${code}`));
-      }
-    });
-
-    ffprobe.on('error', (err) => {
-      reject(err);
-    });
-  });
-}
-
-async function runFFmpeg(args: string[]): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
-    const ffmpeg = spawn('ffmpeg', args);
-
-    ffmpeg.stderr.on('data', (data) => {
-      console.error(`ffmpeg stderr: ${data}`);
-    });
-
-    ffmpeg.on('close', (code) => {
-      if (code === 0) {
-        resolve();
-      } else {
-        reject(new Error(`FFmpeg process exited with code ${code}`));
-      }
-    });
-
-    ffmpeg.on('error', (err) => {
-      reject(err);
-    });
-  });
-}
-
-export async function POST(request: NextRequest) {
+export async function POST(req: Request) {
   try {
-    // Parse the request body
-    const data: ConversionRequest = await request.json();
+    const body = await req.json();
+    const { text, voice, speed, provider, voiceProvider } = body;
     
-    // Create temp directory if it doesn't exist
-    const tempDir = join(process.cwd(), 'temp');
-    if (!existsSync(tempDir)) {
-      await mkdir(tempDir);
+    if (!text) {
+      return Response.json({ error: 'Text is required' }, { status: 400 });
     }
-
-    // Generate or use existing book ID
-    const bookId = data.bookId || randomUUID();
-    const intermediateDir = join(tempDir, `${bookId}-intermediate`);
     
-    // Create intermediate directory
-    if (!existsSync(intermediateDir)) {
-      await mkdir(intermediateDir);
-    }
-
-    // Count existing files to determine chapter index
-    const files = await readdir(intermediateDir);
-    const wavFiles = files.filter(f => f.endsWith('.wav'));
-    const chapterIndex = wavFiles.length;
-
-    // Write input file
-    const inputPath = join(intermediateDir, `${chapterIndex}-input.aac`);
-    const outputPath = join(intermediateDir, `${chapterIndex}.wav`);
-    const metadataPath = join(intermediateDir, `${chapterIndex}.meta.json`);
+    // Use the provided voice provider or default to OpenAI
+    const effectiveVoiceProvider: VoiceProviderType = voiceProvider || 'openai';
+    const effectiveProvider: ProviderType = provider || 'openai';
     
-    // Write the chapter audio to a temp file
-    await writeFile(inputPath, Buffer.from(new Uint8Array(data.buffer)));
+    // Extract API keys from headers if present
+    const headers = new Headers(req.headers);
+    const openaiKey = headers.get('x-openai-key') || '';
+    const elevenLabsKey = headers.get('x-elevenlabs-key') || '';
+    const openrouterKey = headers.get('x-openrouter-key') || '';
     
-    // Convert to WAV from raw aac with consistent format
-    await runFFmpeg([
-      '-i', inputPath,
-      '-f', 'wav',
-      '-c:a', 'copy',
-      '-preset', 'ultrafast',
-      '-threads', '0',
-      outputPath
-    ]);
-
-    // Get the duration and save metadata
-    const duration = await getAudioDuration(outputPath);
-    await writeFile(metadataPath, JSON.stringify({
-      title: data.chapterTitle,
-      duration,
-      index: chapterIndex
-    }));
-
-    // Clean up input file
-    await unlink(inputPath).catch(console.error);
-
-    return NextResponse.json({ 
-      bookId,
-      chapterIndex,
-      duration
-    });
-
-  } catch (error) {
-    console.error('Error processing audio chapter:', error);
-    return NextResponse.json(
-      { error: 'Failed to process audio chapter' }, 
-      { status: 500 }
-    );
-  }
-}
-
-export async function GET(request: NextRequest) {
-  try {
-    const bookId = request.nextUrl.searchParams.get('bookId');
-    if (!bookId) {
-      return NextResponse.json({ error: 'Missing bookId parameter' }, { status: 400 });
-    }
-
-    const tempDir = join(process.cwd(), 'temp');
-    const intermediateDir = join(tempDir, `${bookId}-intermediate`);
-    const outputPath = join(tempDir, `${bookId}.m4b`);
-    const metadataPath = join(tempDir, `${bookId}-metadata.txt`);
-    const listPath = join(tempDir, `${bookId}-list.txt`);
-
-    if (!existsSync(intermediateDir)) {
-      return NextResponse.json({ error: 'Book not found' }, { status: 404 });
-    }
-
-    // Read all chapter metadata
-    const files = await readdir(intermediateDir);
-    const metaFiles = files.filter(f => f.endsWith('.meta.json'));
-    const chapters: { title: string; duration: number; index: number }[] = [];
-    
-    for (const metaFile of metaFiles) {
-      const meta = JSON.parse(await readFile(join(intermediateDir, metaFile), 'utf-8'));
-      chapters.push(meta);
-    }
-
-    // Sort chapters by index
-    chapters.sort((a, b) => a.index - b.index);
-
-    // Create chapter metadata file
-    const metadata: string[] = [];
-    let currentTime = 0;
-    
-    // Calculate chapter timings based on actual durations
-    chapters.forEach((chapter) => {
-      const startMs = Math.floor(currentTime * 1000);
-      currentTime += chapter.duration;
-      const endMs = Math.floor(currentTime * 1000);
-
-      metadata.push(
-        `[CHAPTER]`,
-        `TIMEBASE=1/1000`,
-        `START=${startMs}`,
-        `END=${endMs}`,
-        `title=${chapter.title}`
-      );
-    });
-    
-    await writeFile(metadataPath, ';FFMETADATA1\n' + metadata.join('\n'));
-
-    // Create list file for concat
-    await writeFile(
-      listPath,
-      chapters.map(c => `file '${join(intermediateDir, `${c.index}.wav`)}'`).join('\n')
-    );
-
-    // Combine all files into a single M4B
-    await runFFmpeg([
-      '-f', 'concat',
-      '-safe', '0',
-      '-i', listPath,
-      '-i', metadataPath,
-      '-map_metadata', '1',
-      '-c:a', 'copy', // c:a is codec for audio and :a is stream specifier
-      //'-codec', 'wav',
-      //'-b:a', '192k',
-      //'-threads', '0', // Use maximum available threads
-      //'-movflags', '+faststart',
-      //'-preset', 'ultrafast', // Use fastest encoding preset
-      outputPath
-    ]);
-
-    // Stream the file back to the client
-    const stream = createReadStream(outputPath);
-    
-    // Clean up function
-    const cleanup = async () => {
-      try {
-        await Promise.all([
-          ...chapters.map(c => unlink(join(intermediateDir, `${c.index}.wav`))),
-          ...chapters.map(c => unlink(join(intermediateDir, `${c.index}.meta.json`))),
-          unlink(metadataPath),
-          unlink(listPath),
-          unlink(outputPath),
-          rmdir(intermediateDir)
-        ]);
-      } catch (error) {
-        console.error('Cleanup error:', error);
-      }
+    // Create default provider settings
+    let providerSettings: ProviderSettings = {
+      openai: {
+        apiKey: openaiKey,
+        baseUrl: 'https://api.openai.com/v1',
+        model: 'tts-1',
+      },
+      ollama: {
+        baseUrl: 'http://localhost:11434',
+        model: 'llama3:8b',
+      },
+      openrouter: {
+        apiKey: openrouterKey,
+        model: 'openai/whisper',
+      },
+      elevenlabs: {
+        apiKey: elevenLabsKey,
+      },
     };
-
-    // Clean up after streaming is complete
-    stream.on('end', cleanup);
-
-    const readableWebStream = new ReadableStream({
-      start(controller) {
-        stream.on('data', (chunk) => {
-          controller.enqueue(chunk);
-        });
-        stream.on('end', () => {
-          controller.close();
-        });
-        stream.on('error', (err) => {
-          controller.error(err);
-        });
-      },
+    
+    // Parse provider settings from header if available
+    try {
+      const settingsHeader = headers.get('x-provider-settings');
+      if (settingsHeader) {
+        providerSettings = JSON.parse(settingsHeader);
+      }
+    } catch (error) {
+      console.error('Error parsing provider settings:', error);
+    }
+    
+    console.log(`Converting text to audio using provider: ${effectiveProvider}, voice provider: ${effectiveVoiceProvider}, speed: ${speed || 1.0}`);
+    
+    // Create voice provider for TTS generation
+    const ttsProvider = createVoiceProvider(effectiveVoiceProvider, { 
+      providerSettings
     });
-
-    return new NextResponse(readableWebStream, {
+    
+    if (!ttsProvider) {
+      throw new Error(`Failed to create voice provider for ${effectiveVoiceProvider}`);
+    }
+    
+    // Ensure speed is a valid number
+    const effectiveSpeed = typeof speed === 'string' ? parseFloat(speed) : 
+                          typeof speed === 'number' ? speed : 1.0;
+    
+    // Generate speech from text
+    const audioBuffer = await ttsProvider.generateSpeech({
+      text,
+      voice: voice || 'alloy',
+      speed: effectiveSpeed,
+      format: 'mp3',
+    });
+    
+    if (!audioBuffer || audioBuffer.byteLength === 0) {
+      throw new Error('Generated audio buffer is empty');
+    }
+    
+    // Return audio data
+    return new Response(audioBuffer, {
       headers: {
-        'Content-Type': 'audio/mp4',
+        'Content-Type': 'audio/mpeg',
+        'Content-Disposition': `attachment; filename="audio.mp3"`,
+        'Cache-Control': 'private, max-age=604800', // Cache for a week
       },
     });
-
   } catch (error) {
-    console.error('Error creating M4B:', error);
-    return NextResponse.json(
-      { error: 'Failed to create M4B file' }, 
+    console.error('Error converting text to audio:', error);
+    return Response.json(
+      { error: error instanceof Error ? error.message : 'Unknown error' }, 
       { status: 500 }
     );
   }

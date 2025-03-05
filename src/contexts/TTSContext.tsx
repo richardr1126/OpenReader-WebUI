@@ -2,7 +2,7 @@
  * Text-to-Speech (TTS) Context Provider
  * 
  * This module provides a React context for managing text-to-speech functionality.
- * It handles audio playback, sentence processing, and integration with OpenAI's TTS API.
+ * It handles audio playback, sentence processing, and integration with multiple TTS providers.
  * 
  * Key features:
  * - Audio playback control (play/pause/skip)
@@ -10,6 +10,8 @@
  * - Audio caching for better performance
  * - Voice and speed control
  * - Document navigation
+ * - Multiple AI provider support (OpenAI, Ollama, OpenRouter)
+ * - ElevenLabs voice synthesis integration
  */
 
 'use client';
@@ -28,6 +30,7 @@ import { Howl } from 'howler';
 import toast from 'react-hot-toast';
 import { useParams } from 'next/navigation';
 
+import { ProviderType, VoiceProviderType, Voice, VoiceCategory } from '@/providers/types';
 import { useConfig } from '@/contexts/ConfigContext';
 import { useAudioCache } from '@/hooks/audio/useAudioCache';
 import { useVoiceManagement } from '@/hooks/audio/useVoiceManagement';
@@ -52,16 +55,20 @@ interface TTSContextType {
   isPlaying: boolean;
   isProcessing: boolean;
   currentSentence: string;
-  isBackgrounded: boolean;  // Add this new property
+  isBackgrounded: boolean;
 
   // Navigation
-  currDocPage: string | number;  // Change this to allow both types
+  currDocPage: string | number;
   currDocPageNumber: number; // For PDF
   currDocPages: number | undefined;
 
-  // Voice settings
-  availableVoices: string[];
-
+  // Voice and provider settings
+  availableVoices: Voice[];
+  voiceCategories: VoiceCategory[];
+  voiceIds: string[];
+  provider: ProviderType;
+  voiceProvider: VoiceProviderType;
+  
   // Control functions
   togglePlay: () => void;
   skipForward: () => void;
@@ -73,8 +80,10 @@ interface TTSContextType {
   setCurrDocPages: (num: number | undefined) => void;
   setSpeedAndRestart: (speed: number) => void;
   setVoiceAndRestart: (voice: string) => void;
+  setProviderAndRestart: (provider: ProviderType) => void;
+  setVoiceProviderAndRestart: (voiceProvider: VoiceProviderType) => void;
   skipToLocation: (location: string | number) => void;
-  registerLocationChangeHandler: (handler: (location: string | number) => void) => void;  // EPUB-only: Handles chapter navigation
+  registerLocationChangeHandler: (handler: (location: string | number) => void) => void;
   setIsEPUB: (isEPUB: boolean) => void;
 }
 
@@ -83,28 +92,53 @@ const TTSContext = createContext<TTSContextType | undefined>(undefined);
 
 /**
  * Main provider component that manages the TTS state and functionality.
- * Handles initialization of OpenAI client, audio context, and media session.
+ * Handles multiple TTS providers, audio context, and media session.
  * 
  * @param {Object} props - Component props
  * @param {ReactNode} props.children - Child components to be wrapped by the provider
  * @returns {JSX.Element} TTSProvider component
  */
 export function TTSProvider({ children }: { children: ReactNode }) {
+  // Get document ID from URL params
+  const { id } = useParams();
+  
   // Configuration context consumption
   const {
-    apiKey: openApiKey,
-    baseUrl: openApiBaseUrl,
     isLoading: configIsLoading,
     voiceSpeed,
     voice: configVoice,
     updateConfigKey,
     skipBlank,
+    provider: configProvider,
+    voiceProvider: configVoiceProvider,
+    providerSettings,
+    getDocumentProviderOverride,
   } = useConfig();
 
-  // Remove OpenAI client reference as it's no longer needed
+  // Get document-specific provider override if available
+  const documentOverride = id ? getDocumentProviderOverride(id.toString()) : undefined;
+  
+  // Use document override or default provider settings
+  const [provider, setProvider] = useState<ProviderType>(
+    documentOverride?.provider || configProvider
+  );
+  const [voiceProvider, setVoiceProvider] = useState<VoiceProviderType>(
+    documentOverride?.voiceProvider || configVoiceProvider
+  );
+  
+  // Initialize core services
   const audioContext = useAudioContext();
   const audioCache = useAudioCache(25);
-  const { availableVoices, fetchVoices } = useVoiceManagement(openApiKey, openApiBaseUrl);
+  
+  // Initialize voice management with effective provider settings
+  const { 
+    availableVoices, 
+    voiceCategories, 
+    voiceIds,
+    fetchVoices,
+    clearCache: clearVoiceCache,
+    isLoading: voicesLoading
+  } = useVoiceManagement(provider, voiceProvider, providerSettings, id?.toString());
 
   // Add ref for location change handler
   const locationChangeHandlerRef = useRef<((location: string | number) => void) | null>(null);
@@ -118,9 +152,6 @@ export function TTSProvider({ children }: { children: ReactNode }) {
   const registerLocationChangeHandler = useCallback((handler: (location: string | number) => void) => {
     locationChangeHandlerRef.current = handler;
   }, []);
-
-  // Get document ID from URL params
-  const { id } = useParams();
 
   /**
    * State Management
@@ -137,7 +168,7 @@ export function TTSProvider({ children }: { children: ReactNode }) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [activeHowl, setActiveHowl] = useState<Howl | null>(null);
   const [speed, setSpeed] = useState(voiceSpeed);
-  const [voice, setVoice] = useState(configVoice);
+  const [voice, setVoice] = useState(documentOverride?.voice || configVoice);
 
   // Track pending preload requests
   const preloadRequests = useRef<Map<string, Promise<string>>>(new Map());
@@ -197,7 +228,6 @@ export function TTSProvider({ children }: { children: ReactNode }) {
    * Works for both PDF pages and EPUB locations
    * 
    * @param {string | number} location - The target location to navigate to
-   * @param {boolean} keepPlaying - Whether to maintain playback state
    */
   const skipToLocation = useCallback((location: string | number) => {
     // Reset state for new content in correct order
@@ -205,7 +235,6 @@ export function TTSProvider({ children }: { children: ReactNode }) {
     setCurrentIndex(0);
     setSentences([]);
     setCurrDocPage(location);
-
   }, [abortAudio]);
 
   /**
@@ -233,7 +262,7 @@ export function TTSProvider({ children }: { children: ReactNode }) {
       // Handle next/previous page transitions
       if ((nextIndex >= sentences.length && currDocPageNumber < currDocPages!) ||
         (nextIndex < 0 && currDocPageNumber > 1)) {
-        // Pass wasPlaying to maintain playback state during page turn
+        // Navigate to next/previous page
         skipToLocation(currDocPageNumber + (nextIndex >= sentences.length ? 1 : -1));
         return;
       }
@@ -248,7 +277,7 @@ export function TTSProvider({ children }: { children: ReactNode }) {
   /**
    * Handles blank text sections based on document type
    * 
-   * @param {string[]} sentences - Array of processed sentences
+   * @param {string} text - The text to check for blankness
    * @returns {boolean} - True if blank section was handled
    */
   const handleBlankSection = useCallback((text: string): boolean => {
@@ -280,6 +309,7 @@ export function TTSProvider({ children }: { children: ReactNode }) {
    * Sets the current text and splits it into sentences
    * 
    * @param {string} text - The text to be processed
+   * @param {boolean} [shouldPause=false] - Whether to pause after processing
    */
   const setText = useCallback((text: string, shouldPause = false) => {
     // Check for blank section first
@@ -346,7 +376,6 @@ export function TTSProvider({ children }: { children: ReactNode }) {
     setIsPlaying(false);
   }, [abortAudio]);
 
-
   /**
    * Moves forward one sentence in the text
    */
@@ -375,9 +404,9 @@ export function TTSProvider({ children }: { children: ReactNode }) {
    * Updates the voice and speed settings from the configuration
    */
   const updateVoiceAndSpeed = useCallback(() => {
-    setVoice(configVoice);
+    setVoice(documentOverride?.voice || configVoice);
     setSpeed(voiceSpeed);
-  }, [configVoice, voiceSpeed]);
+  }, [configVoice, voiceSpeed, documentOverride]);
 
   /**
    * Initializes configuration and fetches available voices
@@ -387,13 +416,13 @@ export function TTSProvider({ children }: { children: ReactNode }) {
       fetchVoices();
       updateVoiceAndSpeed();
     }
-  }, [configIsLoading, openApiKey, openApiBaseUrl, updateVoiceAndSpeed, fetchVoices]);
+  }, [configIsLoading, updateVoiceAndSpeed, fetchVoices]);
 
   /**
    * Generates and plays audio for the current sentence
    * 
    * @param {string} sentence - The sentence to generate audio for
-   * @returns {Promise<AudioBuffer | undefined>} The generated audio buffer
+   * @returns {Promise<ArrayBuffer | undefined>} The generated audio buffer
    */
   const getAudio = useCallback(async (sentence: string): Promise<ArrayBuffer | undefined> => {
     // Check if the audio is already cached
@@ -416,19 +445,22 @@ export function TTSProvider({ children }: { children: ReactNode }) {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'x-openai-key': openApiKey || '',
-              'x-openai-base-url': openApiBaseUrl || '',
+              'x-provider-settings': JSON.stringify(providerSettings),
             },
             body: JSON.stringify({
               text: sentence,
               voice: voice,
               speed: speed,
+              provider: provider,
+              voiceProvider: voiceProvider,
+              documentId: id?.toString()
             }),
             signal: controller.signal,
           });
 
           if (!response.ok) {
-            throw new Error('Failed to generate audio');
+            const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+            throw new Error(errorData.error || 'Failed to generate audio');
           }
 
           return response.arrayBuffer();
@@ -466,7 +498,7 @@ export function TTSProvider({ children }: { children: ReactNode }) {
       });
       throw error;
     }
-  }, [voice, speed, audioCache, openApiKey, openApiBaseUrl]);
+  }, [voice, speed, audioCache, provider, voiceProvider, providerSettings, id]);
 
   /**
    * Processes and plays the current sentence
@@ -743,7 +775,6 @@ export function TTSProvider({ children }: { children: ReactNode }) {
    */
   const stopAndPlayFromIndex = useCallback((index: number) => {
     abortAudio();
-
     setCurrentIndex(index);
     setIsPlaying(true);
   }, [abortAudio]);
@@ -784,6 +815,8 @@ export function TTSProvider({ children }: { children: ReactNode }) {
    * @param {string} newVoice - The new voice to set
    */
   const setVoiceAndRestart = useCallback((newVoice: string) => {
+    if (newVoice === voice) return;
+    
     const wasPlaying = isPlaying;
 
     // Set a flag to prevent double audio requests during config update
@@ -806,7 +839,96 @@ export function TTSProvider({ children }: { children: ReactNode }) {
         setIsPlaying(true);
       }
     });
-  }, [abortAudio, updateConfigKey, audioCache, isPlaying]);
+  }, [abortAudio, updateConfigKey, audioCache, isPlaying, voice]);
+
+  /**
+   * Sets the provider and restarts the playback
+   * 
+   * @param {ProviderType} newProvider - The new provider to set
+   */
+  const setProviderAndRestart = useCallback((newProvider: ProviderType) => {
+    if (newProvider === provider) return;
+    
+    const wasPlaying = isPlaying;
+
+    // Set a flag to prevent double audio requests during config update
+    setIsProcessing(true);
+
+    // First stop any current playback
+    setIsPlaying(false);
+    abortAudio(true); // Clear pending requests since provider changed
+    setActiveHowl(null);
+
+    // Update provider, clear cache
+    setProvider(newProvider);
+    audioCache.clear();
+    clearVoiceCache(); // Clear voice cache too since provider changed
+
+    // Update config after state changes
+    updateConfigKey('provider', newProvider).then(() => {
+      setIsProcessing(false);
+      // Resume playback if it was playing before
+      if (wasPlaying) {
+        setIsPlaying(true);
+      }
+    });
+  }, [abortAudio, updateConfigKey, audioCache, isPlaying, provider, clearVoiceCache]);
+
+  /**
+   * Sets the voice provider and restarts the playback
+   * Improved to fetch voices immediately after changing provider
+   * 
+   * @param {VoiceProviderType} newVoiceProvider - The new voice provider to set
+   */
+  const setVoiceProviderAndRestart = useCallback((newVoiceProvider: VoiceProviderType) => {
+    if (newVoiceProvider === voiceProvider) return;
+    
+    const wasPlaying = isPlaying;
+
+    // Set a flag to prevent double audio requests during config update
+    setIsProcessing(true);
+
+    // First stop any current playback
+    setIsPlaying(false);
+    abortAudio(true); // Clear pending requests since provider changed
+    setActiveHowl(null);
+
+    // Update provider, clear cache
+    setVoiceProvider(newVoiceProvider);
+    audioCache.clear();
+    clearVoiceCache(); // Clear voice cache too since provider changed
+
+    // Immediately trigger voice fetch to ensure voices are loaded
+    // This is critical for ElevenLabs voices which need to be fetched
+    const fetchVoicesPromise = fetchVoices();
+
+    // Update config in parallel
+    const updateConfigPromise = updateConfigKey('voiceProvider', newVoiceProvider);
+
+    // Wait for both operations to complete
+    Promise.all([fetchVoicesPromise, updateConfigPromise])
+      .then(() => {
+        setIsProcessing(false);
+        
+        // Resume playback if it was playing before
+        if (wasPlaying) {
+          setIsPlaying(true);
+        }
+      })
+      .catch(error => {
+        console.error("Error updating voice provider:", error);
+        setIsProcessing(false);
+        
+        toast.error('Failed to load voices for the selected provider', {
+          style: {
+            background: 'var(--background)',
+            color: 'var(--accent)',
+          },
+          duration: 3000,
+        });
+      });
+      
+  }, [abortAudio, updateConfigKey, audioCache, isPlaying, voiceProvider, clearVoiceCache, fetchVoices]);
 
   /**
    * Provides the TTS context value to child components
@@ -819,7 +941,13 @@ export function TTSProvider({ children }: { children: ReactNode }) {
     currDocPage,
     currDocPageNumber,
     currDocPages,
+    // Voice and provider settings
     availableVoices,
+    voiceCategories,
+    voiceIds,
+    provider,
+    voiceProvider,
+    // Control functions
     togglePlay,
     skipForward,
     skipBackward,
@@ -830,6 +958,8 @@ export function TTSProvider({ children }: { children: ReactNode }) {
     setCurrDocPages,
     setSpeedAndRestart,
     setVoiceAndRestart,
+    setProviderAndRestart,
+    setVoiceProviderAndRestart,
     skipToLocation,
     registerLocationChangeHandler,
     setIsEPUB
@@ -842,7 +972,13 @@ export function TTSProvider({ children }: { children: ReactNode }) {
     currDocPage,
     currDocPageNumber,
     currDocPages,
+    // Voice and provider settings
     availableVoices,
+    voiceCategories,
+    voiceIds,
+    provider,
+    voiceProvider,
+    // Control functions
     togglePlay,
     skipForward,
     skipBackward,
@@ -853,6 +989,8 @@ export function TTSProvider({ children }: { children: ReactNode }) {
     setCurrDocPages,
     setSpeedAndRestart,
     setVoiceAndRestart,
+    setProviderAndRestart,
+    setVoiceProviderAndRestart,
     skipToLocation,
     registerLocationChangeHandler,
     setIsEPUB
@@ -868,7 +1006,7 @@ export function TTSProvider({ children }: { children: ReactNode }) {
   // Load last location on mount for EPUB only
   useEffect(() => {
     if (id && isEPUB) {
-      getLastDocumentLocation(id as string).then(lastLocation => {
+      getLastDocumentLocation(id.toString()).then(lastLocation => {
         if (lastLocation) {
           console.log('Setting last location:', lastLocation);
           if (locationChangeHandlerRef.current) {

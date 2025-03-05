@@ -58,6 +58,9 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
     baseUrl,
     voiceSpeed,
     voice,
+    provider,
+    voiceProvider,
+    providerSettings
   } = useConfig();
   // Current document state
   const [currDocData, setCurrDocData] = useState<ArrayBuffer>();
@@ -242,17 +245,21 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
         try {
           const audioBuffer = await withRetry(
             async () => {
+              // Include provider information in the request
               const ttsResponse = await fetch('/api/tts', {
                 method: 'POST',
                 headers: {
-                  'x-openai-key': apiKey,
-                  'x-openai-base-url': baseUrl,
+                  'Content-Type': 'application/json',
+                  'x-provider-settings': JSON.stringify(providerSettings),
                 },
                 body: JSON.stringify({
                   text: trimmedText,
                   voice: voice,
                   speed: voiceSpeed,
                   format: format === 'm4b' ? 'aac' : 'mp3',
+                  provider: provider,
+                  voiceProvider: voiceProvider,
+                  documentId: id?.toString()
                 }),
                 signal
               });
@@ -320,7 +327,7 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
       console.error('Error creating audiobook:', error);
       throw error;
     }
-  }, [extractBookText, apiKey, baseUrl, voice, voiceSpeed]);
+  }, [extractBookText, id, voice, voiceSpeed, provider, voiceProvider, providerSettings]);
 
   const setRendition = useCallback((rendition: Rendition) => {
     bookRef.current = rendition.book;
