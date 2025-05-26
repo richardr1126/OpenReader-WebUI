@@ -11,8 +11,6 @@
 
 OpenReader WebUI is a document reader with Text-to-Speech capabilities, offering a TTS read along experience with narration for EPUB, PDF, TXT, MD, and DOCX documents. It can use any OpenAI compatible TTS endpoint, including [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI) and [Orpheus-FastAPI](https://github.com/Lex-au/Orpheus-FastAPI)
 
-> Highly available demo currently available at [https://openreader.richardr.dev/](https://openreader.richardr.dev/)
-
 - 🎯 **TTS API Integration**: 
   - Compatible with OpenAI text to speech API and GPT-4o Mini TTS, Kokoro-FastAPI TTS, Orpheus FastAPI or any other compatible service
   - Support for TTS models (tts-1, tts-1-hd, gpt-4o-mini-tts, kokoro, and custom)
