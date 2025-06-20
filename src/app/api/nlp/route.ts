@@ -1,51 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import nlp from 'compromise';
-
-const MAX_BLOCK_LENGTH = 300;
-
-const preprocessSentenceForAudio = (text: string): string => {
-  return text
-    .replace(/\S*(?:https?:\/\/|www\.)([^\/\s]+)(?:\/\S*)?/gi, '- (link to $1) -')
-    .replace(/(\w+)-\s+(\w+)/g, '$1$2') // Remove hyphenation
-    // Remove special character *
-    .replace(/\*/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-};
-
-const splitIntoSentences = (text: string): string[] => {
-  const paragraphs = text.split(/\n+/);
-  const blocks: string[] = [];
-
-  for (const paragraph of paragraphs) {
-    if (!paragraph.trim()) continue;
-
-    const cleanedText = preprocessSentenceForAudio(paragraph);
-    const doc = nlp(cleanedText);
-    const rawSentences = doc.sentences().out('array') as string[];
-    
-    let currentBlock = '';
-
-    for (const sentence of rawSentences) {
-      const trimmedSentence = sentence.trim();
-      
-      if (currentBlock && (currentBlock.length + trimmedSentence.length + 1) > MAX_BLOCK_LENGTH) {
-        blocks.push(currentBlock.trim());
-        currentBlock = trimmedSentence;
-      } else {
-        currentBlock = currentBlock 
-          ? `${currentBlock} ${trimmedSentence}`
-          : trimmedSentence;
-      }
-    }
-
-    if (currentBlock) {
-      blocks.push(currentBlock.trim());
-    }
-  }
-  
-  return blocks;
-};
+import { processTextToSentences } from '@/utils/nlp';
 
 export async function POST(req: NextRequest) {
   // First check if the request body is empty
@@ -104,14 +58,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (text.length <= MAX_BLOCK_LENGTH) {
-      // Single sentence preprocessing
-      const cleanedText = preprocessSentenceForAudio(text);
-      return NextResponse.json({ sentences: [cleanedText] });
-    }
-
-    // Full text splitting into sentences
-    const sentences = splitIntoSentences(text);
+    // Use the shared utility function for consistent processing
+    const sentences = processTextToSentences(text);
     return NextResponse.json({ sentences });
   } catch (error) {
     console.error('Error processing text:', error);
