@@ -127,7 +127,7 @@ export const processTextWithMapping = (text: string): {
     const rawIndices: number[] = [];
     
     // Find which raw sentences are contained in this processed sentence
-    let remainingText = processedSentence;
+    const remainingText = processedSentence;
     
     while (rawIndex < rawSentences.length && remainingText.length > 0) {
       const rawSentence = rawSentences[rawIndex];
