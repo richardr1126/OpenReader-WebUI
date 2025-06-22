@@ -24,7 +24,7 @@ jobs:
     - name: Run Playwright tests
       env:
         NEXT_PUBLIC_NODE_ENV: test
-        API_BASE: https://koko.richardr.dev/v1
+        API_BASE: https://tts.richardr.dev/v1
         API_KEY: not-needed
       run: npx playwright test --reporter=list,github,html
     - uses: actions/upload-artifact@v4
