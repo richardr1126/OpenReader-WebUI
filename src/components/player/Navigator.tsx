@@ -62,14 +62,14 @@ export const Navigator = ({ currentPage, numPages, skipToLocation }: {
           type="text"
           inputMode="numeric"
           pattern="[0-9]*"
-          className="w-8 text-xs text-center bg-transparent outline-none appearance-none"
+          className="w-6 text-xs text-accent bg-transparent outline-none appearance-none text-right"
           value={inputValue}
           onChange={handleInputChange}
           onBlur={handleInputConfirm}
           onKeyDown={handleInputKeyDown}
           aria-label="Page number"
         />
-        <span className="text-xs ml-1">/ {numPages || 1}</span>
+        <span className="w-6 text-xs ml-1">/ {numPages || 1}</span>
       </div>
 
       {/* Page forward */}
