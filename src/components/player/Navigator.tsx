@@ -1,12 +1,46 @@
 'use client';
 
 import { Button } from '@headlessui/react';
+import { useState, useEffect, useRef } from 'react';
 
 export const Navigator = ({ currentPage, numPages, skipToLocation }: {
   currentPage: number;
   numPages: number | undefined;
   skipToLocation: (location: string | number, shouldPause?: boolean) => void;
 }) => {
+  const [inputValue, setInputValue] = useState(currentPage.toString());
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setInputValue(currentPage.toString());
+  }, [currentPage]);
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    // Only allow numbers
+    const value = e.target.value.replace(/[^0-9]/g, '');
+    setInputValue(value);
+  };
+
+  const handleInputConfirm = () => {
+    let page = parseInt(inputValue, 10);
+    if (isNaN(page)) return;
+    const maxPage = numPages || 1;
+    if (page < 1) page = 1;
+    if (page > maxPage) page = maxPage;
+    if (page !== currentPage) {
+      skipToLocation(page, true);
+    } else {
+      setInputValue(page.toString()); // reset input if unchanged
+    }
+  };
+
+  const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      handleInputConfirm();
+      inputRef.current?.blur();
+    }
+  };
+
   return (
     <div className="flex items-center space-x-1">
       {/* Page back */}
@@ -21,11 +55,21 @@ export const Navigator = ({ currentPage, numPages, skipToLocation }: {
         </svg>
       </Button>
 
-      {/* Page number */}
-      <div className="bg-offbase px-2 py-0.5 rounded-full">
-        <p className="text-xs whitespace-nowrap">
-          {currentPage} / {numPages || 1}
-        </p>
+      {/* Page number input */}
+      <div className="bg-offbase px-2 py-0.5 rounded-full flex items-center">
+        <input
+          ref={inputRef}
+          type="text"
+          inputMode="numeric"
+          pattern="[0-9]*"
+          className="w-8 text-xs text-center bg-transparent outline-none appearance-none"
+          value={inputValue}
+          onChange={handleInputChange}
+          onBlur={handleInputConfirm}
+          onKeyDown={handleInputKeyDown}
+          aria-label="Page number"
+        />
+        <span className="text-xs ml-1">/ {numPages || 1}</span>
       </div>
 
       {/* Page forward */}
