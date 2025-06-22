@@ -12,6 +12,7 @@ type ConfigValues = {
   baseUrl: string;
   viewType: ViewType;
   voiceSpeed: number;
+  audioPlayerSpeed: number;
   voice: string;
   skipBlank: boolean;
   epubTheme: boolean;
@@ -29,6 +30,7 @@ interface ConfigContextType {
   baseUrl: string;
   viewType: ViewType;
   voiceSpeed: number;
+  audioPlayerSpeed: number;
   voice: string;
   skipBlank: boolean;
   epubTheme: boolean;
@@ -58,6 +60,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   const [baseUrl, setBaseUrl] = useState<string>('');
   const [viewType, setViewType] = useState<ViewType>('single');
   const [voiceSpeed, setVoiceSpeed] = useState<number>(1);
+  const [audioPlayerSpeed, setAudioPlayerSpeed] = useState<number>(1);
   const [voice, setVoice] = useState<string>('af_sarah');
   const [skipBlank, setSkipBlank] = useState<boolean>(true);
   const [epubTheme, setEpubTheme] = useState<boolean>(false);
@@ -83,6 +86,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
         const cachedBaseUrl = await getItem('baseUrl');
         const cachedViewType = await getItem('viewType');
         const cachedVoiceSpeed = await getItem('voiceSpeed');
+        const cachedAudioPlayerSpeed = await getItem('audioPlayerSpeed');
         const cachedVoice = await getItem('voice');
         const cachedSkipBlank = await getItem('skipBlank');
         const cachedEpubTheme = await getItem('epubTheme');
@@ -106,6 +110,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
         // Set the other values with defaults
         setViewType((cachedViewType || 'single') as ViewType);
         setVoiceSpeed(parseFloat(cachedVoiceSpeed || '1'));
+        setAudioPlayerSpeed(parseFloat(cachedAudioPlayerSpeed || '1'));
         setVoice(cachedVoice || 'af_sarah');
         setSkipBlank(cachedSkipBlank === 'false' ? false : true);
         setEpubTheme(cachedEpubTheme === 'true');
@@ -136,6 +141,12 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
         if (cachedTTSInstructions === null) {
           await setItem('ttsInstructions', '');
         }
+        if (!cachedVoiceSpeed) {
+          await setItem('voiceSpeed', '1');
+        }
+        if (!cachedAudioPlayerSpeed) {
+          await setItem('audioPlayerSpeed', '1');
+        }
         
       } catch (error) {
         console.error('Error initializing:', error);
@@ -151,7 +162,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
    * Updates multiple configuration values simultaneously
    * Only saves API credentials if they are explicitly set
    */
-  const updateConfig = async (newConfig: Partial<{ apiKey: string; baseUrl: string }>) => {
+  const updateConfig = async (newConfig: Partial<{ apiKey: string; baseUrl: string; viewType: ViewType }>) => {
     try {
       setIsLoading(true);
       if (newConfig.apiKey !== undefined || newConfig.apiKey !== '') {
@@ -205,6 +216,9 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
         case 'voiceSpeed':
           setVoiceSpeed(value as number);
           break;
+        case 'audioPlayerSpeed':
+          setAudioPlayerSpeed(value as number);
+          break;
         case 'voice':
           setVoice(value as string);
           break;
@@ -247,6 +261,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
       baseUrl, 
       viewType, 
       voiceSpeed,
+      audioPlayerSpeed,
       voice,
       skipBlank,
       epubTheme,
