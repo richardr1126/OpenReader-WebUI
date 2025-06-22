@@ -84,7 +84,8 @@ export function PDFProvider({ children }: { children: ReactNode }) {
     stop, 
     currDocPageNumber: currDocPage, 
     currDocPages, 
-    setCurrDocPages 
+    setCurrDocPages,
+    setIsEPUB 
   } = useTTS();
   const { 
     headerMargin,
@@ -307,6 +308,13 @@ export function PDFProvider({ children }: { children: ReactNode }) {
       throw error;
     }
   }, [pdfDocument, headerMargin, footerMargin, leftMargin, rightMargin, apiKey, baseUrl, voice, voiceSpeed]);
+
+  /**
+   * Effect hook to initialize TTS as non-EPUB mode
+   */
+  useEffect(() => {
+    setIsEPUB(false);
+  }, [setIsEPUB]);
 
   // Context value memoization
   const contextValue = useMemo(
