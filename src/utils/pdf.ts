@@ -1,9 +1,9 @@
 import { pdfjs } from 'react-pdf';
-import nlp from 'compromise';
 import stringSimilarity from 'string-similarity';
 import type { TextItem } from 'pdfjs-dist/types/src/display/api';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import "core-js/proposals/promise-with-resolvers";
+import { processTextToSentences } from '@/utils/nlp';
 
 // Function to detect if we need to use legacy build
 function shouldUseLegacyBuild() {
@@ -325,7 +325,9 @@ export function handleTextClick(
 
   if (bestMatch.rating >= similarityThreshold) {
     const matchText = bestMatch.text;
-    const sentences = nlp(pdfText).sentences().out('array') as string[];
+    // Use the same sentence processing logic as TTSContext for consistency
+    const sentences = processTextToSentences(pdfText);
+    console.log("sentences inside handleTextClick: %d", sentences.length)
     let bestSentenceMatch = { sentence: '', rating: 0 };
 
     for (const sentence of sentences) {

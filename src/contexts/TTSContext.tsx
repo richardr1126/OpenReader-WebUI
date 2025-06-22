@@ -37,6 +37,7 @@ import { useAudioContext } from '@/hooks/audio/useAudioContext';
 import { getLastDocumentLocation } from '@/utils/indexedDB';
 import { useBackgroundState } from '@/hooks/audio/useBackgroundState';
 import { withRetry } from '@/utils/audio';
+import { processTextToSentences } from '@/utils/nlp';
 
 // Media globals
 declare global {
@@ -150,28 +151,18 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
   const activeAbortControllers = useRef<Set<AbortController>>(new Set());
 
   /**
-   * Processes text through the NLP API to split it into sentences
+   * Processes text into sentences using the shared NLP utility
    * 
    * @param {string} text - The text to be processed
    * @returns {Promise<string[]>} Array of processed sentences
    */
-  const processTextToSentences = useCallback(async (text: string): Promise<string[]> => {
+  const processTextToSentencesLocal = useCallback(async (text: string): Promise<string[]> => {
     if (text.length < 1) {
       return [];
     }
 
-    const response = await fetch('/api/nlp', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text }),
-    });
-
-    if (!response.ok) {
-      throw new Error('Failed to process text');
-    }
-
-    const { sentences } = await response.json();
-    return sentences;
+    // Use the shared utility directly instead of making an API call
+    return processTextToSentences(text);
   }, []);
 
   /**
@@ -308,7 +299,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     setIsProcessing(true); // Set processing state before text processing starts
 
     console.log('Setting text:', text);
-    processTextToSentences(text)
+    processTextToSentencesLocal(text)
       .then(newSentences => {
         if (newSentences.length === 0) {
           console.warn('No sentences found in text');
@@ -337,7 +328,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
           duration: 3000,
         });
       });
-  }, [isPlaying, handleBlankSection, abortAudio, processTextToSentences]);
+  }, [isPlaying, handleBlankSection, abortAudio, processTextToSentencesLocal]);
 
   /**
    * Toggles the playback state between playing and paused
