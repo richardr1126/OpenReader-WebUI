@@ -74,6 +74,7 @@ interface TTSContextType {
   setText: (text: string, shouldPause?: boolean) => void;
   setCurrDocPages: (num: number | undefined) => void;
   setSpeedAndRestart: (speed: number) => void;
+  setAudioPlayerSpeedAndRestart: (speed: number) => void;
   setVoiceAndRestart: (voice: string) => void;
   skipToLocation: (location: string | number, shouldPause?: boolean) => void;
   registerLocationChangeHandler: (handler: (location: string | number) => void) => void;  // EPUB-only: Handles chapter navigation
@@ -98,6 +99,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     baseUrl: openApiBaseUrl,
     isLoading: configIsLoading,
     voiceSpeed,
+    audioPlayerSpeed,
     voice: configVoice,
     ttsModel: configTTSModel,
     ttsInstructions: configTTSInstructions,
@@ -141,6 +143,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
   const [currentIndex, setCurrentIndex] = useState(0);
   const [activeHowl, setActiveHowl] = useState<Howl | null>(null);
   const [speed, setSpeed] = useState(voiceSpeed);
+  const [audioSpeed, setAudioSpeed] = useState(audioPlayerSpeed);
   const [voice, setVoice] = useState(configVoice);
   const [ttsModel, setTTSModel] = useState(configTTSModel);
   const [ttsInstructions, setTTSInstructions] = useState(configTTSInstructions);
@@ -387,7 +390,8 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
   const updateVoiceAndSpeed = useCallback(() => {
     setVoice(configVoice);
     setSpeed(voiceSpeed);
-  }, [configVoice, voiceSpeed]);
+    setAudioSpeed(audioPlayerSpeed);
+  }, [configVoice, voiceSpeed, audioPlayerSpeed]);
 
   /**
    * Initializes configuration and fetches available voices
@@ -570,6 +574,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
           html5: true,
           preload: true,
           pool: 5,
+          rate: audioSpeed,
           onplay: () => {
             setIsProcessing(false);
             if ('mediaSession' in navigator) {
@@ -666,7 +671,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
       advance();
       return null;
     }
-  }, [isPlaying, advance, activeHowl, processSentence]);
+  }, [isPlaying, advance, activeHowl, processSentence, audioSpeed]);
 
   const playAudio = useCallback(async () => {
     const howl = await playSentenceWithHowl(sentences[currentIndex]);
@@ -823,6 +828,35 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
   }, [abortAudio, updateConfigKey, audioCache, isPlaying]);
 
   /**
+   * Sets the audio player speed and restarts the playback
+   * 
+   * @param {number} newSpeed - The new audio player speed to set
+   */
+  const setAudioPlayerSpeedAndRestart = useCallback((newSpeed: number) => {
+    const wasPlaying = isPlaying;
+
+    // Set a flag to prevent double audio requests during config update
+    setIsProcessing(true);
+
+    // First stop any current playback
+    setIsPlaying(false);
+    abortAudio(true); // Clear pending requests since speed changed
+    setActiveHowl(null);
+
+    // Update audio speed and config
+    setAudioSpeed(newSpeed);
+
+    // Update config after state changes
+    updateConfigKey('audioPlayerSpeed', newSpeed).then(() => {
+      setIsProcessing(false);
+      // Resume playback if it was playing before
+      if (wasPlaying) {
+        setIsPlaying(true);
+      }
+    });
+  }, [abortAudio, updateConfigKey, isPlaying]);
+
+  /**
    * Provides the TTS context value to child components
    */
   const value = useMemo(() => ({
@@ -843,6 +877,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     setText,
     setCurrDocPages,
     setSpeedAndRestart,
+    setAudioPlayerSpeedAndRestart,
     setVoiceAndRestart,
     skipToLocation,
     registerLocationChangeHandler,
@@ -866,6 +901,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     setText,
     setCurrDocPages,
     setSpeedAndRestart,
+    setAudioPlayerSpeedAndRestart,
     setVoiceAndRestart,
     skipToLocation,
     registerLocationChangeHandler,
