@@ -34,7 +34,7 @@ import { useAudioCache } from '@/hooks/audio/useAudioCache';
 import { useVoiceManagement } from '@/hooks/audio/useVoiceManagement';
 import { useMediaSession } from '@/hooks/audio/useMediaSession';
 import { useAudioContext } from '@/hooks/audio/useAudioContext';
-import { getLastDocumentLocation } from '@/utils/indexedDB';
+import { getLastDocumentLocation, setLastDocumentLocation } from '@/utils/indexedDB';
 import { useBackgroundState } from '@/hooks/audio/useBackgroundState';
 import { withRetry } from '@/utils/audio';
 import { processTextToSentences } from '@/utils/nlp';
@@ -149,6 +149,8 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
   const preloadRequests = useRef<Map<string, Promise<string>>>(new Map());
   // Track active abort controllers for TTS requests
   const activeAbortControllers = useRef<Set<AbortController>>(new Set());
+  // Track if we're restoring from a saved position
+  const [pendingRestoreIndex, setPendingRestoreIndex] = useState<number | null>(null);
 
   /**
    * Processes text into sentences using the shared NLP utility
@@ -309,7 +311,17 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
 
         // Set all state updates in a predictable order
         setSentences(newSentences);
-        setCurrentIndex(0);
+        
+        // Check if we have a pending restore index for PDF
+        if (pendingRestoreIndex !== null && !isEPUB) {
+          const restoreIndex = Math.min(pendingRestoreIndex, newSentences.length - 1);
+          console.log(`Restoring sentence index: ${restoreIndex}`);
+          setCurrentIndex(restoreIndex);
+          setPendingRestoreIndex(null); // Clear the pending restore
+        } else {
+          setCurrentIndex(0);
+        }
+        
         setIsProcessing(false);
 
         // Restore playback state if needed
@@ -328,7 +340,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
           duration: 3000,
         });
       });
-  }, [isPlaying, handleBlankSection, abortAudio, processTextToSentencesLocal]);
+  }, [isPlaying, handleBlankSection, abortAudio, processTextToSentencesLocal, pendingRestoreIndex, isEPUB]);
 
   /**
    * Toggles the playback state between playing and paused
@@ -867,19 +879,53 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     skipBackward,
   });
 
-  // Load last location on mount for EPUB only
+  // Load last location on mount for both EPUB and PDF
   useEffect(() => {
-    if (id && isEPUB) {
+    if (id) {
       getLastDocumentLocation(id as string).then(lastLocation => {
         if (lastLocation) {
           console.log('Setting last location:', lastLocation);
-          if (locationChangeHandlerRef.current) {
+          
+          if (isEPUB && locationChangeHandlerRef.current) {
+            // For EPUB documents, use the location change handler
             locationChangeHandlerRef.current(lastLocation);
+          } else if (!isEPUB) {
+            // For PDF documents, parse the location as "page:sentence"
+            try {
+              const [pageStr, sentenceIndexStr] = lastLocation.split(':');
+              const page = parseInt(pageStr, 10);
+              const sentenceIndex = parseInt(sentenceIndexStr, 10);
+              
+              if (!isNaN(page) && !isNaN(sentenceIndex)) {
+                console.log(`Restoring PDF position: page ${page}, sentence ${sentenceIndex}`);
+                // Skip to the page first, then the sentence index will be restored when setText is called
+                setCurrDocPage(page);
+                // Store the sentence index to be used when text is loaded
+                setPendingRestoreIndex(sentenceIndex);
+              }
+            } catch (error) {
+              console.warn('Error parsing PDF location:', error);
+            }
           }
         }
       });
     }
   }, [id, isEPUB]);
+
+  // Save current position periodically for PDFs
+  useEffect(() => {
+    if (id && !isEPUB && sentences.length > 0) {
+      const location = `${currDocPageNumber}:${currentIndex}`;
+      const timeoutId = setTimeout(() => {
+        console.log(`Saving PDF position: ${location}`);
+        setLastDocumentLocation(id as string, location).catch(error => {
+          console.warn('Error saving PDF location:', error);
+        });
+      }, 1000); // Debounce saves by 1 second
+
+      return () => clearTimeout(timeoutId);
+    }
+  }, [id, isEPUB, currDocPageNumber, currentIndex, sentences.length]);
 
   /**
    * Renders the TTS context provider with its children
