@@ -21,7 +21,10 @@ export function Footer() {
             </PopoverButton>
             <PopoverPanel anchor="top" className="bg-base p-4 rounded-lg shadow-lg w-64">
               <p>Documents are uploaded to your local browser cache.</p>
-              <p className='mt-3'>Each sentence of the document you are viewing is sent to my Kokoro-FastAPI server for audio generation, no requests or data is collected.</p>
+              <p className='mt-3'>Each sentence of the document you are viewing is sent to my Kokoro-FastAPI server for audio generation.</p>
+              <p className='mt-3'>The audio is streamed back to your browser and played in real-time.</p>
+              {/* Vercel analytics disclaimer */}
+              <p className='mt-3'>This site uses Vercel Analytics to collect anonymous usage data to help improve the service.</p>
             </PopoverPanel>
           </Popover>
           <span className='w-full sm:w-fit'>•</span>

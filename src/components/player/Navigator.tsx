@@ -1,6 +1,6 @@
 'use client';
 
-import { Button } from '@headlessui/react';
+import { Button, Popover, PopoverButton, PopoverPanel } from '@headlessui/react';
 import { useState, useEffect, useRef } from 'react';
 
 export const Navigator = ({ currentPage, numPages, skipToLocation }: {
@@ -8,7 +8,7 @@ export const Navigator = ({ currentPage, numPages, skipToLocation }: {
   numPages: number | undefined;
   skipToLocation: (location: string | number, shouldPause?: boolean) => void;
 }) => {
-  const [inputValue, setInputValue] = useState(currentPage.toString());
+  const [inputValue, setInputValue] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -22,6 +22,7 @@ export const Navigator = ({ currentPage, numPages, skipToLocation }: {
   };
 
   const handleInputConfirm = () => {
+    if (inputValue === '') return; // Don't do anything if input is empty
     let page = parseInt(inputValue, 10);
     if (isNaN(page)) return;
     const maxPage = numPages || 1;
@@ -29,9 +30,8 @@ export const Navigator = ({ currentPage, numPages, skipToLocation }: {
     if (page > maxPage) page = maxPage;
     if (page !== currentPage) {
       skipToLocation(page, true);
-    } else {
-      setInputValue(page.toString()); // reset input if unchanged
     }
+    setInputValue(''); // Clear input after confirming
   };
 
   const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -39,6 +39,10 @@ export const Navigator = ({ currentPage, numPages, skipToLocation }: {
       handleInputConfirm();
       inputRef.current?.blur();
     }
+  };
+
+  const handlePopoverOpen = () => {
+    setInputValue(''); // Clear input when popup opens
   };
 
   return (
@@ -55,22 +59,36 @@ export const Navigator = ({ currentPage, numPages, skipToLocation }: {
         </svg>
       </Button>
 
-      {/* Page number input */}
-      <div className="bg-offbase px-2 py-0.5 rounded-full flex items-center">
-        <input
-          ref={inputRef}
-          type="text"
-          inputMode="numeric"
-          pattern="[0-9]*"
-          className="w-6 text-xs text-accent bg-transparent outline-none appearance-none text-right"
-          value={inputValue}
-          onChange={handleInputChange}
-          onBlur={handleInputConfirm}
-          onKeyDown={handleInputKeyDown}
-          aria-label="Page number"
-        />
-        <span className="w-6 text-xs ml-1">/ {numPages || 1}</span>
-      </div>
+      {/* Page number popup */}
+      <Popover className="relative">
+        <PopoverButton
+          className="bg-offbase px-2 py-0.5 rounded-full focus:outline-none cursor-pointer hover:bg-offbase/80"
+          onClick={handlePopoverOpen}
+        >
+          <p className="text-xs whitespace-nowrap">
+            {currentPage} / {numPages || 1}
+          </p>
+        </PopoverButton>
+        <PopoverPanel anchor="top" className="absolute z-50 bg-base p-3 rounded-md shadow-lg border border-offbase">
+          <div className="flex flex-col space-y-2">
+            <div className="text-xs font-medium text-foreground">Go to page</div>
+            <input
+              ref={inputRef}
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              className="w-20 px-2 py-1 text-xs text-accent bg-offbase rounded border-none outline-none appearance-none text-center"
+              value={inputValue}
+              onChange={handleInputChange}
+              onBlur={handleInputConfirm}
+              onKeyDown={handleInputKeyDown}
+              placeholder={currentPage.toString()}
+              aria-label="Page number"
+            />
+            <div className="text-xs text-foreground/70 text-center">of {numPages || 1}</div>
+          </div>
+        </PopoverPanel>
+      </Popover>
 
       {/* Page forward */}
       <Button

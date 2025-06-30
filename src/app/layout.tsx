@@ -4,6 +4,7 @@ import { Providers } from "@/app/providers";
 import { Metadata } from "next";
 import { Footer } from "@/components/Footer";
 import { Toaster } from 'react-hot-toast';
+import { Analytics } from "@vercel/analytics/next"
 
 export const metadata: Metadata = {
   title: "OpenReader WebUI",
@@ -59,6 +60,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             <div className="relative max-w-6xl mx-auto align-center">
               <div className="bg-base rounded-lg shadow-lg">
                 {children}
+                <Analytics />
               </div>
               {!isDev && <Footer />}
             </div>
