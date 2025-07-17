@@ -155,13 +155,15 @@ export function SettingsModal() {
   ];
 
   return (
-    <Button
-      onClick={() => setIsOpen(true)}
-      className="rounded-full p-2 text-foreground hover:bg-offbase transform transition-transform duration-200 ease-in-out hover:scale-[1.1] hover:text-accent absolute top-1 left-1 sm:top-3 sm:left-3"
-      aria-label="Settings"
-      tabIndex={0}
-    >
-      <SettingsIcon className="w-4 h-4 sm:w-5 sm:h-5 hover:animate-spin-slow" />
+    <>
+      <Button
+        onClick={() => setIsOpen(true)}
+        className="rounded-full p-2 text-foreground hover:bg-offbase transform transition-transform duration-200 ease-in-out hover:scale-[1.1] hover:text-accent absolute top-1 left-1 sm:top-3 sm:left-3"
+        aria-label="Settings"
+        tabIndex={0}
+      >
+        <SettingsIcon className="w-4 h-4 sm:w-5 sm:h-5 hover:animate-spin-slow" />
+      </Button>
 
       <Transition appear show={isOpen} as={Fragment}>
         <Dialog as="div" className="relative z-50" onClose={resetToCurrent}>
@@ -496,6 +498,6 @@ export function SettingsModal() {
         confirmText="Delete"
         isDangerous={true}
       />
-    </Button>
+    </>
   );
 }
