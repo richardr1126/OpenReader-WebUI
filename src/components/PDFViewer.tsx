@@ -15,6 +15,11 @@ interface PDFViewerProps {
   zoomLevel: number;
 }
 
+interface OnItemClickArgs {
+  pageNumber?: number;
+  dest?: unknown;
+}
+
 export function PDFViewer({ zoomLevel }: PDFViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const scaleRef = useRef<number>(1);
@@ -28,6 +33,7 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
     currentSentence,
     stopAndPlayFromIndex,
     isProcessing,
+    skipToLocation,
   } = useTTS();
 
   // PDF context
@@ -166,6 +172,17 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
         file={currDocData}
         onLoadSuccess={(pdf) => {
           onDocumentLoadSuccess(pdf);
+        }}
+        onItemClick={(args: OnItemClickArgs) => {
+          if (args?.pageNumber) {
+            skipToLocation(args.pageNumber, true);
+          } else if (args?.dest) {
+            const destArray = Array.isArray(args.dest) ? args.dest : [];
+            const pageNum = typeof destArray[0] === 'number' ? destArray[0] + 1 : undefined;
+            if (pageNum) {
+              skipToLocation(pageNum, true);
+            }
+          }
         }}
         className="flex flex-col items-center m-0 z-0" 
       >
