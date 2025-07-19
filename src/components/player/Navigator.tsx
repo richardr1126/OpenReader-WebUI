@@ -9,11 +9,24 @@ export const Navigator = ({ currentPage, numPages, skipToLocation }: {
   skipToLocation: (location: string | number, shouldPause?: boolean) => void;
 }) => {
   const [inputValue, setInputValue] = useState('');
+  const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setInputValue(currentPage.toString());
   }, [currentPage]);
+
+  // Auto-focus and select input when popover opens
+  useEffect(() => {
+    if (isPopoverOpen && inputRef.current) {
+      // Small delay to ensure the popover is fully rendered
+      const timer = setTimeout(() => {
+        inputRef.current?.focus();
+        inputRef.current?.select();
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [isPopoverOpen]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     // Only allow numbers
@@ -61,33 +74,43 @@ export const Navigator = ({ currentPage, numPages, skipToLocation }: {
 
       {/* Page number popup */}
       <Popover className="relative">
-        <PopoverButton
-          className="bg-offbase px-2 py-0.5 rounded-full focus:outline-none cursor-pointer hover:bg-offbase/80"
-          onClick={handlePopoverOpen}
-        >
-          <p className="text-xs whitespace-nowrap">
-            {currentPage} / {numPages || 1}
-          </p>
-        </PopoverButton>
-        <PopoverPanel anchor="top" className="absolute z-50 bg-base p-3 rounded-md shadow-lg border border-offbase">
-          <div className="flex flex-col space-y-2">
-            <div className="text-xs font-medium text-foreground">Go to page</div>
-            <input
-              ref={inputRef}
-              type="text"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              className="w-20 px-2 py-1 text-xs text-accent bg-offbase rounded border-none outline-none appearance-none text-center"
-              value={inputValue}
-              onChange={handleInputChange}
-              onBlur={handleInputConfirm}
-              onKeyDown={handleInputKeyDown}
-              placeholder={currentPage.toString()}
-              aria-label="Page number"
-            />
-            <div className="text-xs text-foreground/70 text-center">of {numPages || 1}</div>
-          </div>
-        </PopoverPanel>
+        {({ open }) => {
+          if (open !== isPopoverOpen) {
+            setIsPopoverOpen(open);
+          }
+          
+          return (
+            <>
+              <PopoverButton
+                className="bg-offbase px-2 py-0.5 rounded-full focus:outline-none cursor-pointer hover:bg-offbase/80"
+                onClick={handlePopoverOpen}
+              >
+                <p className="text-xs whitespace-nowrap">
+                  {currentPage} / {numPages || 1}
+                </p>
+              </PopoverButton>
+              <PopoverPanel anchor="top" className="absolute z-50 bg-base p-3 rounded-md shadow-lg border border-offbase">
+                <div className="flex flex-col space-y-2">
+                  <div className="text-xs font-medium text-foreground">Go to page</div>
+                  <input
+                    ref={inputRef}
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    className="w-20 px-2 py-1 text-xs text-accent bg-offbase rounded border-none outline-none appearance-none text-center"
+                    value={inputValue}
+                    onChange={handleInputChange}
+                    onBlur={handleInputConfirm}
+                    onKeyDown={handleInputKeyDown}
+                    placeholder={currentPage.toString()}
+                    aria-label="Page number"
+                  />
+                  <div className="text-xs text-foreground/70 text-center">of {numPages || 1}</div>
+                </div>
+              </PopoverPanel>
+            </>
+          );
+        }}
       </Popover>
 
       {/* Page forward */}
