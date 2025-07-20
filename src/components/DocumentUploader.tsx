@@ -41,24 +41,27 @@ export function DocumentUploader({ className = '' }: DocumentUploaderProps) {
   };
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
-    const file = acceptedFiles[0];
-    if (!file) return;
+    if (!acceptedFiles || acceptedFiles.length === 0) return;
 
     setIsUploading(true);
     setError(null);
-    
+
     try {
-      if (file.type === 'application/pdf') {
-        await addPDF(file);
-      } else if (file.type === 'application/epub+zip') {
-        await addEPUB(file);
-      } else if (file.type === 'text/plain' || file.type === 'text/markdown' || file.name.endsWith('.md')) {
-        await addHTML(file);
-      } else if (isDev && file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
-        setIsUploading(false);
-        setIsConverting(true);
-        const pdfFile = await convertDocxToPdf(file);
-        await addPDF(pdfFile);
+      for (const file of acceptedFiles) {
+        if (file.type === 'application/pdf') {
+          await addPDF(file);
+        } else if (file.type === 'application/epub+zip') {
+          await addEPUB(file);
+        } else if (file.type === 'text/plain' || file.type === 'text/markdown' || file.name.endsWith('.md')) {
+          await addHTML(file);
+        } else if (isDev && file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+          setIsUploading(false);
+          setIsConverting(true);
+          const pdfFile = await convertDocxToPdf(file);
+          await addPDF(pdfFile);
+          setIsConverting(false);
+          setIsUploading(true);
+        }
       }
     } catch (err) {
       setError('Failed to upload file. Please try again.');
@@ -80,7 +83,7 @@ export function DocumentUploader({ className = '' }: DocumentUploaderProps) {
         'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx']
       } : {})
     },
-    multiple: false,
+    multiple: true,
     disabled: isUploading || isConverting
   });
 
@@ -110,7 +113,7 @@ export function DocumentUploader({ className = '' }: DocumentUploaderProps) {
         ) : (
           <>
             <p className="mb-2 text-sm sm:text-lg font-semibold text-foreground">
-              {isDragActive ? 'Drop your file here' : 'Drop your file here, or click to select'}
+              {isDragActive ? 'Drop your file(s) here' : 'Drop your file(s) here, or click to select'}
             </p>
             <p className="text-xs sm:text-sm text-muted">
               {isDev ? 'PDF, EPUB, TXT, MD, or DOCX files are accepted' : 'PDF, EPUB, TXT, or MD files are accepted'}
