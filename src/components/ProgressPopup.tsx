@@ -8,9 +8,11 @@ interface ProgressPopupProps {
   estimatedTimeRemaining?: string;
   onCancel: () => void;
   isProcessing: boolean;
+  statusMessage?: string;
+  operationType?: 'sync' | 'load';
 }
 
-export function ProgressPopup({ isOpen, progress, estimatedTimeRemaining, onCancel, isProcessing }: ProgressPopupProps) {
+export function ProgressPopup({ isOpen, progress, estimatedTimeRemaining, onCancel, isProcessing, statusMessage, operationType }: ProgressPopupProps) {
   return (
     <Transition
       show={isOpen}
@@ -22,7 +24,7 @@ export function ProgressPopup({ isOpen, progress, estimatedTimeRemaining, onCanc
       leaveFrom="opacity-100 translate-y-0"
       leaveTo="opacity-0 -translate-y-4"
     >
-      <div className="fixed inset-x-0 top-2 z-50 pointer-events-none">
+      <div className="fixed inset-x-0 top-2 z-[60] pointer-events-none">
         <div className="w-full max-w-sm mx-auto">
           <div className="w-full transform rounded-lg bg-offbase p-4 shadow-xl pointer-events-auto">
             <div className="space-y-2 truncate">
@@ -33,12 +35,20 @@ export function ProgressPopup({ isOpen, progress, estimatedTimeRemaining, onCanc
                 />
               </div>
               <div className="flex justify-between items-center text-sm text-muted text-xs sm:text-sm">
-                <div className="flex flex-wrap items-center gap-1">
-                  <span>{Math.round(progress)}% complete</span>
-                  {estimatedTimeRemaining && <div>
-                    <span>&bull;</span>
-                    <span>{` ~${estimatedTimeRemaining}`}</span>
-                  </div>}
+                <div className="flex flex-col gap-1">
+                  {operationType && (
+                    <span className="text-accent font-semibold text-xs uppercase tracking-wide">
+                      {operationType === 'sync' ? 'Saving to Server' : 'Loading from Server'}
+                    </span>
+                  )}
+                  {statusMessage && <span className="text-foreground font-medium">{statusMessage}</span>}
+                  <div className="flex flex-wrap items-center gap-1">
+                    <span>{Math.round(progress)}% complete</span>
+                    {estimatedTimeRemaining && <div>
+                      <span>&bull;</span>
+                      <span>{` ~${estimatedTimeRemaining}`}</span>
+                    </div>}
+                  </div>
                 </div>
                 <button
                   type="button"

@@ -26,6 +26,8 @@ import { indexedDBService } from '@/utils/indexedDB';
 import { useDocuments } from '@/contexts/DocumentContext';
 import { setItem, getItem } from '@/utils/indexedDB';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { ProgressPopup } from '@/components/ProgressPopup';
+import { useTimeEstimation } from '@/hooks/useTimeEstimation';
 import { THEMES } from '@/contexts/ThemeContext';
 
 const isDev = process.env.NEXT_PUBLIC_NODE_ENV !== 'production' || process.env.NODE_ENV == null;
@@ -48,9 +50,14 @@ export function SettingsModal() {
   const [localTTSInstructions, setLocalTTSInstructions] = useState(ttsInstructions);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [showProgress, setShowProgress] = useState(false);
+  const [statusMessage, setStatusMessage] = useState('');
+  const [operationType, setOperationType] = useState<'sync' | 'load'>('sync');
+  const [abortController, setAbortController] = useState<AbortController | null>(null);
   const selectedTheme = themes.find(t => t.id === theme) || themes[0];
   const [showClearLocalConfirm, setShowClearLocalConfirm] = useState(false);
   const [showClearServerConfirm, setShowClearServerConfirm] = useState(false);
+  const { progress, setProgress, estimatedTimeRemaining } = useTimeEstimation();
 
   const ttsModels = useMemo(() => [
     { id: 'tts-1', name: 'TTS-1' },
@@ -84,25 +91,69 @@ export function SettingsModal() {
   }, [apiKey, baseUrl, ttsModel, ttsModels, ttsInstructions, checkFirstVist]);
 
   const handleSync = async () => {
+    const controller = new AbortController();
+    setAbortController(controller);
+    
     try {
       setIsSyncing(true);
-      await indexedDBService.syncToServer();
+      setShowProgress(true);
+      setProgress(0);
+      setOperationType('sync');
+      setStatusMessage('Preparing documents...');
+      await indexedDBService.syncToServer((progress, status) => {
+        if (controller.signal.aborted) return;
+        setProgress(progress);
+        if (status) setStatusMessage(status);
+      }, controller.signal);
     } catch (error) {
-      console.error('Sync failed:', error);
+      if (controller.signal.aborted) {
+        console.log('Sync operation cancelled');
+        setStatusMessage('Operation cancelled');
+      } else {
+        console.error('Sync failed:', error);
+        setStatusMessage('Sync failed. Please try again.');
+      }
     } finally {
       setIsSyncing(false);
+      setShowProgress(false);
+      setProgress(0);
+      setStatusMessage('');
+      setAbortController(null);
     }
   };
 
   const handleLoad = async () => {
+    const controller = new AbortController();
+    setAbortController(controller);
+    
     try {
       setIsLoading(true);
-      await indexedDBService.loadFromServer();
+      setShowProgress(true);
+      setProgress(0);
+      setOperationType('load');
+      setStatusMessage('Downloading documents from server...');
+      await indexedDBService.loadFromServer((progress, status) => {
+        if (controller.signal.aborted) return;
+        setProgress(progress);
+        if (status) setStatusMessage(status);
+      }, controller.signal);
+      if (controller.signal.aborted) return;
+      setStatusMessage('Refreshing document list...');
       await Promise.all([refreshPDFs(), refreshEPUBs()]);
     } catch (error) {
-      console.error('Load failed:', error);
+      if (controller.signal.aborted) {
+        console.log('Load operation cancelled');
+        setStatusMessage('Operation cancelled');
+      } else {
+        console.error('Load failed:', error);
+        setStatusMessage('Load failed. Please try again.');
+      }
     } finally {
       setIsLoading(false);
+      setShowProgress(false);
+      setProgress(0);
+      setStatusMessage('');
+      setAbortController(null);
     }
   };
 
@@ -430,7 +481,7 @@ export function SettingsModal() {
                                        transform transition-transform duration-200 ease-in-out hover:scale-[1.04] hover:text-accent
                                        disabled:opacity-50"
                             >
-                              {isLoading ? 'Loading...' : 'Load docs from Server'}
+                              {isLoading ? `Loading... ${Math.round(progress)}%` : 'Load docs from Server'}
                             </Button>
                             <Button
                               onClick={handleSync}
@@ -441,7 +492,7 @@ export function SettingsModal() {
                                        transform transition-transform duration-200 ease-in-out hover:scale-[1.04] hover:text-accent
                                        disabled:opacity-50"
                             >
-                              {isSyncing ? 'Saving...' : 'Save local to Server'}
+                              {isSyncing ? `Saving... ${Math.round(progress)}%` : 'Save local to Server'}
                             </Button>
                           </div>
                         </div>}
@@ -497,6 +548,27 @@ export function SettingsModal() {
         message="Are you sure you want to delete all documents from the server? This action cannot be undone."
         confirmText="Delete"
         isDangerous={true}
+      />
+      
+      <ProgressPopup 
+        isOpen={showProgress}
+        progress={progress}
+        estimatedTimeRemaining={estimatedTimeRemaining || undefined}
+        onCancel={() => {
+          if (abortController) {
+            abortController.abort();
+          }
+          setShowProgress(false);
+          setProgress(0);
+          setIsSyncing(false);
+          setIsLoading(false);
+          setStatusMessage('');
+          setOperationType('sync');
+          setAbortController(null);
+        }}
+        isProcessing={isSyncing || isLoading}
+        statusMessage={statusMessage}
+        operationType={operationType}
       />
     </>
   );
