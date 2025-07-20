@@ -1,7 +1,9 @@
 import Link from 'next/link';
-import { DragEvent } from 'react';
+import { DragEvent, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Button } from '@headlessui/react';
 import { PDFIcon, EPUBIcon, FileIcon } from '@/components/icons/Icons';
+import { LoadingSpinner } from '@/components/Spinner';
 import { DocumentListDocument } from '@/types/documents';
 
 interface DocumentListItemProps {
@@ -27,9 +29,18 @@ export function DocumentListItem({
   onDrop,
   isDropTarget = false,
 }: DocumentListItemProps) {
+  const [loading, setLoading] = useState(false);
+  const router = useRouter();
+
   // Only allow drag and drop interactions for documents not in folders
   const isDraggable = dragEnabled && !doc.folderId;
   const allowDropTarget = !doc.folderId;
+
+  const handleDocumentClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    router.push(`/${doc.type}/${encodeURIComponent(doc.id)}`);
+  };
 
   return (
     <div
@@ -43,13 +54,20 @@ export function DocumentListItem({
         w-full
         ${allowDropTarget && isDropTarget ? 'ring-2 ring-accent bg-primary/10' : ''}
         bg-background rounded-lg p-2 shadow hover:shadow-md transition-shadow
+        relative
       `}
     >
+      {loading && (
+        <div className="absolute inset-0 z-20 flex items-center justify-center bg-background/80 rounded-lg">
+          <LoadingSpinner />
+        </div>
+      )}
       <div className="flex items-center rounded-lg">
         <Link
           href={`/${doc.type}/${encodeURIComponent(doc.id)}`}
           draggable={false}
           className="document-link flex items-center align-center space-x-4 w-full truncate hover:bg-base rounded-lg p-0.5 sm:p-1 transition-colors"
+          onClick={handleDocumentClick}
         >
           <div className="flex-shrink-0">
             {doc.type === 'pdf' ? <PDFIcon /> : doc.type === 'epub' ? <EPUBIcon /> : <FileIcon />}
