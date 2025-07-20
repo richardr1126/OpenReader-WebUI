@@ -569,6 +569,7 @@ export function SettingsModal() {
         isProcessing={isSyncing || isLoading}
         statusMessage={statusMessage}
         operationType={operationType}
+        cancelText="Cancel"
       />
     </>
   );

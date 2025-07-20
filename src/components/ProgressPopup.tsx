@@ -10,9 +10,10 @@ interface ProgressPopupProps {
   isProcessing: boolean;
   statusMessage?: string;
   operationType?: 'sync' | 'load';
+  cancelText?: string;
 }
 
-export function ProgressPopup({ isOpen, progress, estimatedTimeRemaining, onCancel, isProcessing, statusMessage, operationType }: ProgressPopupProps) {
+export function ProgressPopup({ isOpen, progress, estimatedTimeRemaining, onCancel, isProcessing, statusMessage, operationType, cancelText = 'Cancel' }: ProgressPopupProps) {
   return (
     <Transition
       show={isOpen}
@@ -52,19 +53,15 @@ export function ProgressPopup({ isOpen, progress, estimatedTimeRemaining, onCanc
                 </div>
                 <button
                   type="button"
-                  className="inline-flex justify-center rounded-lg px-2.5 py-1
-                            font-medium text-foreground hover:text-accent focus:outline-none 
-                            focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2
-                            transform transition-transform duration-200 ease-in-out hover:scale-[1.02]"
+                  className="inline-flex items-center justify-center gap-1 rounded-lg px-2.5 py-1 font-medium text-foreground hover:text-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 transform transition-transform duration-200 ease-in-out hover:scale-[1.02]"
                   onClick={onCancel}
                 >
-                  {isProcessing ? (
-                    <div className="w-full h-full flex items-center justify-end">
+                  {isProcessing && (
+                    <span className="relative inline-block w-4 h-4">
                       <LoadingSpinner />
-                    </div>
-                  ) : (
-                    'Cancel and download'
+                    </span>
                   )}
+                  <span>{cancelText}</span>
                 </button>
               </div>
             </div>
