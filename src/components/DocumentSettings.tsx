@@ -133,6 +133,7 @@ export function DocumentSettings({ isOpen, setIsOpen, epub, html }: {
         estimatedTimeRemaining={estimatedTimeRemaining || undefined}
         onCancel={handleCancel}
         isProcessing={epub ? isAudioCombining : isPDFAudioCombining}
+        cancelText="Cancel and download"
       />
       
       <Transition appear show={isOpen} as={Fragment}>

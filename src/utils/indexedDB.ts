@@ -635,11 +635,13 @@ class IndexedDBService {
     });
   }
 
-  async syncToServer(): Promise<{ lastSync: number }> {
+  async syncToServer(onProgress?: (progress: number, status?: string) => void, signal?: AbortSignal): Promise<{ lastSync: number }> {
     const pdfDocs = await this.getAllDocuments();
     const epubDocs = await this.getAllEPUBDocuments();
 
     const documents = [];
+    const totalDocs = pdfDocs.length + epubDocs.length;
+    let processedDocs = 0;
 
     // Process PDF documents - convert ArrayBuffer to array for JSON serialization
     for (const doc of pdfDocs) {
@@ -648,6 +650,10 @@ class IndexedDBService {
         type: 'pdf',
         data: Array.from(new Uint8Array(doc.data))
       });
+      processedDocs++;
+      if (onProgress) {
+        onProgress((processedDocs / totalDocs) * 50, `Processing ${processedDocs}/${totalDocs} documents...`);
+      }
     }
 
     // Process EPUB documents
@@ -657,31 +663,57 @@ class IndexedDBService {
         type: 'epub',
         data: Array.from(new Uint8Array(doc.data))
       });
+      processedDocs++;
+      if (onProgress) {
+        onProgress((processedDocs / totalDocs) * 50, `Processing ${processedDocs}/${totalDocs} documents...`);
+      }
+    }
+
+    if (onProgress) {
+      onProgress(50, 'Uploading to server...');
     }
 
     const response = await fetch('/api/documents', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ documents })
+      body: JSON.stringify({ documents }),
+      signal
     });
 
     if (!response.ok) {
       throw new Error('Failed to sync documents to server');
     }
 
+    if (onProgress) {
+      onProgress(100, 'Upload complete!');
+    }
+
     return { lastSync: Date.now() };
   }
 
-  async loadFromServer(): Promise<{ lastSync: number }> {
-    const response = await fetch('/api/documents');
+  async loadFromServer(onProgress?: (progress: number, status?: string) => void, signal?: AbortSignal): Promise<{ lastSync: number }> {
+    if (onProgress) {
+      onProgress(10, 'Starting download...');
+    }
+
+    const response = await fetch('/api/documents', { signal });
     if (!response.ok) {
       throw new Error('Failed to fetch documents from server');
     }
 
+    if (onProgress) {
+      onProgress(30, 'Download complete');
+    }
+
     const { documents } = await response.json();
 
+    if (onProgress) {
+      onProgress(40, 'Parsing documents...');
+    }
+
     // Process each document
-    for (const doc of documents) {
+    for (let i = 0; i < documents.length; i++) {
+      const doc = documents[i];
       // Convert the numeric array back to ArrayBuffer
       const uint8Array = new Uint8Array(doc.data);
       const documentData = {
@@ -700,6 +732,15 @@ class IndexedDBService {
       } else {
         console.warn(`Unknown document type: ${doc.type}`);
       }
+
+      if (onProgress) {
+        // Progress from 40% to 90% for document processing
+        onProgress(40 + ((i + 1) / documents.length) * 50, `Processing document ${i + 1}/${documents.length}...`);
+      }
+    }
+
+    if (onProgress) {
+      onProgress(100, 'Load complete!');
     }
 
     return { lastSync: Date.now() };
