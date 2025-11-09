@@ -63,6 +63,7 @@ interface TTSContextType {
 
   // Voice settings
   availableVoices: string[];
+  voiceApiFailed: boolean;
 
   // Control functions
   togglePlay: () => void;
@@ -110,7 +111,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
   // Remove OpenAI client reference as it's no longer needed
   const audioContext = useAudioContext();
   const audioCache = useAudioCache(25);
-  const { availableVoices, fetchVoices } = useVoiceManagement(openApiKey, openApiBaseUrl);
+  const { availableVoices, fetchVoices, voiceApiFailed } = useVoiceManagement(openApiKey, openApiBaseUrl);
 
   // Add ref for location change handler
   const locationChangeHandlerRef = useRef<((location: string | number) => void) | null>(null);
@@ -868,6 +869,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     currDocPageNumber,
     currDocPages,
     availableVoices,
+    voiceApiFailed,
     togglePlay,
     skipForward,
     skipBackward,
@@ -892,6 +894,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     currDocPageNumber,
     currDocPages,
     availableVoices,
+    voiceApiFailed,
     togglePlay,
     skipForward,
     skipBackward,

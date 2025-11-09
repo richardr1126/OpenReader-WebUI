@@ -27,6 +27,7 @@ export default function TTSPlayer({ currentPage, numPages }: {
     setAudioPlayerSpeedAndRestart,
     setVoiceAndRestart,
     availableVoices,
+    voiceApiFailed,
     skipToLocation,
   } = useTTS();
 
@@ -77,7 +78,7 @@ export default function TTSPlayer({ currentPage, numPages }: {
         </Button>
 
         {/* Voice control */}
-        <VoicesControl availableVoices={availableVoices} setVoiceAndRestart={setVoiceAndRestart} />
+        <VoicesControl availableVoices={availableVoices} setVoiceAndRestart={setVoiceAndRestart} voiceApiFailed={voiceApiFailed} />
       </div>
     </div>
   );

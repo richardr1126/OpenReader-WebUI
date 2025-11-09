@@ -21,10 +21,10 @@ export async function GET(req: NextRequest) {
     }
 
     const data = await response.json();
-    return NextResponse.json({ voices: data.voices || DEFAULT_VOICES });
+    return NextResponse.json({ voices: data.voices || DEFAULT_VOICES, failed: false });
   } catch (error) {
     console.error('Error fetching voices:', error);
-    // Return default voices on error
-    return NextResponse.json({ voices: DEFAULT_VOICES });
+    // Return default voices on error with failed flag
+    return NextResponse.json({ voices: DEFAULT_VOICES, failed: true });
   }
 }
