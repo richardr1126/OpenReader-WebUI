@@ -42,7 +42,7 @@ export const VoicesControl = ({ availableVoices, setVoiceAndRestart, voiceApiFai
             }
           }}
           placeholder="Enter voice"
-          className="bg-transparent text-foreground text-xs sm:text-sm focus:outline-none border border-accent rounded px-1.5 sm:px-2 py-0.5 sm:py-1 w-24 sm:w-28"
+          className="bg-transparent text-foreground text-xs sm:text-sm focus:outline-none border border-offbase focus:border-accent rounded px-1.5 sm:px-2 py-0.5 sm:py-1 w-24 sm:w-28"
           title="Voice API unavailable - enter custom voice"
         />
       </div>
