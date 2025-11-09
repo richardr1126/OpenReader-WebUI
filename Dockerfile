@@ -4,23 +4,26 @@ FROM node:current-alpine
 # Add ffmpeg and libreoffice using Alpine package manager
 RUN apk add --no-cache ffmpeg libreoffice-writer
 
+# Install pnpm globally
+RUN npm install -g pnpm
+
 # Create app directory
 WORKDIR /app
 
 # Copy package files
-COPY package*.json ./
+COPY package.json pnpm-lock.yaml ./
 
 # Install dependencies
-RUN npm install
+RUN pnpm install --frozen-lockfile
 
 # Copy project files
 COPY . .
 
 # Build the Next.js application
-RUN npm run build
+RUN pnpm run build
 
 # Expose the port the app runs on
 EXPOSE 3003
 
 # Start the application
-CMD ["npm", "start"]
+CMD ["pnpm", "start"]

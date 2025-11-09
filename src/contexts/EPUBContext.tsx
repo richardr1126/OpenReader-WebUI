@@ -58,6 +58,7 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
     baseUrl,
     voiceSpeed,
     voice,
+    ttsProvider,
   } = useConfig();
   // Current document state
   const [currDocData, setCurrDocData] = useState<ArrayBuffer>();
@@ -254,6 +255,7 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
                 headers: {
                   'x-openai-key': apiKey,
                   'x-openai-base-url': baseUrl,
+                  'x-tts-provider': ttsProvider,
                 },
                 body: JSON.stringify({
                   text: trimmedText,

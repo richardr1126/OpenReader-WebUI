@@ -101,6 +101,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     voiceSpeed,
     audioPlayerSpeed,
     voice: configVoice,
+    ttsProvider: configTTSProvider,
     ttsModel: configTTSModel,
     ttsInstructions: configTTSInstructions,
     updateConfigKey,
@@ -110,7 +111,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
   // Remove OpenAI client reference as it's no longer needed
   const audioContext = useAudioContext();
   const audioCache = useAudioCache(25);
-  const { availableVoices, fetchVoices } = useVoiceManagement(openApiKey, openApiBaseUrl);
+  const { availableVoices, fetchVoices } = useVoiceManagement(openApiKey, openApiBaseUrl, configTTSProvider, configTTSModel);
 
   // Add ref for location change handler
   const locationChangeHandlerRef = useRef<((location: string | number) => void) | null>(null);
@@ -406,6 +407,20 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
   }, [configIsLoading, openApiKey, openApiBaseUrl, updateVoiceAndSpeed, fetchVoices, configTTSModel, configTTSInstructions]);
 
   /**
+   * Validates that the current voice is in the available voices list
+   * If voice is empty or invalid, use the first available voice (only in local state, don't save)
+   */
+  useEffect(() => {
+    if (availableVoices.length > 0) {
+      if (!voice || !availableVoices.includes(voice)) {
+        console.log(`Voice "${voice || '(empty)'}" not found in available voices. Using "${availableVoices[0]}"`);
+        setVoice(availableVoices[0]);
+        // Don't save to config - just use it temporarily until user explicitly selects one
+      }
+    }
+  }, [availableVoices, voice]);
+
+  /**
    * Generates and plays audio for the current sentence
    * 
    * @param {string} sentence - The sentence to generate audio for
@@ -434,6 +449,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
               'Content-Type': 'application/json',
               'x-openai-key': openApiKey || '',
               'x-openai-base-url': openApiBaseUrl || '',
+              'x-tts-provider': configTTSProvider,
             },
             body: JSON.stringify({
               text: sentence,

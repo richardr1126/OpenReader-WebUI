@@ -15,8 +15,10 @@ export const VoicesControl = ({ availableVoices, setVoiceAndRestart }: {
 }) => {
   const { voice: configVoice } = useConfig();
 
-  // Use configVoice as the source of truth
-  const currentVoice = configVoice;
+  // If the saved voice is not in the available list, use the first available voice
+  const currentVoice = (configVoice && availableVoices.includes(configVoice)) 
+    ? configVoice 
+    : availableVoices[0] || '';
 
   return (
     <div className="relative">

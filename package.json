@@ -6,7 +6,8 @@
     "dev": "next dev --turbopack -p 3003",
     "build": "next build",
     "start": "next start -p 3003",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test": "playwright test"
   },
   "dependencies": {
     "@headlessui/react": "^2.2.0",
@@ -16,6 +17,7 @@
     "@vercel/analytics": "^1.5.0",
     "compromise": "^14.14.4",
     "core-js": "^3.41.0",
+    "epubjs": "^0.3.93",
     "howler": "^2.2.4",
     "lru-cache": "^11.0.2",
     "next": "^15.2.1",

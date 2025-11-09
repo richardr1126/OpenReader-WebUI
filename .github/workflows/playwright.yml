@@ -24,8 +24,8 @@ jobs:
     - name: Run Playwright tests
       env:
         NEXT_PUBLIC_NODE_ENV: test
-        API_BASE: https://tts.richardr.dev/v1
-        API_KEY: not-needed
+        API_BASE: https://api.deepinfra.com/v1/openai
+        API_KEY: ${{ secrets.DEEPINFRA_API_KEY }}
       run: npx playwright test --reporter=list,github,html
     - uses: actions/upload-artifact@v4
       if: ${{ !cancelled() }}

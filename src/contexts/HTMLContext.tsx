@@ -33,7 +33,7 @@ const HTMLContext = createContext<HTMLContextType | undefined>(undefined);
  */
 export function HTMLProvider({ children }: { children: ReactNode }) {
   const { setText: setTTSText, stop } = useTTS();
-  const { apiKey, baseUrl, voiceSpeed, voice } = useConfig();
+  const { apiKey, baseUrl, voiceSpeed, voice, ttsProvider } = useConfig();
 
   // Current document state
   const [currDocData, setCurrDocData] = useState<string>();
@@ -97,6 +97,7 @@ export function HTMLProvider({ children }: { children: ReactNode }) {
               headers: {
                 'x-openai-key': apiKey,
                 'x-openai-base-url': baseUrl,
+                'x-tts-provider': ttsProvider,
               },
               body: JSON.stringify({
                 text: currDocText,

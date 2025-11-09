@@ -13,6 +13,7 @@ export async function POST(req: NextRequest) {
     // Get API credentials from headers or fall back to environment variables
     const openApiKey = req.headers.get('x-openai-key') || process.env.API_KEY || 'none';
     const openApiBaseUrl = req.headers.get('x-openai-base-url') || process.env.API_BASE;
+    const provider = req.headers.get('x-tts-provider') || 'openai';
     const { text, voice, speed, format, model, instructions } = await req.json();
     console.log('Received TTS request:', text, voice, speed, format, model);
 
@@ -24,6 +25,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Missing required parameters' }, { status: 400 });
     }
 
+    // Apply Deepinfra defaults if provider is deepinfra
+    const finalModel = provider === 'deepinfra' && !model ? 'hexgrad/Kokoro-82M' : model;
+    const finalVoice = provider === 'deepinfra' && !voice ? 'af_bella' : voice;
+
     // Initialize OpenAI client with abort signal
     const openai = new OpenAI({
       apiKey: openApiKey,
@@ -32,15 +37,15 @@ export async function POST(req: NextRequest) {
 
     // Request audio from OpenAI and pass along the abort signal
     const createParams: ExtendedSpeechParams = {
-      model: model || 'tts-1',
-      voice: voice as "alloy",
+      model: finalModel || 'tts-1',
+      voice: finalVoice as "alloy",
       input: text,
       speed: speed,
       response_format: format === 'aac' ? 'aac' : 'mp3',
     };
 
     // Only add instructions if model is gpt-4o-mini-tts and instructions are provided
-    if (model === 'gpt-4o-mini-tts' && instructions) {
+    if (finalModel === 'gpt-4o-mini-tts' && instructions) {
       createParams.instructions = instructions;
     }
 

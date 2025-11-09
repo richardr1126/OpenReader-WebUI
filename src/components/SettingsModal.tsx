@@ -41,12 +41,13 @@ export function SettingsModal() {
   const [isOpen, setIsOpen] = useState(false);
 
   const { theme, setTheme } = useTheme();
-  const { apiKey, baseUrl, ttsModel, ttsInstructions, updateConfig, updateConfigKey } = useConfig();
+  const { apiKey, baseUrl, ttsProvider, ttsModel, ttsInstructions, updateConfig, updateConfigKey } = useConfig();
   const { refreshPDFs, refreshEPUBs, clearPDFs, clearEPUBs } = useDocuments();
   const [localApiKey, setLocalApiKey] = useState(apiKey);
   const [localBaseUrl, setLocalBaseUrl] = useState(baseUrl);
-  const [localTTSModel, setLocalTTSModel] = useState(ttsModel);
-  const [customModel, setCustomModel] = useState('');
+  const [localTTSProvider, setLocalTTSProvider] = useState(ttsProvider);
+  const [modelValue, setModelValue] = useState(ttsModel);
+  const [customModelInput, setCustomModelInput] = useState('');
   const [localTTSInstructions, setLocalTTSInstructions] = useState(ttsInstructions);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -59,13 +60,58 @@ export function SettingsModal() {
   const [showClearServerConfirm, setShowClearServerConfirm] = useState(false);
   const { progress, setProgress, estimatedTimeRemaining } = useTimeEstimation();
 
-  const ttsModels = useMemo(() => [
-    { id: 'tts-1', name: 'TTS-1' },
-    { id: 'tts-1-hd', name: '($$) TTS-1-HD' },
-    { id: 'gpt-4o-mini-tts', name: '($$$) GPT-4o Mini TTS' },
-    { id: 'kokoro', name: 'Kokoro' },
-    { id: 'custom', name: 'Custom Model' }
+  const ttsProviders = useMemo(() => [
+    { id: 'custom-openai', name: 'Custom OpenAI-Like' },
+    { id: 'deepinfra', name: 'Deepinfra' },
+    { id: 'openai', name: 'OpenAI' }
   ], []);
+
+  const ttsModels = useMemo(() => {
+    switch (localTTSProvider) {
+      case 'openai':
+        return [
+          { id: 'tts-1', name: 'TTS-1' },
+          { id: 'tts-1-hd', name: 'TTS-1 HD' },
+          { id: 'gpt-4o-mini-tts', name: 'GPT-4o Mini TTS' }
+        ];
+      case 'custom-openai':
+        return [
+          { id: 'kokoro', name: 'Kokoro' },
+          { id: 'orpheus', name: 'Orpheus' },
+          { id: 'custom', name: 'Other' }
+        ];
+      case 'deepinfra':
+        return [
+          { id: 'hexgrad/Kokoro-82M', name: 'hexgrad/Kokoro-82M' },
+          { id: 'canopylabs/orpheus-3b-0.1-ft', name: 'canopylabs/orpheus-3b-0.1-ft' },
+          { id: 'sesame/csm-1b', name: 'sesame/csm-1b' },
+          { id: 'ResembleAI/chatterbox', name: 'ResembleAI/chatterbox' },
+          { id: 'Zyphra/Zonos-v0.1-hybrid', name: 'Zyphra/Zonos-v0.1-hybrid' },
+          { id: 'Zyphra/Zonos-v0.1-transformer', name: 'Zyphra/Zonos-v0.1-transformer' },
+          { id: 'custom', name: 'Other' }
+        ];
+      default:
+        return [
+          { id: 'tts-1', name: 'TTS-1' }
+        ];
+    }
+  }, [localTTSProvider]);
+
+  const supportsCustom = useMemo(() => localTTSProvider !== 'openai', [localTTSProvider]);
+
+  const selectedModelId = useMemo(
+    () => {
+      const isPreset = ttsModels.some(m => m.id === modelValue);
+      if (isPreset) return modelValue;
+      return supportsCustom ? 'custom' : (ttsModels[0]?.id ?? '');
+    },
+    [ttsModels, modelValue, supportsCustom]
+  );
+
+  const canSubmit = useMemo(
+    () => selectedModelId !== 'custom' || (supportsCustom && customModelInput.trim().length > 0),
+    [selectedModelId, supportsCustom, customModelInput]
+  );
 
   // set firstVisit on initial load
   const checkFirstVist = useCallback(async () => {
@@ -81,14 +127,19 @@ export function SettingsModal() {
     checkFirstVist();
     setLocalApiKey(apiKey);
     setLocalBaseUrl(baseUrl);
-    setLocalTTSModel(ttsModel);
+    setLocalTTSProvider(ttsProvider);
+    setModelValue(ttsModel);
     setLocalTTSInstructions(ttsInstructions);
-    // Set custom model if current model is not in predefined list
-    if (!ttsModels.some(m => m.id === ttsModel) && ttsModel !== '') {
-      setCustomModel(ttsModel);
-      setLocalTTSModel('custom');
+  }, [apiKey, baseUrl, ttsProvider, ttsModel, ttsInstructions, checkFirstVist]);
+
+  // Detect if current model is custom (not in presets) and mirror it in the input field
+  useEffect(() => {
+    if (!ttsModels.some(m => m.id === modelValue) && modelValue !== '') {
+      setCustomModelInput(modelValue);
+    } else {
+      setCustomModelInput('');
     }
-  }, [apiKey, baseUrl, ttsModel, ttsModels, ttsInstructions, checkFirstVist]);
+  }, [modelValue, ttsModels]);
 
   const handleSync = async () => {
     const controller = new AbortController();
@@ -177,13 +228,11 @@ export function SettingsModal() {
     setShowClearServerConfirm(false);
   };
 
-  const handleInputChange = (type: 'apiKey' | 'baseUrl' | 'ttsModel', value: string) => {
+  const handleInputChange = (type: 'apiKey' | 'baseUrl', value: string) => {
     if (type === 'apiKey') {
       setLocalApiKey(value === '' ? '' : value);
     } else if (type === 'baseUrl') {
       setLocalBaseUrl(value === '' ? '' : value);
-    } else if (type === 'ttsModel') {
-      setLocalTTSModel(value === '' ? 'tts-1' : value);
     }
   };
 
@@ -191,17 +240,19 @@ export function SettingsModal() {
     setIsOpen(false);
     setLocalApiKey(apiKey);
     setLocalBaseUrl(baseUrl);
-    setLocalTTSModel(ttsModel);
+    setLocalTTSProvider(ttsProvider);
+    setModelValue(ttsModel);
     setLocalTTSInstructions(ttsInstructions);
     if (!ttsModels.some(m => m.id === ttsModel) && ttsModel !== '') {
-      setCustomModel(ttsModel);
-      setLocalTTSModel('custom');
+      setCustomModelInput(ttsModel);
+    } else {
+      setCustomModelInput('');
     }
-  }, [apiKey, baseUrl, ttsModel, ttsInstructions, ttsModels]);
+  }, [apiKey, baseUrl, ttsProvider, ttsModel, ttsInstructions, ttsModels]);
 
   const tabs = [
-    { name: 'Appearance', icon: '✨' },
     { name: 'API', icon: '🔑' },
+    { name: 'Appearance', icon: '✨' },
     { name: 'Documents', icon: '📄' }
   ];
 
@@ -271,6 +322,233 @@ export function SettingsModal() {
                       ))}
                     </TabList>
                     <TabPanels className="mt-2">
+                      <TabPanel className="space-y-4">
+                        <div className="space-y-2">
+                          <label className="block text-sm font-medium text-foreground">TTS Provider</label>
+                          <Listbox
+                            value={ttsProviders.find(p => p.id === localTTSProvider) || ttsProviders[0]}
+                            onChange={(provider) => {
+                              setLocalTTSProvider(provider.id);
+                              // Set default model and base_url for each provider
+                              if (provider.id === 'openai') {
+                                setModelValue('tts-1');
+                                setLocalBaseUrl('https://api.openai.com/v1');
+                              } else if (provider.id === 'custom-openai') {
+                                setModelValue('kokoro');
+                                // Clear baseUrl for custom provider
+                                setLocalBaseUrl('');
+                              } else if (provider.id === 'deepinfra') {
+                                setModelValue('hexgrad/Kokoro-82M');
+                                setLocalBaseUrl('https://api.deepinfra.com/v1/openai');
+                              }
+                              setCustomModelInput('');
+                            }}
+                          >
+                            <ListboxButton className="relative w-full cursor-pointer rounded-lg bg-background py-2 pl-3 pr-10 text-left text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-accent transform transition-transform duration-200 ease-in-out hover:scale-[1.01] hover:text-accent">
+                              <span className="block truncate">
+                                {ttsProviders.find(p => p.id === localTTSProvider)?.name || 'Select Provider'}
+                              </span>
+                              <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2">
+                                <ChevronUpDownIcon className="h-5 w-5 text-muted" />
+                              </span>
+                            </ListboxButton>
+                            <Transition
+                              as={Fragment}
+                              leave="transition ease-in duration-100"
+                              leaveFrom="opacity-100"
+                              leaveTo="opacity-0"
+                            >
+                              <ListboxOptions className="absolute mt-1 w-full overflow-auto rounded-md bg-background py-1 shadow-lg ring-1 ring-black/5 focus:outline-none z-50">
+                                {ttsProviders.map((provider) => (
+                                  <ListboxOption
+                                    key={provider.id}
+                                    className={({ active }) =>
+                                      `relative cursor-pointer select-none py-2 pl-10 pr-4 ${
+                                        active ? 'bg-accent/10 text-accent' : 'text-foreground'
+                                      }`
+                                    }
+                                    value={provider}
+                                  >
+                                    {({ selected }) => (
+                                      <>
+                                        <span className={`block truncate ${selected ? 'font-medium' : 'font-normal'}`}>
+                                          {provider.name}
+                                        </span>
+                                        {selected ? (
+                                          <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-accent">
+                                            <CheckIcon className="h-5 w-5" />
+                                          </span>
+                                        ) : null}
+                                      </>
+                                    )}
+                                  </ListboxOption>
+                                ))}
+                              </ListboxOptions>
+                            </Transition>
+                          </Listbox>
+                        </div>
+
+                        <div className="space-y-2">
+                          <label className="block text-sm font-medium text-foreground">
+                            API Key
+                            {localApiKey && <span className="ml-2 text-xs text-accent">(Overriding env)</span>}
+                          </label>
+                          <div className="flex gap-2">
+                            <Input
+                              type="password"
+                              value={localApiKey}
+                              onChange={(e) => handleInputChange('apiKey', e.target.value)}
+                              placeholder="Using environment variable"
+                              className="w-full rounded-lg bg-background py-2 px-3 text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <label className="block text-sm font-medium text-foreground">TTS Model</label>
+                          <div className="flex flex-col gap-2">
+                            <Listbox
+                              value={ttsModels.find(m => m.id === selectedModelId) || ttsModels[0]}
+                              onChange={(model) => {
+                                if (model.id === 'custom') {
+                                  // Switch to custom: keep the current custom input (or empty)
+                                  setModelValue(customModelInput);
+                                } else {
+                                  setModelValue(model.id);
+                                  setCustomModelInput('');
+                                }
+                              }}
+                            >
+                              <ListboxButton className="relative w-full cursor-pointer rounded-lg bg-background py-2 pl-3 pr-10 text-left text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-accent transform transition-transform duration-200 ease-in-out hover:scale-[1.01] hover:text-accent">
+                                <span className="block truncate">
+                                  {ttsModels.find(m => m.id === selectedModelId)?.name || 'Select Model'}
+                                </span>
+                                <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2">
+                                  <ChevronUpDownIcon className="h-5 w-5 text-muted" />
+                                </span>
+                              </ListboxButton>
+                              <Transition
+                                as={Fragment}
+                                leave="transition ease-in duration-100"
+                                leaveFrom="opacity-100"
+                                leaveTo="opacity-0"
+                              >
+                                <ListboxOptions className="absolute mt-1 w-full overflow-auto rounded-md bg-background py-1 shadow-lg ring-1 ring-black/5 focus:outline-none z-50">
+                                  {ttsModels.map((model) => (
+                                    <ListboxOption
+                                      key={model.id}
+                                      className={({ active }) =>
+                                        `relative cursor-pointer select-none py-2 pl-10 pr-4 ${
+                                          active ? 'bg-accent/10 text-accent' : 'text-foreground'
+                                        }`
+                                      }
+                                      value={model}
+                                    >
+                                      {({ selected }) => (
+                                        <>
+                                          <span className={`block truncate ${selected ? 'font-medium' : 'font-normal'}`}>
+                                            {model.name}
+                                          </span>
+                                          {selected ? (
+                                            <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-accent">
+                                              <CheckIcon className="h-5 w-5" />
+                                            </span>
+                                          ) : null}
+                                        </>
+                                      )}
+                                    </ListboxOption>
+                                  ))}
+                                </ListboxOptions>
+                              </Transition>
+                            </Listbox>
+
+                            {supportsCustom && selectedModelId === 'custom' && (
+                              <Input
+                                type="text"
+                                value={customModelInput}
+                                onChange={(e) => {
+                                  setCustomModelInput(e.target.value);
+                                  setModelValue(e.target.value);
+                                }}
+                                placeholder="Enter custom model name"
+                                className="w-full rounded-lg bg-background py-2 px-3 text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                              />
+                            )}
+                          </div>
+                        </div>
+
+                        {modelValue === 'gpt-4o-mini-tts' && (
+                          <div className="space-y-2">
+                            <label className="block text-sm font-medium text-foreground">TTS Instructions</label>
+                            <textarea
+                              value={localTTSInstructions}
+                              onChange={(e) => setLocalTTSInstructions(e.target.value)}
+                              placeholder="Enter instructions for the TTS model"
+                              className="w-full h-24 rounded-lg bg-background py-2 px-3 text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                            />
+                          </div>
+                        )}
+
+                        {(localTTSProvider === 'custom-openai' || !localBaseUrl || localBaseUrl === '') && (
+                          <div className="space-y-2">
+                            <label className="block text-sm font-medium text-foreground">
+                              API Base URL
+                              {localBaseUrl && <span className="ml-2 text-xs text-accent">(Overriding env)</span>}
+                            </label>
+                            <div className="flex gap-2">
+                              <Input
+                                type="text"
+                                value={localBaseUrl}
+                                onChange={(e) => handleInputChange('baseUrl', e.target.value)}
+                                placeholder="Using environment variable"
+                                className="w-full rounded-lg bg-background py-2 px-3 text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                              />
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="mt-6 flex justify-end gap-2">
+                          <Button
+                            type="button"
+                            className="inline-flex justify-center rounded-lg bg-background px-3 py-1.5 text-sm 
+                               font-medium text-foreground hover:bg-background/90 focus:outline-none 
+                               focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2
+                               transform transition-transform duration-200 ease-in-out hover:scale-[1.04] hover:text-accent"
+                            onClick={async () => {
+                              setLocalApiKey('');
+                              setLocalBaseUrl('');
+                              setLocalTTSProvider('custom-openai');
+                              setModelValue('kokoro');
+                              setCustomModelInput('');
+                              setLocalTTSInstructions('');
+                            }}
+                          >
+                            Reset
+                          </Button>
+                          <Button
+                            type="button"
+                            className="inline-flex justify-center rounded-lg bg-accent px-3 py-1.5 text-sm 
+                               font-medium text-white hover:bg-accent/90 focus:outline-none 
+                               focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2
+                               transform transition-transform duration-200 ease-in-out hover:scale-[1.04] hover:text-background"
+                            disabled={!canSubmit}
+                            onClick={async () => {
+                              await updateConfig({
+                                apiKey: localApiKey || '',
+                                baseUrl: localBaseUrl || '',
+                              });
+                              await updateConfigKey('ttsProvider', localTTSProvider);
+                              const finalModel = selectedModelId === 'custom' ? customModelInput.trim() : modelValue;
+                              await updateConfigKey('ttsModel', finalModel);
+                              await updateConfigKey('ttsInstructions', localTTSInstructions);
+                              setIsOpen(false);
+                            }}
+                          >
+                            Save
+                          </Button>
+                        </div>
+                      </TabPanel>
+
                       <TabPanel className="space-y-4 pb-3">
                         <div className="space-y-2">
                           <label className="block text-sm font-medium text-foreground">Theme</label>
@@ -314,157 +592,6 @@ export function SettingsModal() {
                               </ListboxOptions>
                             </Transition>
                           </Listbox>
-                        </div>
-                      </TabPanel>
-
-                      <TabPanel className="space-y-4">
-                        <div className="space-y-2">
-                          <label className="block text-sm font-medium text-foreground">
-                            OpenAI API Key
-                            {localApiKey && <span className="ml-2 text-xs text-accent">(Overriding env)</span>}
-                          </label>
-                          <div className="flex gap-2">
-                            <Input
-                              type="password"
-                              value={localApiKey}
-                              onChange={(e) => handleInputChange('apiKey', e.target.value)}
-                              placeholder="Using environment variable"
-                              className="w-full rounded-lg bg-background py-2 px-3 text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-accent"
-                            />
-                          </div>
-                        </div>
-
-                        <div className="space-y-2">
-                          <label className="block text-sm font-medium text-foreground">
-                            OpenAI API Base URL
-                            {localBaseUrl && <span className="ml-2 text-xs text-accent">(Overriding env)</span>}
-                          </label>
-                          <div className="flex gap-2">
-                            <Input
-                              type="text"
-                              value={localBaseUrl}
-                              onChange={(e) => handleInputChange('baseUrl', e.target.value)}
-                              placeholder="Using environment variable"
-                              className="w-full rounded-lg bg-background py-2 px-3 text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-accent"
-                            />
-                          </div>
-                        </div>
-
-                        <div className="space-y-2">
-                          <label className="block text-sm font-medium text-foreground">TTS Model</label>
-                          <div className="flex flex-col gap-2">
-                            <Listbox 
-                              value={ttsModels.find(m => m.id === localTTSModel) || ttsModels[0]} 
-                              onChange={(model) => {
-                                setLocalTTSModel(model.id);
-                                if (model.id !== 'custom') {
-                                  setCustomModel('');
-                                }
-                              }}
-                            >
-                              <ListboxButton className="relative w-full cursor-pointer rounded-lg bg-background py-2 pl-3 pr-10 text-left text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-accent transform transition-transform duration-200 ease-in-out hover:scale-[1.01] hover:text-accent">
-                                <span className="block truncate">
-                                  {ttsModels.find(m => m.id === localTTSModel)?.name || 'Select Model'}
-                                </span>
-                                <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2">
-                                  <ChevronUpDownIcon className="h-5 w-5 text-muted" />
-                                </span>
-                              </ListboxButton>
-                              <Transition
-                                as={Fragment}
-                                leave="transition ease-in duration-100"
-                                leaveFrom="opacity-100"
-                                leaveTo="opacity-0"
-                              >
-                                <ListboxOptions className="absolute mt-1 w-full overflow-auto rounded-md bg-background py-1 shadow-lg ring-1 ring-black/5 focus:outline-none z-50">
-                                  {ttsModels.map((model) => (
-                                    <ListboxOption
-                                      key={model.id}
-                                      className={({ active }) =>
-                                        `relative cursor-pointer select-none py-2 pl-10 pr-4 ${
-                                          active ? 'bg-accent/10 text-accent' : 'text-foreground'
-                                        }`
-                                      }
-                                      value={model}
-                                    >
-                                      {({ selected }) => (
-                                        <>
-                                          <span className={`block truncate ${selected ? 'font-medium' : 'font-normal'}`}>
-                                            {model.name}
-                                          </span>
-                                          {selected ? (
-                                            <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-accent">
-                                              <CheckIcon className="h-5 w-5" />
-                                            </span>
-                                          ) : null}
-                                        </>
-                                      )}
-                                    </ListboxOption>
-                                  ))}
-                                </ListboxOptions>
-                              </Transition>
-                            </Listbox>
-
-                            {localTTSModel === 'custom' && (
-                              <Input
-                                type="text"
-                                value={customModel}
-                                onChange={(e) => setCustomModel(e.target.value)}
-                                placeholder="Enter custom model name"
-                                className="w-full rounded-lg bg-background py-2 px-3 text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-accent"
-                              />
-                            )}
-                          </div>
-                        </div>
-
-                        {localTTSModel === 'gpt-4o-mini-tts' && (
-                          <div className="space-y-2">
-                            <label className="block text-sm font-medium text-foreground">TTS Instructions</label>
-                            <textarea
-                              value={localTTSInstructions}
-                              onChange={(e) => setLocalTTSInstructions(e.target.value)}
-                              placeholder="Enter instructions for the TTS model"
-                              className="w-full h-24 rounded-lg bg-background py-2 px-3 text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-accent"
-                            />
-                          </div>
-                        )}
-
-                        <div className="mt-6 flex justify-end gap-2">
-                          <Button
-                            type="button"
-                            className="inline-flex justify-center rounded-lg bg-background px-3 py-1.5 text-sm 
-                               font-medium text-foreground hover:bg-background/90 focus:outline-none 
-                               focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2
-                               transform transition-transform duration-200 ease-in-out hover:scale-[1.04] hover:text-accent"
-                            onClick={async () => {
-                              setLocalApiKey('');
-                              setLocalBaseUrl('');
-                              setLocalTTSModel('tts-1');
-                              setCustomModel('');
-                              setLocalTTSInstructions('');
-                            }}
-                          >
-                            Reset
-                          </Button>
-                          <Button
-                            type="button"
-                            className="inline-flex justify-center rounded-lg bg-accent px-3 py-1.5 text-sm 
-                               font-medium text-white hover:bg-accent/90 focus:outline-none 
-                               focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2
-                               transform transition-transform duration-200 ease-in-out hover:scale-[1.04] hover:text-background"
-                            onClick={async () => {
-                              await updateConfig({
-                                apiKey: localApiKey || '',
-                                baseUrl: localBaseUrl || '',
-                              });
-                              const finalModel = localTTSModel === 'custom' ? customModel : localTTSModel;
-                              await updateConfigKey('ttsModel', finalModel);
-                              await updateConfigKey('ttsInstructions', localTTSInstructions);
-                              setIsOpen(false);
-                            }}
-                          >
-                            Done
-                          </Button>
                         </div>
                       </TabPanel>
 

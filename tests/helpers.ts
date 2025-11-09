@@ -74,7 +74,10 @@ export async function setupTest(page: Page) {
   await page.goto('/');
   await page.waitForLoadState('networkidle');
 
+  await page.getByRole('button', { name: 'Custom OpenAI-Like' }).click();
+  await page.getByText('Deepinfra').click();
+
   // Click the "done" button to dismiss the welcome message
   await page.getByRole('tab', { name: '🔑 API' }).click();
-  await page.getByRole('button', { name: 'Done' }).click();
+  await page.getByRole('button', { name: 'Save' }).click();
 }
