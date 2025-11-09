@@ -329,7 +329,7 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
       console.error('Error creating audiobook:', error);
       throw error;
     }
-  }, [extractBookText, apiKey, baseUrl, voice, voiceSpeed]);
+  }, [extractBookText, apiKey, baseUrl, voice, voiceSpeed, ttsProvider]);
 
   const setRendition = useCallback((rendition: Rendition) => {
     bookRef.current = rendition.book;

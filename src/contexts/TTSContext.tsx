@@ -500,7 +500,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
       });
       throw error;
     }
-  }, [voice, speed, ttsModel, ttsInstructions, audioCache, openApiKey, openApiBaseUrl]);
+  }, [voice, speed, ttsModel, ttsInstructions, audioCache, openApiKey, openApiBaseUrl, configTTSProvider]);
 
   /**
    * Processes and plays the current sentence

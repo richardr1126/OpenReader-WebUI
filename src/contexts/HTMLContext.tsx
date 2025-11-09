@@ -147,7 +147,7 @@ export function HTMLProvider({ children }: { children: ReactNode }) {
       console.error('Error creating audiobook:', error);
       throw error;
     }
-  }, [currDocText, currDocName, apiKey, baseUrl, voice, voiceSpeed]);
+  }, [currDocText, currDocName, apiKey, baseUrl, voice, voiceSpeed, ttsProvider]);
 
   const contextValue = useMemo(() => ({
     currDocData,

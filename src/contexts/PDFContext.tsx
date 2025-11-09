@@ -309,7 +309,7 @@ export function PDFProvider({ children }: { children: ReactNode }) {
       console.error('Error creating audiobook:', error);
       throw error;
     }
-  }, [pdfDocument, headerMargin, footerMargin, leftMargin, rightMargin, apiKey, baseUrl, voice, voiceSpeed]);
+  }, [pdfDocument, headerMargin, footerMargin, leftMargin, rightMargin, apiKey, baseUrl, voice, voiceSpeed, ttsProvider]);
 
   /**
    * Effect hook to initialize TTS as non-EPUB mode

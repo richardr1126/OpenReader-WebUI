@@ -20,6 +20,7 @@ RUN pnpm install --frozen-lockfile
 COPY . .
 
 # Build the Next.js application
+RUN pnpm exec next telemetry disable
 RUN pnpm run build
 
 # Expose the port the app runs on
