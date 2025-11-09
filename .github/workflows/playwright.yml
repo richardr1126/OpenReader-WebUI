@@ -13,20 +13,23 @@ jobs:
     - uses: actions/setup-node@v4
       with:
         node-version: lts/*
+    - uses: pnpm/action-setup@v4
+      with:
+        version: 9
     - name: Install Deps (FFmpeg is install through Playwright)
       run: |
         sudo apt-get update
         sudo apt-get install -y libreoffice-writer
     - name: Install dependencies
-      run: npm ci
+      run: pnpm install --frozen-lockfile
     - name: Install Playwright Browsers
-      run: npx playwright install --with-deps
+      run: pnpm exec playwright install --with-deps
     - name: Run Playwright tests
       env:
         NEXT_PUBLIC_NODE_ENV: test
         API_BASE: https://api.deepinfra.com/v1/openai
         API_KEY: ${{ secrets.DEEPINFRA_API_KEY }}
-      run: npx playwright test --reporter=list,github,html
+      run: pnpm exec playwright test --reporter=list,github,html
     - uses: actions/upload-artifact@v4
       if: ${{ !cancelled() }}
       with:
