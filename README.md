@@ -29,10 +29,6 @@ OpenReader WebUI is a document reader with Text-to-Speech capabilities, offering
   - 🎨 Multiple app theme options
 
 ### 🛠️ Work in progress
-- [x] **Audiobook creation and download** (m4b format)
-- [x] **Support for GPT-4o Mini TTS with instructions**
-- [x] **Easy Orpheus-FastAPI support**
-- [x] **More document formats**: .txt, .md added
 - [ ] **Native .docx support** (currently requires libreoffice)
 - [ ] **Support non-OpenAI TTS APIs**: ElevenLabs, etc.
 - [ ] **Accessibility Improvements**
