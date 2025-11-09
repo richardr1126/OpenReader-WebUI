@@ -15,7 +15,6 @@ OpenReader WebUI is a document reader with Text-to-Speech capabilities, offering
   - **OpenAI**: tts-1, tts-1-hd, gpt-4o-mini-tts models with voices (alloy, echo, fable, onyx, nova, shimmer)
   - **Deepinfra**: Kokoro-82M, Orpheus-3B, Sesame-1B models with extensive voice libraries
   - **Custom OpenAI-Compatible**: Any OpenAI-compatible endpoint with custom voice sets
-  - Provider-specific voice management with automatic voice restoration per provider-model combination
 - 💾 **Local-First Architecture**: Uses IndexedDB browser storage for documents
 - 🛜 **Optional Server-side documents**: Manually upload documents to the next backend for all users to download
 - 📖 **Read Along Experience**: Follow along with highlighted text as the TTS narrates
