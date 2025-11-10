@@ -3,6 +3,8 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { getItem, indexedDBService, setItem, removeItem } from '@/utils/indexedDB';
 
+const isDev = process.env.NEXT_PUBLIC_NODE_ENV !== 'production' || process.env.NODE_ENV == null;
+
 /** Represents the possible view types for document display */
 export type ViewType = 'single' | 'dual' | 'scroll';
 
@@ -114,7 +116,10 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
         let inferredProvider = cachedTTSProvider || '';
         let inferredBaseUrl = cachedBaseUrl || '';
 
-        if (!inferredProvider) {
+        // In production mode, force deepinfra provider if not already set
+        if (!isDev && !cachedTTSProvider) {
+          inferredProvider = 'deepinfra';
+        } else if (!inferredProvider) {
           if (cachedBaseUrl) {
             const baseUrlLower = cachedBaseUrl.toLowerCase();
             if (baseUrlLower.includes('deepinfra.com')) {
