@@ -81,6 +81,11 @@ export function SettingsModal() {
           { id: 'custom', name: 'Other' }
         ];
       case 'deepinfra':
+        if (!isDev) {
+          return [
+            { id: 'hexgrad/Kokoro-82M', name: 'hexgrad/Kokoro-82M' }
+          ];
+        }
         return [
           { id: 'hexgrad/Kokoro-82M', name: 'hexgrad/Kokoro-82M' },
           { id: 'canopylabs/orpheus-3b-0.1-ft', name: 'canopylabs/orpheus-3b-0.1-ft' },
@@ -398,7 +403,7 @@ export function SettingsModal() {
                               type="password"
                               value={localApiKey}
                               onChange={(e) => handleInputChange('apiKey', e.target.value)}
-                              placeholder="Using environment variable"
+                              placeholder={!isDev && localTTSProvider === 'deepinfra' ? "Deepinfra free or override apikey" : "Using environment variable"}
                               className="w-full rounded-lg bg-background py-2 px-3 text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-accent"
                             />
                           </div>
