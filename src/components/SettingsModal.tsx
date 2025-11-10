@@ -81,11 +81,13 @@ export function SettingsModal() {
           { id: 'custom', name: 'Other' }
         ];
       case 'deepinfra':
-        if (!isDev) {
+        // In production without an API key, limit to free tier model
+        if (!isDev && !localApiKey) {
           return [
             { id: 'hexgrad/Kokoro-82M', name: 'hexgrad/Kokoro-82M' }
           ];
         }
+        // In dev or with an API key, allow all models
         return [
           { id: 'hexgrad/Kokoro-82M', name: 'hexgrad/Kokoro-82M' },
           { id: 'canopylabs/orpheus-3b-0.1-ft', name: 'canopylabs/orpheus-3b-0.1-ft' },
@@ -100,7 +102,7 @@ export function SettingsModal() {
           { id: 'tts-1', name: 'TTS-1' }
         ];
     }
-  }, [localTTSProvider]);
+  }, [localTTSProvider, localApiKey]);
 
   const supportsCustom = useMemo(() => localTTSProvider !== 'openai', [localTTSProvider]);
 
