@@ -74,12 +74,13 @@ docker pull ghcr.io/richardr1126/openreader-webui:latest
 
 ### (Alternate) 🐳 Configuration with Docker Compose and Kokoro-FastAPI
 
-A complete example docker-compose file with Kokoro-FastAPI and OpenReader WebUI is available in [`examples/docker-compose.yml`](examples/docker-compose.yml). You can download and use it:
+A complete example docker-compose file with Kokoro-FastAPI and OpenReader WebUI is available in [`docs/examples/docker-compose.yml`](docs/examples/docker-compose.yml). You can download and use it:
 
 ```bash
-mkdir -p openreader-compose
+# Download example docker-compose.yml
+curl --create-dirs -L -o openreader-compose/docker-compose.yml https://raw.githubusercontent.com/richardr1126/OpenReader-WebUI/main/docs/examples/docker-compose.yml
+
 cd openreader-compose
-curl -O https://raw.githubusercontent.com/richardr1126/OpenReader-WebUI/main/examples/docker-compose.yml
 docker compose up -d
 ```
 
