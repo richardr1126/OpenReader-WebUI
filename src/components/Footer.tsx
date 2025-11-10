@@ -40,12 +40,12 @@ export function Footer() {
             </a>
             {' '}and{' '}
             <a
-              href="https://github.com/remsky/Kokoro-FastAPI/tree/master"
+              href="https://deepinfra.com/models?type=text-to-speech"
               target="_blank"
               rel="noopener noreferrer"
               className="font-bold hover:text-foreground transition-colors"
             >
-              Kokoro-FastAPI
+              Deepinfra
             </a>
           </span>
         </div>
