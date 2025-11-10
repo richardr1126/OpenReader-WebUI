@@ -1,9 +1,11 @@
 import { pdfjs } from 'react-pdf';
-import stringSimilarity from 'string-similarity';
 import type { TextItem } from 'pdfjs-dist/types/src/display/api';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import "core-js/proposals/promise-with-resolvers";
 import { processTextToSentences } from '@/utils/nlp';
+import { CmpStr } from 'cmpstr';
+
+const cmp = CmpStr.create().setMetric( 'levenshtein' ).setFlags( 'i' );
 
 // Function to detect if we need to use legacy build
 function shouldUseLegacyBuild() {
@@ -207,7 +209,7 @@ export function findBestTextMatch(
       combinedText = newText;
       currentElements.push(node.element);
 
-      const similarity = stringSimilarity.compareTwoStrings(targetText, combinedText);
+      const similarity = cmp.compare(combinedText, targetText);
       const lengthDiff = Math.abs(combinedText.length - targetText.length);
       const lengthPenalty = lengthDiff / targetText.length;
       const adjustedRating = similarity * (1 - lengthPenalty * 0.5);
@@ -331,7 +333,7 @@ export function handleTextClick(
     let bestSentenceMatch = { sentence: '', rating: 0 };
 
     for (const sentence of sentences) {
-      const rating = stringSimilarity.compareTwoStrings(matchText, sentence);
+      const rating = cmp.compare(matchText, sentence);
       if (rating > bestSentenceMatch.rating) {
         bestSentenceMatch = { sentence, rating };
       }
