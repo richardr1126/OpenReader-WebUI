@@ -6,7 +6,6 @@ import { useEPUB } from '@/contexts/EPUBContext';
 import { useTTS } from '@/contexts/TTSContext';
 import { useConfig } from '@/contexts/ConfigContext';
 import { DocumentSkeleton } from '@/components/DocumentSkeleton';
-import TTSPlayer from '@/components/player/TTSPlayer';
 import { useEPUBTheme, getThemeStyles } from '@/hooks/epub/useEPUBTheme';
 import { useEPUBResize } from '@/hooks/epub/useEPUBResize';
 
@@ -65,11 +64,8 @@ export function EPUBViewer({ className = '' }: EPUBViewerProps) {
   }
 
   return (
-    <div className={`h-screen flex flex-col ${className}`} ref={containerRef}>
-      <div className="z-10">
-        <TTSPlayer />
-      </div>
-      <div className="flex-1 -mt-16 pt-16">
+    <div className={`h-full flex flex-col relative z-0 ${className}`} ref={containerRef}>
+      <div className="flex-1">
         <ReactReader
           loadingView={<DocumentSkeleton />}
           key={'epub-reader'}

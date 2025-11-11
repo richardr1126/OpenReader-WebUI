@@ -4,7 +4,7 @@ import { Providers } from "@/app/providers";
 import { Metadata } from "next";
 import { Footer } from "@/components/Footer";
 import { Toaster } from 'react-hot-toast';
-import { Analytics } from "@vercel/analytics/next"
+import { Analytics } from "@vercel/analytics/next";
 
 export const metadata: Metadata = {
   title: "OpenReader WebUI",
@@ -56,14 +56,16 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       </head>
       <body className="antialiased">
         <Providers>
-          <div className="min-h-screen bg-background p-4">
-            <div className="relative max-w-6xl mx-auto align-center">
-              <div className="bg-base rounded-lg shadow-lg">
-                {children}
-                <Analytics />
+          <div className="app-shell min-h-screen flex flex-col bg-background">
+            <main className="flex-1 flex flex-col">
+              {children}
+              <Analytics />
+            </main>
+            {!isDev && (
+              <div className="px-4 py-3">
+                <Footer />
               </div>
-              {!isDev && <Footer />}
-            </div>
+            )}
           </div>
           <Toaster />
         </Providers>

@@ -3,7 +3,6 @@ import { DragEvent, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@headlessui/react';
 import { PDFIcon, EPUBIcon, FileIcon } from '@/components/icons/Icons';
-import { LoadingSpinner } from '@/components/Spinner';
 import { DocumentListDocument } from '@/types/documents';
 
 interface DocumentListItemProps {
@@ -50,41 +49,44 @@ export function DocumentListItem({
       onDragOver={(e) => allowDropTarget && onDragOver?.(e, doc)}
       onDragLeave={() => allowDropTarget && onDragLeave?.()}
       onDrop={(e) => allowDropTarget && onDrop?.(e, doc)}
+      aria-busy={loading}
       className={`
-        w-full
-        ${allowDropTarget && isDropTarget ? 'ring-2 ring-accent bg-primary/10' : ''}
-        bg-background rounded-lg p-2 shadow hover:shadow-md transition-shadow
-        relative
+        w-full group
+        ${allowDropTarget && isDropTarget ? 'ring-2 ring-accent' : ''}
+        ${loading ? 'prism-outline' : 'bg-base hover:bg-offbase'}
+        border border-offbase rounded-md p-1
+        transition-colors duration-150 relative
       `}
     >
-      {loading && (
-        <div className="absolute inset-0 z-20 flex items-center justify-center bg-background/80 rounded-lg">
-          <LoadingSpinner />
-        </div>
-      )}
-      <div className="flex items-center rounded-lg">
+      <div className="flex items-center">
         <Link
           href={`/${doc.type}/${encodeURIComponent(doc.id)}`}
           draggable={false}
-          className="document-link flex items-center align-center space-x-4 w-full truncate hover:bg-base rounded-lg p-0.5 sm:p-1 transition-colors"
+          className="document-link flex items-center align-center gap-2 w-full truncate rounded-md py-0.5 px-0.5"
           onClick={handleDocumentClick}
         >
           <div className="flex-shrink-0">
-            {doc.type === 'pdf' ? <PDFIcon /> : doc.type === 'epub' ? <EPUBIcon /> : <FileIcon />}
+            {doc.type === 'pdf' ? (
+              <PDFIcon className="w-5 h-5 sm:w-6 sm:h-6 text-red-500" />
+            ) : doc.type === 'epub' ? (
+              <EPUBIcon className="w-5 h-5 sm:w-6 sm:h-6 text-blue-500" />
+            ) : (
+              <FileIcon className="w-6 h-6 sm:w-6 sm:h-6 text-muted" />
+            )}
           </div>
-          <div className="flex flex-col min-w-0 transform transition-transform duration-200 ease-in-out hover:scale-[1.02] w-full truncate">
-            <p className="text-sm sm:text-md text-foreground font-medium truncate">{doc.name}</p>
-            <p className="text-xs sm:text-sm text-muted truncate">
+          <div className="flex flex-col min-w-0 transform transition-transform duration-150 ease-in-out hover:scale-[1.009] w-full truncate">
+            <p className="text-[12px] sm:text-[13px] leading-tight text-foreground font-medium truncate group-hover:text-accent">{doc.name}</p>
+            <p className="text-[9px] sm:text-[10px] leading-tight text-muted truncate">
               {(doc.size / 1024 / 1024).toFixed(2)} MB
             </p>
           </div>
         </Link>
         <Button
           onClick={() => onDelete(doc)}
-          className="ml-4 p-2 text-muted hover:text-red-500 rounded-lg hover:bg-red-50 transition-colors"
+          className="ml-1 p-1.5 text-muted hover:text-accent rounded-md hover:bg-offbase transition-colors"
           aria-label="Delete document"
         >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
           </svg>
         </Button>

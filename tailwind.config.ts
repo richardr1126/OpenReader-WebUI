@@ -16,6 +16,7 @@ export default {
         base: "var(--base)",
         offbase: "var(--offbase)",
         accent: "var(--accent)",
+        "secondary-accent": "var(--secondary-accent)",
         muted: "var(--muted)",
       },
       animation: {

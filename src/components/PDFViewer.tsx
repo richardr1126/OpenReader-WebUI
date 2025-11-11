@@ -7,7 +7,6 @@ import 'react-pdf/dist/Page/TextLayer.css';
 import { DocumentSkeleton } from '@/components/DocumentSkeleton';
 import { useTTS } from '@/contexts/TTSContext';
 import { usePDF } from '@/contexts/PDFContext';
-import TTSPlayer from '@/components/player/TTSPlayer';
 import { useConfig } from '@/contexts/ConfigContext';
 import { usePDFResize } from '@/hooks/pdf/usePDFResize';
 
@@ -48,25 +47,23 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
     currDocPage,
   } = usePDF();
 
-  // Add static styles once during component initialization
-  const styleElement = document.createElement('style');
-  styleElement.textContent = `
-    .react-pdf__Page__textContent span {
-      cursor: pointer;
-      transition: background-color 0.2s ease;
-    }
-    .react-pdf__Page__textContent span:hover {
-      background-color: rgba(255, 255, 0, 0.2) !important;
-    }
-  `;
-  document.head.appendChild(styleElement);
-
-  // Cleanup styles when component unmounts
+  // Add static styles once during component mount
   useEffect(() => {
+    const styleElement = document.createElement('style');
+    styleElement.textContent = `
+      .react-pdf__Page__textContent span {
+        cursor: pointer;
+        transition: background-color 0.2s ease;
+      }
+      .react-pdf__Page__textContent span:hover {
+        background-color: rgba(255, 255, 0, 0.2) !important;
+      }
+    `;
+    document.head.appendChild(styleElement);
     return () => {
       styleElement.remove();
     };
-  }, [styleElement]);
+  }, []);
 
   useEffect(() => {
     /*
@@ -135,7 +132,7 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
   // Modify scale calculation to be more efficient
   const calculateScale = useCallback((width = pageWidth, height = pageHeight): number => {
     const margin = viewType === 'dual' ? 48 : 24; // adjust margin based on view type
-    const containerHeight = window.innerHeight - 100;
+    const containerHeight = (containerRef.current?.clientHeight ?? window.innerHeight);
     const targetWidth = viewType === 'dual'
       ? (containerWidth - margin) / 2 // divide by 2 for dual pages
       : containerWidth - margin;
@@ -165,7 +162,7 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
   }, [calculateScale]);
 
   return (
-    <div ref={containerRef} className="flex flex-col items-center overflow-auto max-h-[calc(100vh-100px)] w-full px-6">
+    <div ref={containerRef} className="flex flex-col items-center overflow-auto w-full px-6 h-full">
       <Document
         loading={<DocumentSkeleton />}
         noData={<DocumentSkeleton />}
@@ -240,10 +237,6 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
           )}
         </div>
       </Document>
-      <TTSPlayer 
-        currentPage={currDocPage}
-        numPages={currDocPages}
-      />
     </div>
   );
 }

@@ -16,7 +16,7 @@ interface DocumentFolderProps {
   onDrop: (e: DragEvent, folderId: string) => void;
 }
 
-const ChevronIcon = ({ className = "w-5 h-5" }) => (
+const ChevronIcon = ({ className = "w-4 h-4" }) => (
   <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
   </svg>
@@ -62,36 +62,33 @@ export function DocumentFolder({
         if (!draggedDoc || draggedDoc.folderId) return;
         onDrop(e, folder.id);
       }}
-      className={`overflow-hidden rounded-lg transition-all bg-offbase shadow hover:shadow-md ${isDropTarget ? 'ring-2 ring-accent' : ''}`}
+      className={`overflow-hidden rounded-md border border-offbase ${isDropTarget ? 'ring-2 ring-accent' : ''}`}
     >
-      <div className='flex flex-row justify-between p-2'>
+      <div className='flex flex-row justify-between p-0'>
         <div className="w-full">
-          <div className={`flex items-center justify-between ${isCollapsed ? 'mb-0' : 'mb-2'} transition-all duration-200`}>
+          <div className={`flex items-center justify-between px-2 py-1 bg-offbase rounded-t-md border-b border-offbase transition-all duration-200`}>        
             <div className="flex items-center">
-              <h3 className="text-lg px-1 font-semibold">{folder.name}</h3>
+              <h3 className="text-sm px-1 font-semibold leading-tight">{folder.name}</h3>
                 <Button
                 onClick={() => onToggleCollapse(folder.id)}
-                className="transform transition-transform duration-200 ease-in-out hover:scale-[1.09] hover:font-semibold hover:text-accent"
+                className="ml-0.5 transform transition-transform duration-200 ease-in-out hover:scale-[1.08] hover:text-accent"
                 aria-label={isCollapsed ? "Expand folder" : "Collapse folder"}
                 >
-                <ChevronIcon
-                  className={`w-5 h-5 transform transition-transform duration-300 ease-in-out ${isCollapsed ? '-rotate-180' : ''}`}
-                />
+                <ChevronIcon className={`transform transition-transform duration-300 ease-in-out ${isCollapsed ? '-rotate-180' : ''}`} />
                 </Button>
             </div>
             <Button
               onClick={onDelete}
-              className="p-1 text-muted hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+              className="p-1 text-muted hover:text-accent hover:bg-base rounded-md transition-colors"
               aria-label="Delete folder"
             >
-              <svg className="w-4 h-4"
+              <svg className="w-3.5 h-3.5"
                 fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
               </svg>
             </Button>
           </div>
-
-          <div className="relative">
+          <div className="relative bg-base px-1 py-1 rounded-b-md">
             <Transition
               show={!isCollapsed}
               enter="transition-all duration-300 ease-out"
@@ -101,7 +98,7 @@ export function DocumentFolder({
               leaveFrom="transform scale-y-100 opacity-100 max-h-[1000px]"
               leaveTo="transform scale-y-0 opacity-0 max-h-0"
             >
-              <div className="space-y-2 origin-top">
+              <div className="space-y-1 origin-top">
                 {sortedDocuments.map(doc => (
                   <DocumentListItem
                     key={`${doc.type}-${doc.id}`}
@@ -125,7 +122,7 @@ export function DocumentFolder({
               leaveFrom="max-h-[50px] opacity-100"
               leaveTo="max-h-0 opacity-0"
             >
-              <p className="text-xs px-1 text-left text-muted">
+              <p className="text-[10px] px-1 text-left text-muted leading-tight">
                 {(calculateFolderSize(sortedDocuments) / 1024 / 1024).toFixed(2)} MB
                 {` • ${sortedDocuments.length} ${sortedDocuments.length === 1 ? 'file' : 'files'}`}
               </p>

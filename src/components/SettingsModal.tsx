@@ -267,11 +267,11 @@ export function SettingsModal() {
     <>
       <Button
         onClick={() => setIsOpen(true)}
-        className="rounded-full p-2 text-foreground hover:bg-offbase transform transition-transform duration-200 ease-in-out hover:scale-[1.1] hover:text-accent absolute top-1 left-1 sm:top-3 sm:left-3"
+        className="rounded-full p-2 text-foreground hover:bg-offbase transform transition-transform duration-200 ease-in-out hover:scale-[1.09] hover:text-accent absolute top-2 right-2 sm:top-4 sm:right-4"
         aria-label="Settings"
         tabIndex={0}
       >
-        <SettingsIcon className="w-4 h-4 sm:w-5 sm:h-5 hover:animate-spin-slow" />
+        <SettingsIcon className="w-4 h-4 sm:w-5 sm:h-5 transform transition-transform duration-200 ease-in-out hover:rotate-45" />
       </Button>
 
       <Transition appear show={isOpen} as={Fragment}>
@@ -285,7 +285,7 @@ export function SettingsModal() {
             leaveFrom="opacity-100"
             leaveTo="opacity-0"
           >
-            <div className="fixed inset-0 bg-black/25 backdrop-blur-sm" />
+            <div className="fixed inset-0 overlay-dim backdrop-blur-sm" />
           </TransitionChild>
 
           <div className="fixed inset-0 overflow-y-auto">
@@ -316,8 +316,8 @@ export function SettingsModal() {
                             `w-full rounded-lg py-1 text-sm font-medium
                              ring-accent/60 ring-offset-2 ring-offset-base
                              ${selected
-                              ? 'bg-accent text-white shadow'
-                              : 'text-foreground hover:bg-accent/[0.12] hover:text-accent'
+                              ? 'bg-accent text-background shadow'
+                              : 'text-foreground hover:text-accent'
                             }`
                           }
                         >
@@ -329,8 +329,8 @@ export function SettingsModal() {
                       ))}
                     </TabList>
                     <TabPanels className="mt-2">
-                      <TabPanel className="space-y-4">
-                        <div className="space-y-2">
+                      <TabPanel className="space-y-2.5">
+                        <div className="space-y-1">
                           <label className="block text-sm font-medium text-foreground">TTS Provider</label>
                           <Listbox
                             value={ttsProviders.find(p => p.id === localTTSProvider) || ttsProviders[0]}
@@ -395,7 +395,7 @@ export function SettingsModal() {
                           </Listbox>
                         </div>
 
-                        <div className="space-y-2">
+                        <div className="space-y-1">
                           <label className="block text-sm font-medium text-foreground">
                             API Key
                             {localApiKey && <span className="ml-2 text-xs text-accent">(Overriding env)</span>}
@@ -411,7 +411,7 @@ export function SettingsModal() {
                           </div>
                         </div>
 
-                        <div className="space-y-2">
+                        <div className="space-y-1">
                           <label className="block text-sm font-medium text-foreground">TTS Model</label>
                           <div className="flex flex-col gap-2">
                             <Listbox
@@ -485,7 +485,7 @@ export function SettingsModal() {
                         </div>
 
                         {modelValue === 'gpt-4o-mini-tts' && (
-                          <div className="space-y-2">
+                          <div className="space-y-1">
                             <label className="block text-sm font-medium text-foreground">TTS Instructions</label>
                             <textarea
                               value={localTTSInstructions}
@@ -497,7 +497,7 @@ export function SettingsModal() {
                         )}
 
                         {(localTTSProvider === 'custom-openai' || !localBaseUrl || localBaseUrl === '') && (
-                          <div className="space-y-2">
+                          <div className="space-y-1">
                             <label className="block text-sm font-medium text-foreground">
                               API Base URL
                               {localBaseUrl && <span className="ml-2 text-xs text-accent">(Overriding env)</span>}
@@ -514,7 +514,7 @@ export function SettingsModal() {
                           </div>
                         )}
 
-                        <div className="mt-6 flex justify-end gap-2">
+                        <div className="pt-4 flex justify-end gap-2">
                           <Button
                             type="button"
                             className="inline-flex justify-center rounded-lg bg-background px-3 py-1.5 text-sm 
@@ -534,8 +534,8 @@ export function SettingsModal() {
                           </Button>
                           <Button
                             type="button"
-                            className="inline-flex justify-center rounded-lg bg-accent px-3 py-1.5 text-sm 
-                               font-medium text-white hover:bg-accent/90 focus:outline-none 
+                             className="inline-flex justify-center rounded-lg bg-accent px-3 py-1.5 text-sm 
+                               font-medium text-background hover:bg-accent/90 focus:outline-none 
                                focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2
                                transform transition-transform duration-200 ease-in-out hover:scale-[1.04] hover:text-background"
                             disabled={!canSubmit}
@@ -557,7 +557,7 @@ export function SettingsModal() {
                       </TabPanel>
 
                       <TabPanel className="space-y-4 pb-3">
-                        <div className="space-y-2">
+                        <div className="space-y-1">
                           <label className="block text-sm font-medium text-foreground">Theme</label>
                           <Listbox value={selectedTheme} onChange={(newTheme) => setTheme(newTheme.id)}>
                             <ListboxButton className="relative w-full cursor-pointer rounded-lg bg-background py-2 pl-3 pr-10 text-left text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-accent transform transition-transform duration-200 ease-in-out hover:scale-[1.01] hover:text-accent">
@@ -603,7 +603,7 @@ export function SettingsModal() {
                       </TabPanel>
 
                       <TabPanel className="space-y-4">
-                        {isDev && <div className="space-y-2">
+                        {isDev && <div className="space-y-1">
                           <label className="block text-sm font-medium text-foreground">Document Sync</label>
                           <div className="flex gap-2">
                             <Button
@@ -631,23 +631,23 @@ export function SettingsModal() {
                           </div>
                         </div>}
 
-                        <div className="space-y-2 pb-3">
+                        <div className="space-y-1 pb-3">
                           <label className="block text-sm font-medium text-foreground">Bulk Delete</label>
                           <div className="flex gap-2">
                             <Button
                               onClick={() => setShowClearLocalConfirm(true)}
-                              className="justify-center rounded-lg bg-red-600 px-3 py-1.5 text-sm 
-                                       font-medium text-white hover:bg-red-700 focus:outline-none 
-                                       focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2
+                              className="justify-center rounded-lg bg-red-500 px-3 py-1.5 text-sm 
+                                         font-medium text-background hover:bg-accent/90 focus:outline-none 
+                                         focus-visible:ring-2 focus-visible:bg-red-500 focus-visible:ring-offset-2
                                        transform transition-transform duration-200 ease-in-out hover:scale-[1.04]"
                             >
                               Delete local docs
                             </Button>
                             {isDev && <Button
                               onClick={() => setShowClearServerConfirm(true)}
-                              className="justify-center rounded-lg bg-red-600 px-3 py-1.5 text-sm 
-                                       font-medium text-white hover:bg-red-700 focus:outline-none 
-                                       focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2
+                              className="justify-center rounded-lg bg-red-500 px-3 py-1.5 text-sm 
+                                         font-medium text-background hover:bg-red-500/90 focus:outline-none 
+                                         focus-visible:ring-2 focus-visible:bg-red-500 focus-visible:ring-offset-2
                                        transform transition-transform duration-200 ease-in-out hover:scale-[1.04]"
                             >
                               Delete server docs

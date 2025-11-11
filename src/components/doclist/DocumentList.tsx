@@ -12,6 +12,7 @@ import { DocumentFolder } from '@/components/doclist/DocumentFolder';
 import { SortControls } from '@/components/doclist/SortControls';
 import { CreateFolderDialog } from '@/components/doclist/CreateFolderDialog';
 import { Button } from '@headlessui/react';
+import { DocumentUploader } from '@/components/DocumentUploader';
 
 type DocumentToDelete = {
   id: string;
@@ -297,11 +298,18 @@ export function DocumentList() {
     doc => !folders.some(folder => folder.documents.some(d => d.id === doc.id))
   );
 
+  // Build compact summary (counts per type + total size)
+  const summaryParts: string[] = [];
+  if (pdfDocs.length) summaryParts.push(`${pdfDocs.length} PDF${pdfDocs.length === 1 ? '' : 's'}`);
+  if (epubDocs.length) summaryParts.push(`${epubDocs.length} EPUB${epubDocs.length === 1 ? '' : 's'}`);
+  if (htmlDocs.length) summaryParts.push(`${htmlDocs.length} HTML${htmlDocs.length === 1 ? '' : 's'}`);
+  const totalSizeMB = (allDocuments.reduce((acc, d) => acc + d.size, 0) / 1024 / 1024).toFixed(2);
+
   return (
     <DndProvider backend={HTML5Backend}>
       <div className="w-full mx-auto">
-        <div className="flex items-center justify-between mb-2 sm:mb-4">
-          <h2 className="text-lg sm:text-xl font-semibold text-foreground">Your Documents</h2>
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg sm:text-xl font-semibold text-foreground">Local Documents</h2>
           <SortControls
             sortBy={sortBy}
             sortDirection={sortDirection}
@@ -309,14 +317,21 @@ export function DocumentList() {
             onSortDirectionChange={() => setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc')}
           />
         </div>
+        
+        <p className="text-xs text-muted mb-2" data-doc-summary>
+          {summaryParts.join(' • ')}{summaryParts.length ? ' • ' : ''}{totalSizeMB} MB total
+        </p>
+        <div className="mb-3">
+          <DocumentUploader variant="compact" />
+        </div>
 
         <div className="space-y-2">
           {showHint && allDocuments.length > 1 && (
-            <div className="flex items-center justify-between bg-background rounded-lg px-3 py-2 text-sm shadow hover:shadow-md transition-shadow">
-              <p className="text-sm">Drag files on top of each other to make folders</p>
+            <div className="flex items-center justify-between bg-offbase border border-offbase rounded-md px-3 py-1 text-sm">
+              <p className="text-sm text-foreground">Drag files on top of each other to make folders</p>
               <Button
                 onClick={() => setShowHint(false)}
-                className="p-1 hover:bg-accent rounded-lg transition-colors"
+                className="p-1 rounded-md hover:bg-base hover:text-accent transition-colors"
                 aria-label="Dismiss hint"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

@@ -19,7 +19,6 @@ import { setLastDocumentLocation } from '@/utils/indexedDB';
 import { SpineItem } from 'epubjs/types/section';
 import { useParams } from 'next/navigation';
 import { useConfig } from './ConfigContext';
-import { combineAudioChunks } from '@/utils/audio';
 import { withRetry } from '@/utils/audio';
 
 interface EPUBContextType {
@@ -31,7 +30,8 @@ interface EPUBContextType {
   setCurrentDocument: (id: string) => Promise<void>;
   clearCurrDoc: () => void;
   extractPageText: (book: Book, rendition: Rendition, shouldPause?: boolean) => Promise<string>;
-  createFullAudioBook: (onProgress: (progress: number) => void, signal?: AbortSignal, format?: 'mp3' | 'm4b') => Promise<ArrayBuffer>;
+  createFullAudioBook: (onProgress: (progress: number) => void, signal?: AbortSignal, onChapterComplete?: (chapter: { index: number; title: string; duration?: number; status: 'pending' | 'generating' | 'completed' | 'error'; bookId?: string; format?: 'mp3' | 'm4b' }) => void, bookId?: string, format?: 'mp3' | 'm4b') => Promise<string>;
+  regenerateChapter: (chapterIndex: number, bookId: string, format: 'mp3' | 'm4b', onProgress: (progress: number) => void, signal: AbortSignal) => Promise<{ index: number; title: string; duration?: number; status: 'pending' | 'generating' | 'completed' | 'error'; bookId?: string; format?: 'mp3' | 'm4b' }>;
   bookRef: RefObject<Book | null>;
   renditionRef: RefObject<Rendition | undefined>;
   tocRef: RefObject<NavItem[]>;
@@ -59,12 +59,14 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
     voiceSpeed,
     voice,
     ttsProvider,
+    ttsModel,
+    ttsInstructions,
   } = useConfig();
   // Current document state
   const [currDocData, setCurrDocData] = useState<ArrayBuffer>();
   const [currDocName, setCurrDocName] = useState<string>();
   const [currDocText, setCurrDocText] = useState<string>();
-  const [isAudioCombining, setIsAudioCombining] = useState(false);
+  const [isAudioCombining] = useState(false);
 
   // Add new refs
   const bookRef = useRef<Book | null>(null);
@@ -197,21 +199,43 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
   const createFullAudioBook = useCallback(async (
     onProgress: (progress: number) => void,
     signal?: AbortSignal,
+    onChapterComplete?: (chapter: { index: number; title: string; duration?: number; status: 'pending' | 'generating' | 'completed' | 'error'; bookId?: string; format?: 'mp3' | 'm4b' }) => void,
+    providedBookId?: string,
     format: 'mp3' | 'm4b' = 'mp3'
-  ): Promise<ArrayBuffer> => {
+  ): Promise<string> => {
     try {
       const sections = await extractBookText();
       if (!sections.length) throw new Error('No text content found in book');
 
       // Calculate total length for accurate progress tracking
       const totalLength = sections.reduce((sum, section) => sum + section.text.trim().length, 0);
-      const audioChunks: { buffer: ArrayBuffer; title?: string; startTime: number }[] = [];
       let processedLength = 0;
-      let currentTime = 0;
+      let bookId: string = providedBookId || '';
 
       // Get TOC for chapter titles
       const chapters = tocRef.current || [];
-      console.log('Chapters:', chapters);
+      
+      // If we have a bookId, check for existing chapters to determine which indices already exist
+      const existingIndices = new Set<number>();
+      if (bookId) {
+        try {
+          const existingResponse = await fetch(`/api/audio/convert/chapters?bookId=${bookId}`);
+          if (existingResponse.ok) {
+            const existingData = await existingResponse.json();
+            if (existingData.chapters && existingData.chapters.length > 0) {
+              for (const ch of existingData.chapters) {
+                existingIndices.add(ch.index);
+              }
+              // Log smallest missing index for visibility
+              let nextMissing = 0;
+              while (existingIndices.has(nextMissing)) nextMissing++;
+              console.log(`Resuming; next missing chapter index is ${nextMissing}`);
+            }
+          }
+        } catch (error) {
+          console.error('Error checking existing chapters:', error);
+        }
+      }
       
       // Create a map of section hrefs to their chapter titles
       const sectionTitleMap = new Map<string, string>();
@@ -233,35 +257,52 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
           }
         }
       }
-      
-      console.log('Section to chapter title mapping:', sectionTitleMap);
 
       // Process each section
       for (let i = 0; i < sections.length; i++) {
+        // Check for abort at the start of iteration
         if (signal?.aborted) {
-          const partialBuffer = await combineAudioChunks(audioChunks, format, setIsAudioCombining);
-          return partialBuffer;
+          console.log('Generation cancelled by user');
+          if (bookId) {
+            return bookId; // Return bookId with partial progress
+          }
+          throw new Error('Audiobook generation cancelled');
         }
 
         const section = sections[i];
         const trimmedText = section.text.trim();
         if (!trimmedText) continue;
 
+        // Skip chapters that already exist on disk (supports non-contiguous indices)
+        if (existingIndices.has(i)) {
+          processedLength += trimmedText.length;
+          onProgress((processedLength / totalLength) * 100);
+          continue;
+        }
+
         try {
           const audioBuffer = await withRetry(
             async () => {
+              // Check for abort before starting TTS request
+              if (signal?.aborted) {
+                throw new DOMException('Aborted', 'AbortError');
+              }
+
               const ttsResponse = await fetch('/api/tts', {
                 method: 'POST',
                 headers: {
+                  'Content-Type': 'application/json',
                   'x-openai-key': apiKey,
                   'x-openai-base-url': baseUrl,
                   'x-tts-provider': ttsProvider,
                 },
                 body: JSON.stringify({
                   text: trimmedText,
-                  voice: voice,
+                  voice: voice || (ttsProvider === 'openai' ? 'alloy' : (ttsProvider === 'deepinfra' ? 'af_bella' : 'af_sarah')),
                   speed: voiceSpeed,
-                  format: format === 'm4b' ? 'aac' : 'mp3',
+                  format: 'mp3',
+                  model: ttsModel,
+                  instructions: ttsModel === 'gpt-4o-mini-tts' ? ttsInstructions : undefined
                 }),
                 signal
               });
@@ -289,47 +330,232 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
           
           // If no chapter title found, use index-based naming
           if (!chapterTitle) {
-            chapterTitle = `Unknown Section - ${i + 1}`;
+            chapterTitle = `Chapter ${i + 1}`;
           }
 
-          console.log('Processed audiobook chapter title:', chapterTitle);
-          audioChunks.push({
-            buffer: audioBuffer,
-            title: chapterTitle,
-            startTime: currentTime
+          // Check for abort before sending to server
+          if (signal?.aborted) {
+            console.log('Generation cancelled before saving chapter');
+            if (bookId) {
+              return bookId;
+            }
+            throw new Error('Audiobook generation cancelled');
+          }
+
+          // Send to server for conversion and storage
+          const convertResponse = await fetch('/api/audio/convert', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              chapterTitle,
+              buffer: Array.from(new Uint8Array(audioBuffer)),
+              bookId,
+              format,
+              chapterIndex: i
+            }),
+            signal
           });
 
-          // Add silence between sections
-          const silenceBuffer = new ArrayBuffer(48000);
-          audioChunks.push({
-            buffer: silenceBuffer,
-            startTime: currentTime + (audioBuffer.byteLength / 48000)
-          });
+          if (convertResponse.status === 499) {
+            throw new Error('cancelled');
+          }
 
-          currentTime += (audioBuffer.byteLength + 48000) / 48000;
+          if (!convertResponse.ok) {
+            throw new Error('Failed to convert audio chapter');
+          }
+
+          const { bookId: returnedBookId, chapterIndex, duration } = await convertResponse.json();
+          
+          if (!bookId) {
+            bookId = returnedBookId;
+          }
+
+          // Notify about completed chapter
+          if (onChapterComplete) {
+            onChapterComplete({
+              index: chapterIndex,
+              title: chapterTitle,
+              duration,
+              status: 'completed',
+              bookId,
+              format
+            });
+          }
+
           processedLength += trimmedText.length;
           onProgress((processedLength / totalLength) * 100);
 
         } catch (error) {
-          if (error instanceof Error && error.name === 'AbortError') {
-            console.log('TTS request aborted');
-            const partialBuffer = await combineAudioChunks(audioChunks, format, setIsAudioCombining);
-            return partialBuffer;
+          if (error instanceof Error && (error.name === 'AbortError' || error.message.includes('cancelled'))) {
+            console.log('TTS request aborted, returning partial progress');
+            if (bookId) {
+              return bookId; // Return with partial progress
+            }
+            throw new Error('Audiobook generation cancelled');
           }
           console.error('Error processing section:', error);
+          
+          // Notify about error
+          if (onChapterComplete) {
+            onChapterComplete({
+              index: i,
+              title: sectionTitleMap.get(section.href) || `Chapter ${i + 1}`,
+              status: 'error',
+              bookId,
+              format
+            });
+          }
         }
       }
 
-      if (audioChunks.length === 0) {
+      if (!bookId) {
         throw new Error('No audio was generated from the book content');
       }
 
-      return combineAudioChunks(audioChunks, format, setIsAudioCombining);
+      return bookId;
     } catch (error) {
       console.error('Error creating audiobook:', error);
       throw error;
     }
-  }, [extractBookText, apiKey, baseUrl, voice, voiceSpeed, ttsProvider]);
+  }, [extractBookText, apiKey, baseUrl, voice, voiceSpeed, ttsProvider, ttsModel, ttsInstructions]);
+
+  /**
+   * Regenerates a specific chapter of the audiobook
+   */
+  const regenerateChapter = useCallback(async (
+    chapterIndex: number,
+    bookId: string,
+    format: 'mp3' | 'm4b',
+    onProgress: (progress: number) => void,
+    signal: AbortSignal
+  ): Promise<{ index: number; title: string; duration?: number; status: 'pending' | 'generating' | 'completed' | 'error'; bookId?: string; format?: 'mp3' | 'm4b' }> => {
+    try {
+      const sections = await extractBookText();
+      if (chapterIndex >= sections.length) {
+        throw new Error('Invalid chapter index');
+      }
+
+      const section = sections[chapterIndex];
+      const trimmedText = section.text.trim();
+      
+      if (!trimmedText) {
+        throw new Error('No text content found in chapter');
+      }
+
+      // Get TOC for chapter title
+      const chapters = tocRef.current || [];
+      const sectionTitleMap = new Map<string, string>();
+      
+      for (const chapter of chapters) {
+        if (!chapter.href) continue;
+        const chapterBaseHref = chapter.href.split('#')[0];
+        const chapterTitle = chapter.label.trim();
+        
+        for (const sect of sections) {
+          const sectionHref = sect.href;
+          const sectionBaseHref = sectionHref.split('#')[0];
+          
+          if (sectionHref === chapter.href || sectionBaseHref === chapterBaseHref) {
+            sectionTitleMap.set(sectionHref, chapterTitle);
+          }
+        }
+      }
+
+      const chapterTitle = sectionTitleMap.get(section.href) || `Chapter ${chapterIndex + 1}`;
+
+      // Generate audio with retry logic
+      const audioBuffer = await withRetry(
+        async () => {
+          if (signal?.aborted) {
+            throw new DOMException('Aborted', 'AbortError');
+          }
+
+          const ttsResponse = await fetch('/api/tts', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-openai-key': apiKey,
+              'x-openai-base-url': baseUrl,
+              'x-tts-provider': ttsProvider,
+            },
+            body: JSON.stringify({
+              text: trimmedText,
+              voice: voice || (ttsProvider === 'openai' ? 'alloy' : (ttsProvider === 'deepinfra' ? 'af_bella' : 'af_sarah')),
+              speed: voiceSpeed,
+              format: 'mp3',
+              model: ttsModel,
+              instructions: ttsModel === 'gpt-4o-mini-tts' ? ttsInstructions : undefined
+            }),
+            signal
+          });
+
+          if (!ttsResponse.ok) {
+            throw new Error(`TTS processing failed with status ${ttsResponse.status}`);
+          }
+
+          const buffer = await ttsResponse.arrayBuffer();
+          if (buffer.byteLength === 0) {
+            throw new Error('Received empty audio buffer from TTS');
+          }
+          return buffer;
+        },
+        {
+          maxRetries: 2,
+          initialDelay: 5000,
+          maxDelay: 10000,
+          backoffFactor: 2
+        }
+      );
+
+      if (signal?.aborted) {
+        throw new Error('Chapter regeneration cancelled');
+      }
+
+      // Send to server for conversion and storage
+      const convertResponse = await fetch('/api/audio/convert', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          chapterTitle,
+          buffer: Array.from(new Uint8Array(audioBuffer)),
+          bookId,
+          format,
+          chapterIndex
+        }),
+        signal
+      });
+
+      if (convertResponse.status === 499) {
+        throw new Error('cancelled');
+      }
+
+      if (!convertResponse.ok) {
+        throw new Error('Failed to convert audio chapter');
+      }
+
+      const { chapterIndex: returnedIndex, duration } = await convertResponse.json();
+
+      return {
+        index: returnedIndex,
+        title: chapterTitle,
+        duration,
+        status: 'completed',
+        bookId,
+        format
+      };
+
+    } catch (error) {
+      if (error instanceof Error && (error.name === 'AbortError' || error.message.includes('cancelled'))) {
+        throw new Error('Chapter regeneration cancelled');
+      }
+      console.error('Error regenerating chapter:', error);
+      throw error;
+    }
+  }, [extractBookText, apiKey, baseUrl, voice, voiceSpeed, ttsProvider, ttsModel, ttsInstructions]);
 
   const setRendition = useCallback((rendition: Rendition) => {
     bookRef.current = rendition.book;
@@ -387,6 +613,7 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
       clearCurrDoc,
       extractPageText,
       createFullAudioBook,
+      regenerateChapter,
       bookRef,
       renditionRef,
       tocRef,
@@ -405,6 +632,7 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
       clearCurrDoc,
       extractPageText,
       createFullAudioBook,
+      regenerateChapter,
       handleLocationChanged,
       setRendition,
       isAudioCombining,

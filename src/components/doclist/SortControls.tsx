@@ -29,13 +29,13 @@ export function SortControls({
     <div className="flex items-center gap-1">
       <Button
         onClick={onSortDirectionChange}
-        className="px-1.5 sm:px-2 py-0.5 sm:py-1 bg-base hover:bg-offbase rounded text-xs sm:text-sm whitespace-nowrap"
+        className="px-1.5 sm:px-2 py-0.5 sm:py-1 bg-base hover:bg-offbase rounded text-xs sm:text-sm whitespace-nowrap transform transition-transform duration-200 ease-in-out hover:scale-[1.04] hover:text-accent"
       >
         {directionLabel}
       </Button>
       <div className="relative">
         <Listbox value={sortBy} onChange={onSortByChange}>
-          <ListboxButton className="flex items-center space-x-0.5 sm:space-x-1 bg-background text-foreground text-xs sm:text-sm focus:outline-none cursor-pointer hover:bg-offbase rounded pl-1.5 sm:pl-2 pr-0.5 sm:pr-1 py-0.5 sm:py-1">
+          <ListboxButton className="flex items-center space-x-0.5 sm:space-x-1 bg-background text-foreground text-xs sm:text-sm focus:outline-none cursor-pointer hover:bg-offbase rounded pl-1.5 sm:pl-2 pr-0.5 sm:pr-1 py-0.5 sm:py-1 transform transition-transform duration-200 ease-in-out hover:scale-[1.04] hover:text-accent">
             <span>{sortOptions.find(opt => opt.value === sortBy)?.label}</span>
             <ChevronUpDownIcon className="h-2.5 w-2.5 sm:h-3 sm:w-3" />
           </ListboxButton>

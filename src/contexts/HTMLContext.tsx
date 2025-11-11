@@ -33,7 +33,7 @@ const HTMLContext = createContext<HTMLContextType | undefined>(undefined);
  */
 export function HTMLProvider({ children }: { children: ReactNode }) {
   const { setText: setTTSText, stop } = useTTS();
-  const { apiKey, baseUrl, voiceSpeed, voice, ttsProvider } = useConfig();
+  const { apiKey, baseUrl, voiceSpeed, voice, ttsProvider, ttsModel, ttsInstructions } = useConfig();
 
   // Current document state
   const [currDocData, setCurrDocData] = useState<string>();
@@ -95,15 +95,18 @@ export function HTMLProvider({ children }: { children: ReactNode }) {
             const ttsResponse = await fetch('/api/tts', {
               method: 'POST',
               headers: {
+                'Content-Type': 'application/json',
                 'x-openai-key': apiKey,
                 'x-openai-base-url': baseUrl,
                 'x-tts-provider': ttsProvider,
               },
               body: JSON.stringify({
                 text: currDocText,
-                voice: voice,
+                voice: voice || (ttsProvider === 'openai' ? 'alloy' : (ttsProvider === 'deepinfra' ? 'af_bella' : 'af_sarah')),
                 speed: voiceSpeed,
-                format: format === 'm4b' ? 'aac' : 'mp3'
+                format: 'mp3',
+                model: ttsModel,
+                instructions: ttsModel === 'gpt-4o-mini-tts' ? ttsInstructions : undefined
               }),
               signal
             });
@@ -147,7 +150,7 @@ export function HTMLProvider({ children }: { children: ReactNode }) {
       console.error('Error creating audiobook:', error);
       throw error;
     }
-  }, [currDocText, currDocName, apiKey, baseUrl, voice, voiceSpeed, ttsProvider]);
+  }, [currDocText, currDocName, apiKey, baseUrl, voice, voiceSpeed, ttsProvider, ttsModel, ttsInstructions]);
 
   const contextValue = useMemo(() => ({
     currDocData,

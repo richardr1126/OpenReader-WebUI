@@ -46,7 +46,7 @@ export function ConfirmDialog({
           leaveFrom="opacity-100"
           leaveTo="opacity-0"
         >
-          <div className="fixed inset-0 bg-black/25 backdrop-blur-sm" />
+          <div className="fixed inset-0 overlay-dim backdrop-blur-sm" />
         </TransitionChild>
 
         <div className="fixed inset-0 overflow-y-auto">
@@ -88,8 +88,8 @@ export function ConfirmDialog({
                              font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2
                              transform transition-transform duration-200 ease-in-out hover:scale-[1.04]
                              ${isDangerous 
-                               ? 'bg-red-600 text-white hover:bg-red-700 focus-visible:ring-red-500 hover:text-white' 
-                               : 'bg-accent text-white hover:bg-accent/90 focus-visible:ring-accent hover:text-background'
+                               ? 'bg-accent text-background hover:bg-accent/90 focus-visible:ring-accent' 
+                               : 'bg-accent text-background hover:bg-accent/90 focus-visible:ring-accent'
                              }`}
                     onClick={onConfirm}
                   >

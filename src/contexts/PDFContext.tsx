@@ -35,7 +35,7 @@ import {
 } from '@/utils/pdf';
 
 import type { PDFDocumentProxy } from 'pdfjs-dist';
-import { combineAudioChunks, withRetry } from '@/utils/audio';
+import { withRetry } from '@/utils/audio';
 
 /**
  * Interface defining all available methods and properties in the PDF context
@@ -62,7 +62,8 @@ interface PDFContextType {
     stopAndPlayFromIndex: (index: number) => void,
     isProcessing: boolean
   ) => void;
-  createFullAudioBook: (onProgress: (progress: number) => void, signal?: AbortSignal, format?: 'mp3' | 'm4b') => Promise<ArrayBuffer>;
+  createFullAudioBook: (onProgress: (progress: number) => void, signal?: AbortSignal, onChapterComplete?: (chapter: { index: number; title: string; duration?: number; status: 'pending' | 'generating' | 'completed' | 'error'; bookId?: string; format?: 'mp3' | 'm4b' }) => void, bookId?: string, format?: 'mp3' | 'm4b') => Promise<string>;
+  regenerateChapter: (chapterIndex: number, bookId: string, format: 'mp3' | 'm4b', onProgress: (progress: number) => void, signal: AbortSignal) => Promise<{ index: number; title: string; duration?: number; status: 'pending' | 'generating' | 'completed' | 'error'; bookId?: string; format?: 'mp3' | 'm4b' }>;
   isAudioCombining: boolean;
 }
 
@@ -97,6 +98,8 @@ export function PDFProvider({ children }: { children: ReactNode }) {
     voiceSpeed,
     voice,
     ttsProvider,
+    ttsModel,
+    ttsInstructions,
   } = useConfig();
 
   // Current document state
@@ -104,7 +107,7 @@ export function PDFProvider({ children }: { children: ReactNode }) {
   const [currDocName, setCurrDocName] = useState<string>();
   const [currDocText, setCurrDocText] = useState<string>();
   const [pdfDocument, setPdfDocument] = useState<PDFDocumentProxy>();
-  const [isAudioCombining, setIsAudioCombining] = useState(false);
+  const [isAudioCombining] = useState(false);
 
   /**
    * Handles successful PDF document load
@@ -189,14 +192,16 @@ export function PDFProvider({ children }: { children: ReactNode }) {
    * Creates a complete audiobook by processing all PDF pages through NLP and TTS
    * @param {Function} onProgress - Callback for progress updates
    * @param {AbortSignal} signal - Optional signal for cancellation
-   * @param {string} format - Optional format for the audiobook ('mp3' or 'm4b')
-   * @returns {Promise<ArrayBuffer>} The complete audiobook as an ArrayBuffer
+   * @param {Function} onChapterComplete - Optional callback for when a chapter completes
+   * @returns {Promise<string>} The bookId for the generated audiobook
    */
   const createFullAudioBook = useCallback(async (
     onProgress: (progress: number) => void,
     signal?: AbortSignal,
+    onChapterComplete?: (chapter: { index: number; title: string; duration?: number; status: 'pending' | 'generating' | 'completed' | 'error'; bookId?: string; format?: 'mp3' | 'm4b' }) => void,
+    providedBookId?: string,
     format: 'mp3' | 'm4b' = 'mp3'
-  ): Promise<ArrayBuffer> => {
+  ): Promise<string> => {
     try {
       if (!pdfDocument) {
         throw new Error('No PDF document loaded');
@@ -224,33 +229,72 @@ export function PDFProvider({ children }: { children: ReactNode }) {
         throw new Error('No text content found in PDF');
       }
 
-      const audioChunks: { buffer: ArrayBuffer; title?: string; startTime: number }[] = [];
       let processedLength = 0;
-      let currentTime = 0;
+      let bookId: string = providedBookId || '';
+
+      // If we have a bookId, check for existing chapters to determine which indices already exist
+      const existingIndices = new Set<number>();
+      if (bookId) {
+        try {
+          const existingResponse = await fetch(`/api/audio/convert/chapters?bookId=${bookId}`);
+          if (existingResponse.ok) {
+            const existingData = await existingResponse.json();
+            if (existingData.chapters && existingData.chapters.length > 0) {
+              for (const ch of existingData.chapters) {
+                existingIndices.add(ch.index);
+              }
+              let nextMissing = 0;
+              while (existingIndices.has(nextMissing)) nextMissing++;
+              console.log(`Resuming; next missing page index is ${nextMissing} (page ${nextMissing + 1})`);
+            }
+          }
+        } catch (error) {
+          console.error('Error checking existing chapters:', error);
+        }
+      }
 
       // Second pass: process text into audio
       for (let i = 0; i < textPerPage.length; i++) {
+        // Check for abort at the start of iteration
         if (signal?.aborted) {
-          const partialBuffer = await combineAudioChunks(audioChunks, format, setIsAudioCombining);
-          return partialBuffer;
+          console.log('Generation cancelled by user');
+          if (bookId) {
+            return bookId; // Return bookId with partial progress
+          }
+          throw new Error('Audiobook generation cancelled');
         }
 
         const text = textPerPage[i];
+        
+        // Skip pages that already exist on disk (supports non-contiguous indices)
+        if (existingIndices.has(i)) {
+          processedLength += text.length;
+          onProgress((processedLength / totalLength) * 100);
+          continue;
+        }
         try {
           const audioBuffer = await withRetry(
             async () => {
+              // Check for abort before starting TTS request
+              if (signal?.aborted) {
+                throw new DOMException('Aborted', 'AbortError');
+              }
+
               const ttsResponse = await fetch('/api/tts', {
                 method: 'POST',
                 headers: {
+                  'Content-Type': 'application/json',
                   'x-openai-key': apiKey,
                   'x-openai-base-url': baseUrl,
                   'x-tts-provider': ttsProvider,
                 },
                 body: JSON.stringify({
                   text,
-                  voice: voice,
+                  voice: voice || (ttsProvider === 'openai' ? 'alloy' : (ttsProvider === 'deepinfra' ? 'af_bella' : 'af_sarah')),
                   speed: voiceSpeed,
-                  format: format === 'm4b' ? 'aac' : 'mp3'
+                  format: 'mp3',
+                  model: ttsModel,
+                  instructions: ttsModel === 'gpt-4o-mini-tts' ? ttsInstructions : undefined
                 }),
                 signal
               });
@@ -273,43 +317,239 @@ export function PDFProvider({ children }: { children: ReactNode }) {
             }
           );
 
-          audioChunks.push({
-            buffer: audioBuffer,
-            title: `Page ${i + 1}`,
-            startTime: currentTime
+          const chapterTitle = `Page ${i + 1}`;
+
+          // Check for abort before sending to server
+          if (signal?.aborted) {
+            console.log('Generation cancelled before saving page');
+            if (bookId) {
+              return bookId;
+            }
+            throw new Error('Audiobook generation cancelled');
+          }
+
+          // Send to server for conversion and storage
+          const convertResponse = await fetch('/api/audio/convert', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              chapterTitle,
+              buffer: Array.from(new Uint8Array(audioBuffer)),
+              bookId,
+              format,
+              chapterIndex: i
+            }),
+            signal
           });
 
-          // Add a small pause between pages (1s of silence)
-          const silenceBuffer = new ArrayBuffer(48000);
-          audioChunks.push({
-            buffer: silenceBuffer,
-            startTime: currentTime + (audioBuffer.byteLength / 48000)
-          });
+          if (convertResponse.status === 499) {
+            throw new Error('cancelled');
+          }
 
-          currentTime += (audioBuffer.byteLength + 48000) / 48000;
+          if (!convertResponse.ok) {
+            throw new Error('Failed to convert audio chapter');
+          }
+
+          const { bookId: returnedBookId, chapterIndex, duration } = await convertResponse.json();
+          
+          if (!bookId) {
+            bookId = returnedBookId;
+          }
+
+          // Notify about completed chapter
+          if (onChapterComplete) {
+            onChapterComplete({
+              index: chapterIndex,
+              title: chapterTitle,
+              duration,
+              status: 'completed',
+              bookId,
+              format
+            });
+          }
+
           processedLength += text.length;
           onProgress((processedLength / totalLength) * 100);
 
         } catch (error) {
-          if (error instanceof Error && error.name === 'AbortError') {
-            console.log('TTS request aborted');
-            const partialBuffer = await combineAudioChunks(audioChunks, format, setIsAudioCombining);
-            return partialBuffer;
+          if (error instanceof Error && (error.name === 'AbortError' || error.message.includes('cancelled'))) {
+            console.log('TTS request aborted, returning partial progress');
+            if (bookId) {
+              return bookId; // Return with partial progress
+            }
+            throw new Error('Audiobook generation cancelled');
           }
           console.error('Error processing page:', error);
+          
+          // Notify about error
+          if (onChapterComplete) {
+            onChapterComplete({
+              index: i,
+              title: `Page ${i + 1}`,
+              status: 'error',
+              bookId,
+              format
+            });
+          }
         }
       }
 
-      if (audioChunks.length === 0) {
+      if (!bookId) {
         throw new Error('No audio was generated from the PDF content');
       }
 
-      return combineAudioChunks(audioChunks, format, setIsAudioCombining);
+      return bookId;
     } catch (error) {
       console.error('Error creating audiobook:', error);
       throw error;
     }
-  }, [pdfDocument, headerMargin, footerMargin, leftMargin, rightMargin, apiKey, baseUrl, voice, voiceSpeed, ttsProvider]);
+  }, [pdfDocument, headerMargin, footerMargin, leftMargin, rightMargin, apiKey, baseUrl, voice, voiceSpeed, ttsProvider, ttsModel, ttsInstructions]);
+
+  /**
+   * Regenerates a specific chapter (page) of the PDF audiobook
+   */
+  const regenerateChapter = useCallback(async (
+    chapterIndex: number,
+    bookId: string,
+    format: 'mp3' | 'm4b',
+    onProgress: (progress: number) => void,
+    signal: AbortSignal
+  ): Promise<{ index: number; title: string; duration?: number; status: 'pending' | 'generating' | 'completed' | 'error'; bookId?: string; format?: 'mp3' | 'm4b' }> => {
+    try {
+      if (!pdfDocument) {
+        throw new Error('No PDF document loaded');
+      }
+
+      // IMPORTANT: Chapter indices are based on non-empty pages used during generation.
+      // Build a mapping of "chapterIndex" -> actual PDF page number (1-based).
+      const nonEmptyPages: number[] = [];
+      for (let page = 1; page <= pdfDocument.numPages; page++) {
+        const pageText = await extractTextFromPDF(pdfDocument, page, {
+          header: headerMargin,
+          footer: footerMargin,
+          left: leftMargin,
+          right: rightMargin
+        });
+        if (pageText.trim()) {
+          nonEmptyPages.push(page);
+        }
+      }
+
+      if (chapterIndex < 0 || chapterIndex >= nonEmptyPages.length) {
+        throw new Error('Invalid chapter index');
+      }
+
+      const pageNum = nonEmptyPages[chapterIndex];
+
+      // Extract text from the mapped page
+      const text = await extractTextFromPDF(pdfDocument, pageNum, {
+        header: headerMargin,
+        footer: footerMargin,
+        left: leftMargin,
+        right: rightMargin
+      });
+
+      const trimmedText = text.trim();
+      if (!trimmedText) {
+        throw new Error('No text content found on page');
+      }
+
+      // Use logical chapter numbering (index + 1) to match original generation titles
+      const chapterTitle = `Page ${chapterIndex + 1}`;
+
+      // Generate audio with retry logic
+      const audioBuffer = await withRetry(
+        async () => {
+          if (signal?.aborted) {
+            throw new DOMException('Aborted', 'AbortError');
+          }
+
+          const ttsResponse = await fetch('/api/tts', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-openai-key': apiKey,
+              'x-openai-base-url': baseUrl,
+              'x-tts-provider': ttsProvider,
+            },
+            body: JSON.stringify({
+              text: trimmedText,
+              voice: voice || (ttsProvider === 'openai' ? 'alloy' : (ttsProvider === 'deepinfra' ? 'af_bella' : 'af_sarah')),
+              speed: voiceSpeed,
+              format: 'mp3',
+              model: ttsModel,
+              instructions: ttsModel === 'gpt-4o-mini-tts' ? ttsInstructions : undefined
+            }),
+            signal
+          });
+
+          if (!ttsResponse.ok) {
+            throw new Error(`TTS processing failed with status ${ttsResponse.status}`);
+          }
+
+          const buffer = await ttsResponse.arrayBuffer();
+          if (buffer.byteLength === 0) {
+            throw new Error('Received empty audio buffer from TTS');
+          }
+          return buffer;
+        },
+        {
+          maxRetries: 3,
+          initialDelay: 1000,
+          maxDelay: 5000,
+          backoffFactor: 2
+        }
+      );
+
+      if (signal?.aborted) {
+        throw new Error('Page regeneration cancelled');
+      }
+
+      // Send to server for conversion and storage
+      const convertResponse = await fetch('/api/audio/convert', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          chapterTitle,
+          buffer: Array.from(new Uint8Array(audioBuffer)),
+          bookId,
+          format,
+          chapterIndex
+        }),
+        signal
+      });
+
+      if (convertResponse.status === 499) {
+        throw new Error('cancelled');
+      }
+
+      if (!convertResponse.ok) {
+        throw new Error('Failed to convert audio chapter');
+      }
+
+      const { chapterIndex: returnedIndex, duration } = await convertResponse.json();
+
+      return {
+        index: returnedIndex,
+        title: chapterTitle,
+        duration,
+        status: 'completed',
+        bookId,
+        format
+      };
+
+    } catch (error) {
+      if (error instanceof Error && (error.name === 'AbortError' || error.message.includes('cancelled'))) {
+        throw new Error('Page regeneration cancelled');
+      }
+      console.error('Error regenerating page:', error);
+      throw error;
+    }
+  }, [pdfDocument, headerMargin, footerMargin, leftMargin, rightMargin, apiKey, baseUrl, voice, voiceSpeed, ttsProvider, ttsModel, ttsInstructions]);
 
   /**
    * Effect hook to initialize TTS as non-EPUB mode
@@ -334,6 +574,7 @@ export function PDFProvider({ children }: { children: ReactNode }) {
       handleTextClick,
       pdfDocument,
       createFullAudioBook,
+      regenerateChapter,
       isAudioCombining,
     }),
     [
@@ -347,6 +588,7 @@ export function PDFProvider({ children }: { children: ReactNode }) {
       clearCurrDoc,
       pdfDocument,
       createFullAudioBook,
+      regenerateChapter,
       isAudioCombining,
     ]
   );

@@ -90,7 +90,8 @@ export const combineAudioChunks = async (
           body: JSON.stringify({
             chapterTitle: chunk.title,
             buffer: Array.from(new Uint8Array(chunk.buffer)),
-            bookId // Will be undefined for first chunk, then set for subsequent ones
+            bookId, // Will be undefined for first chunk, then set for subsequent ones
+            format
           }),
         });
 
@@ -106,8 +107,8 @@ export const combineAudioChunks = async (
         throw new Error('No book ID received from server');
       }
 
-      // Get the final combined M4B file
-      const m4bResponse = await fetch(`/api/audio/convert?bookId=${bookId}`);
+      // Get the final combined M4B/MP3 file
+      const m4bResponse = await fetch(`/api/audio/convert?bookId=${bookId}&format=${format}`);
       if (!m4bResponse.ok) {
         throw new Error('Failed to get combined M4B');
       }

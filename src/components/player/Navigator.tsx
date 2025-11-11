@@ -64,7 +64,7 @@ export const Navigator = ({ currentPage, numPages, skipToLocation }: {
       <Button
         onClick={() => skipToLocation(currentPage - 1, true)}
         disabled={currentPage <= 1}
-        className="relative p-2 rounded-full text-foreground hover:bg-offbase data-[hover]:bg-offbase data-[active]:bg-offbase/80 transition-colors duration-200 focus:outline-none disabled:opacity-50"
+        className="relative p-2 rounded-full text-foreground hover:bg-offbase data-[hover]:bg-offbase data-[active]:bg-offbase transition-all duration-200 focus:outline-none disabled:opacity-50 transform ease-in-out hover:scale-[1.09] hover:text-accent"
         aria-label="Previous page"
       >
         <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
@@ -82,7 +82,7 @@ export const Navigator = ({ currentPage, numPages, skipToLocation }: {
           return (
             <>
               <PopoverButton
-                className="bg-offbase px-2 py-0.5 rounded-full focus:outline-none cursor-pointer hover:bg-offbase/80"
+                className="bg-offbase px-2 py-0.5 rounded-full focus:outline-none cursor-pointer hover:bg-offbase transform transition-transform duration-200 ease-in-out hover:scale-[1.04] hover:text-accent"
                 onClick={handlePopoverOpen}
               >
                 <p className="text-xs whitespace-nowrap">
@@ -105,7 +105,7 @@ export const Navigator = ({ currentPage, numPages, skipToLocation }: {
                     placeholder={currentPage.toString()}
                     aria-label="Page number"
                   />
-                  <div className="text-xs text-foreground/70 text-center">of {numPages || 1}</div>
+                  <div className="text-xs text-muted text-center">of {numPages || 1}</div>
                 </div>
               </PopoverPanel>
             </>
@@ -117,7 +117,7 @@ export const Navigator = ({ currentPage, numPages, skipToLocation }: {
       <Button
         onClick={() => skipToLocation(currentPage + 1, true)}
         disabled={currentPage >= (numPages || 1)}
-        className="relative p-2 rounded-full text-foreground hover:bg-offbase data-[hover]:bg-offbase data-[active]:bg-offbase/80 transition-colors duration-200 focus:outline-none disabled:opacity-50"
+        className="relative p-2 rounded-full text-foreground hover:bg-offbase data-[hover]:bg-offbase data-[active]:bg-offbase transition-all duration-200 focus:outline-none disabled:opacity-50 transform ease-in-out hover:scale-[1.09] hover:text-accent"
         aria-label="Next page"
       >
         <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor">
