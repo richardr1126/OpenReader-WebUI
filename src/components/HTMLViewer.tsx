@@ -24,7 +24,7 @@ export function HTMLViewer({ className = '' }: HTMLViewerProps) {
     return (
       <div className={`flex flex-col h-full ${className}`} ref={containerRef}>
         <div className="flex-1 overflow-auto">
-          <div className={`min-w-full px-4 py-4 ${isTxtFile ? 'whitespace-pre-wrap font-mono text-sm' : 'prose prose-base'}`}>
+          <div className={`html-container min-w-full px-4 py-4 ${isTxtFile ? 'whitespace-pre-wrap font-mono text-sm' : 'prose prose-base'}`}>
             {isTxtFile ? (
               currDocData
             ) : (

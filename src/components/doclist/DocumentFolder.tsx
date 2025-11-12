@@ -70,11 +70,15 @@ export function DocumentFolder({
             <div className="flex items-center">
               <h3 className="text-sm px-1 font-semibold leading-tight">{folder.name}</h3>
                 <Button
-                onClick={() => onToggleCollapse(folder.id)}
-                className="ml-0.5 transform transition-transform duration-200 ease-in-out hover:scale-[1.08] hover:text-accent"
-                aria-label={isCollapsed ? "Expand folder" : "Collapse folder"}
+                  type="button"
+                  onClick={() => onToggleCollapse(folder.id)}
+                  className="ml-0.5 p-1 inline-flex items-center justify-center transform transition-transform duration-200 ease-in-out hover:scale-[1.08] hover:text-accent"
+                  aria-label={isCollapsed ? "Expand folder" : "Collapse folder"}
+                  aria-expanded={!isCollapsed}
+                  aria-controls={`folder-panel-${folder.id}`}
+                  title={isCollapsed ? "Expand folder" : "Collapse folder"}
                 >
-                <ChevronIcon className={`transform transition-transform duration-300 ease-in-out ${isCollapsed ? '-rotate-180' : ''}`} />
+                  <ChevronIcon className={`w-4 h-4 transform transition-transform duration-300 ease-in-out ${isCollapsed ? '-rotate-180' : ''}`} />
                 </Button>
             </div>
             <Button
@@ -98,7 +102,7 @@ export function DocumentFolder({
               leaveFrom="transform scale-y-100 opacity-100 max-h-[1000px]"
               leaveTo="transform scale-y-0 opacity-0 max-h-0"
             >
-              <div className="space-y-1 origin-top">
+              <div id={`folder-panel-${folder.id}`} className="space-y-1 origin-top">
                 {sortedDocuments.map(doc => (
                   <DocumentListItem
                     key={`${doc.type}-${doc.id}`}
