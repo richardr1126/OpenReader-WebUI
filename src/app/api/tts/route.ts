@@ -23,6 +23,87 @@ const ttsAudioCache = new LRUCache<string, AudioBufferValue>({
   ttl: TTS_CACHE_TTL_MS,
 });
 
+// Concurrency controls and in-flight de-duplication
+const TTS_MAX_CONCURRENCY = Number(process.env.TTS_MAX_CONCURRENCY || 4);
+
+class Semaphore {
+  private permits: number;
+  private queue: Array<() => void> = [];
+  constructor(max: number) {
+    this.permits = Math.max(1, max);
+  }
+  async acquire(): Promise<() => void> {
+    if (this.permits > 0) {
+      this.permits -= 1;
+      return this.release.bind(this);
+    }
+    return new Promise<() => void>((resolve) => {
+      this.queue.push(() => {
+        this.permits -= 1;
+        resolve(this.release.bind(this));
+      });
+    });
+  }
+  private release() {
+    this.permits += 1;
+    const next = this.queue.shift();
+    if (next) next();
+  }
+}
+
+const ttsSemaphore = new Semaphore(TTS_MAX_CONCURRENCY);
+
+type InflightEntry = {
+  promise: Promise<ArrayBuffer>;
+  controller: AbortController;
+  consumers: number;
+};
+
+const inflightRequests = new Map<string, InflightEntry>();
+
+function sleep(ms: number) {
+  return new Promise((res) => setTimeout(res, ms));
+}
+
+async function fetchTTSBufferWithRetry(
+  openai: OpenAI,
+  createParams: ExtendedSpeechParams,
+  signal: AbortSignal
+): Promise<ArrayBuffer> {
+  let attempt = 0;
+  const maxRetries = Number(process.env.TTS_MAX_RETRIES ?? 2);
+  let delay = Number(process.env.TTS_RETRY_INITIAL_MS ?? 250);
+  const maxDelay = Number(process.env.TTS_RETRY_MAX_MS ?? 2000);
+  const backoff = Number(process.env.TTS_RETRY_BACKOFF ?? 2);
+
+  // Retry on 429 and 5xx only; never retry aborts
+  for (;;) {
+    try {
+      const response = await openai.audio.speech.create(createParams as SpeechCreateParams, { signal });
+      return await response.arrayBuffer();
+    } catch (err: unknown) {
+      if (signal?.aborted || (err instanceof Error && err.name === 'AbortError')) {
+        throw err;
+      }
+      const status = (() => {
+        if (typeof err === 'object' && err !== null) {
+          const rec = err as Record<string, unknown>;
+          if (typeof rec.status === 'number') return rec.status as number;
+          if (typeof rec.statusCode === 'number') return rec.statusCode as number;
+        }
+        return 0;
+      })();
+      const retryable = status === 429 || status >= 500;
+      if (!retryable || attempt >= maxRetries) {
+        throw err;
+      }
+      await sleep(Math.min(delay, maxDelay));
+      delay = Math.min(maxDelay, delay * backoff);
+      attempt += 1;
+    }
+  }
+}
+
 function makeCacheKey(input: {
   provider: string;
   model: string | null | undefined;
@@ -102,30 +183,108 @@ export async function POST(req: NextRequest) {
       instructions: createParams.instructions,
     });
 
+    const etag = `W/"${cacheKey}"`;
+    const ifNoneMatch = req.headers.get('if-none-match');
+
     const cachedBuffer = ttsAudioCache.get(cacheKey);
     if (cachedBuffer) {
+      if (ifNoneMatch && (ifNoneMatch.includes(cacheKey) || ifNoneMatch.includes(etag))) {
+        return new NextResponse(null, {
+          status: 304,
+          headers: {
+            'ETag': etag,
+            'Cache-Control': 'private, max-age=1800',
+            'Vary': 'x-tts-provider, x-openai-key, x-openai-base-url'
+          }
+        });
+      }
       console.log('TTS cache HIT for key:', cacheKey.slice(0, 8));
       return new NextResponse(cachedBuffer, {
         headers: {
           'Content-Type': contentType,
           'X-Cache': 'HIT',
+          'ETag': etag,
+          'Content-Length': String(cachedBuffer.byteLength),
+          'Cache-Control': 'private, max-age=1800',
+          'Vary': 'x-tts-provider, x-openai-key, x-openai-base-url'
         }
       });
     }
 
-    const response = await openai.audio.speech.create(createParams as SpeechCreateParams, { signal: req.signal });
+    // De-duplicate identical in-flight requests and bound upstream concurrency
+    const existing = inflightRequests.get(cacheKey);
+    if (existing) {
+      console.log('TTS in-flight JOIN for key:', cacheKey.slice(0, 8));
+      existing.consumers += 1;
 
-    // Read the audio data as an ArrayBuffer and return it with appropriate headers
-    // This will also be aborted if the client cancels
-    const buffer = await response.arrayBuffer();
+      const onAbort = (_evt: Event) => {
+        existing.consumers = Math.max(0, existing.consumers - 1);
+        if (existing.consumers === 0) {
+          existing.controller.abort();
+        }
+      };
+      req.signal.addEventListener('abort', onAbort, { once: true });
 
-    // Save to cache
-    ttsAudioCache.set(cacheKey, buffer);
+      try {
+        const buffer = await existing.promise;
+        return new NextResponse(buffer, {
+          headers: {
+            'Content-Type': contentType,
+            'X-Cache': 'INFLIGHT',
+            'ETag': etag,
+            'Content-Length': String(buffer.byteLength),
+            'Cache-Control': 'private, max-age=1800',
+            'Vary': 'x-tts-provider, x-openai-key, x-openai-base-url'
+          }
+        });
+      } finally {
+        try { req.signal.removeEventListener('abort', onAbort); } catch {}
+      }
+    }
+
+    const controller = new AbortController();
+    const entry: InflightEntry = {
+      controller,
+      consumers: 1,
+      promise: (async () => {
+        const release = await ttsSemaphore.acquire();
+        try {
+          const buffer = await fetchTTSBufferWithRetry(openai, createParams, controller.signal);
+          // Save to cache
+          ttsAudioCache.set(cacheKey, buffer);
+          return buffer;
+        } finally {
+          release();
+          inflightRequests.delete(cacheKey);
+        }
+      })()
+    };
+
+    inflightRequests.set(cacheKey, entry);
+
+    const onAbort = (_evt: Event) => {
+      entry.consumers = Math.max(0, entry.consumers - 1);
+      if (entry.consumers === 0) {
+        entry.controller.abort();
+      }
+    };
+    req.signal.addEventListener('abort', onAbort, { once: true });
+
+    let buffer: ArrayBuffer;
+    try {
+      buffer = await entry.promise;
+    } finally {
+      try { req.signal.removeEventListener('abort', onAbort); } catch {}
+    }
 
     return new NextResponse(buffer, {
       headers: {
         'Content-Type': contentType,
-        'X-Cache': 'MISS'
+        'X-Cache': 'MISS',
+        'ETag': etag,
+        'Content-Length': String(buffer.byteLength),
+        'Cache-Control': 'private, max-age=1800',
+        'Vary': 'x-tts-provider, x-openai-key, x-openai-base-url'
       }
     });
   } catch (error) {

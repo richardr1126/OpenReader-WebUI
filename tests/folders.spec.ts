@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { setupTest, uploadFiles, ensureDocumentsListed, deleteAllLocalDocuments } from './helpers';
+import { setupTest, uploadFiles, ensureDocumentsListed, deleteAllLocalDocuments, waitForDocumentListHintPersist } from './helpers';
 
 test.describe('Document folders and hint persistence', () => {
   test.beforeEach(async ({ page }) => {
@@ -87,6 +87,9 @@ test.describe('Document folders and hint persistence', () => {
 
     // Hint should disappear
     await expect(hint).toHaveCount(0);
+
+    // Ensure the dismissal has been persisted to IndexedDB before reloading
+    await waitForDocumentListHintPersist(page, false);
 
     // Reload and ensure it remains dismissed
     await page.reload();

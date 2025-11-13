@@ -49,20 +49,8 @@ export async function waitAndClickPlay(page: Page) {
   await expect(page.getByRole('button', { name: 'Play' })).toBeVisible();
   // Play the TTS by clicking the button
   await page.getByRole('button', { name: 'Play' }).click();
-
-  // Expect for buttons to be disabled
-  await expect(page.locator('button[aria-label="Skip forward"][disabled]')).toBeVisible();
-  await expect(page.locator('button[aria-label="Skip backward"][disabled]')).toBeVisible();
-
-  // Wait for the TTS to stop processing
-  await Promise.all([
-    page.waitForSelector('button[aria-label="Skip forward"]:not([disabled])', { timeout: 45000 }),
-    page.waitForSelector('button[aria-label="Skip backward"]:not([disabled])', { timeout: 45000 }),
-  ]);
-
-  await page.waitForFunction(() => {
-    return navigator.mediaSession?.playbackState === 'playing';
-  });
+  // Use resilient processing transition helper (tolerates fast completion)
+  await expectProcessingTransition(page);
 }
 
 /**
@@ -93,7 +81,7 @@ export async function pauseTTSAndVerify(page: Page) {
 export async function setupTest(page: Page) {
   // Navigate to the home page before each test
   await page.goto('/');
-  //await page.waitForLoadState('networkidle');
+  await page.waitForLoadState('networkidle');
 
   // If running in CI, select the "Custom OpenAI-Like" model and "Deepinfra" provider
   if (process.env.CI) {
@@ -323,7 +311,37 @@ export async function changeNativeSpeedAndAssert(page: Page, newSpeed: number) {
 
 // Expect navigator.mediaSession.playbackState to equal given state
 export async function expectMediaState(page: Page, state: 'playing' | 'paused') {
-  await page.waitForFunction((s) => navigator.mediaSession?.playbackState === s, state, { timeout: 20000 });
+  // WebKit (and sometimes other engines) may not reliably update navigator.mediaSession.playbackState.
+  // Fallback heuristics:
+  // 1. Prefer mediaSession if it matches desired state.
+  // 2. Otherwise inspect any <audio> element: use paused flag and currentTime progression.
+  // 3. Allow short grace period for first frame to advance.
+  // 4. If neither detectable, keep polling until timeout.
+  await page.waitForFunction((desired) => {
+    try {
+      const msState = (navigator.mediaSession && navigator.mediaSession.playbackState) || '';
+      if (msState === desired) return true;
+
+      const audio: HTMLAudioElement | null = document.querySelector('audio');
+      if (audio) {
+        // Track advancement by storing last time on the element dataset
+        const last = parseFloat(audio.dataset.lastTime || '0');
+        const curr = audio.currentTime;
+        audio.dataset.lastTime = String(curr);
+
+        if (desired === 'playing') {
+          // Consider playing if not paused AND time has advanced at least a tiny amount
+          if (!audio.paused && curr > 0 && curr > last) return true;
+        } else {
+            // paused target
+            if (audio.paused) return true;
+        }
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  }, state, { timeout: 25000 });
 }
 
 // Use Navigator to go to a specific page number (PDF)
@@ -352,4 +370,36 @@ export async function countRenderedTextLayers(page: Page): Promise<number> {
 // Force viewport resize to trigger resize hooks (e.g., EPUB)
 export async function triggerViewportResize(page: Page, width: number, height: number) {
   await page.setViewportSize({ width, height });
+}
+
+// Wait for DocumentListState.showHint to persist in IndexedDB 'config' store
+export async function waitForDocumentListHintPersist(page: Page, expected: boolean) {
+  await page.waitForFunction(async (exp) => {
+    try {
+      const openDb = () => new Promise<IDBDatabase>((resolve, reject) => {
+        const req = indexedDB.open('openreader-db');
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+      const db = await openDb();
+      const readConfig = () => new Promise<any>((resolve, reject) => {
+        const tx = db.transaction(['config'], 'readonly');
+        const store = tx.objectStore('config');
+        const getReq = store.get('documentListState');
+        getReq.onsuccess = () => resolve(getReq.result);
+        getReq.onerror = () => reject(getReq.error);
+      });
+      const item = await readConfig();
+      db.close();
+      if (!item || typeof item.value !== 'string') return false;
+      try {
+        const parsed = JSON.parse(item.value);
+        return parsed && parsed.showHint === exp;
+      } catch {
+        return false;
+      }
+    } catch {
+      return false;
+    }
+  }, expected, { timeout: 5000 });
 }
