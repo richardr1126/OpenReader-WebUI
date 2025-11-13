@@ -8,13 +8,8 @@ import {
 } from '@headlessui/react';
 import { ChevronUpDownIcon, AudioWaveIcon } from '@/components/icons/Icons';
 import { useConfig } from '@/contexts/ConfigContext';
-import { useEffect, useMemo, useState, useCallback } from 'react';
-import { 
-  parseKokoroVoiceNames, 
-  buildKokoroVoiceString, 
-  getMaxVoicesForProvider,
-  isKokoroModel 
-} from '@/utils/voice';
+import { useEffect, useMemo, useState } from 'react';
+import { parseKokoroVoiceNames, buildKokoroVoiceString, isKokoroModel, getMaxVoicesForProvider } from '@/utils/voice';
 
 export const VoicesControl = ({ availableVoices, setVoiceAndRestart }: {
   availableVoices: string[];
@@ -23,20 +18,13 @@ export const VoicesControl = ({ availableVoices, setVoiceAndRestart }: {
   const { voice: configVoice, ttsModel, ttsProvider } = useConfig();
 
   const isKokoro = isKokoroModel(ttsModel);
-  const maxVoices = getMaxVoicesForProvider(ttsProvider, ttsModel || '');
-
-  const clampToLimit = useCallback((names: string[]): string[] => {
-    if (maxVoices === Infinity) return names;
-    if (names.length <= maxVoices) return names;
-    // For initial clamp, keep the first up to max allowed
-    return names.slice(0, maxVoices);
-  }, [maxVoices]);
+  const maxVoices = getMaxVoicesForProvider(ttsProvider, ttsModel);
 
   // Local selection state for Kokoro multi-select
   const [selectedVoices, setSelectedVoices] = useState<string[]>([]);
 
   useEffect(() => {
-    if (!isKokoro) return;
+    if (!(isKokoro && maxVoices > 1)) return;
     let initial: string[] = [];
     if (configVoice && configVoice.includes('+')) {
       initial = parseKokoroVoiceNames(configVoice);
@@ -45,23 +33,27 @@ export const VoicesControl = ({ availableVoices, setVoiceAndRestart }: {
     } else if (availableVoices.length > 0) {
       initial = [availableVoices[0]];
     }
-    setSelectedVoices(clampToLimit(initial));
-  }, [isKokoro, configVoice, availableVoices, maxVoices, clampToLimit]);
+    // Clamp to provider limit
+    if (initial.length > maxVoices) {
+      initial = initial.slice(0, maxVoices);
+    }
+    setSelectedVoices(initial);
+  }, [isKokoro, maxVoices, configVoice, availableVoices]);
 
-  // If the saved voice is not in the available list, use the first available voice (non-Kokoro)
+  // If the saved voice is not in the available list, use the first available voice (non-Kokoro or Kokoro limited)
   const currentVoice = useMemo(() => {
-    if (isKokoro) {
+    if (isKokoro && maxVoices > 1) {
       const combined = buildKokoroVoiceString(selectedVoices);
       return combined || (availableVoices[0] || '');
     }
     return (configVoice && availableVoices.includes(configVoice))
       ? configVoice
       : availableVoices[0] || '';
-  }, [isKokoro, selectedVoices, availableVoices, configVoice]);
+  }, [isKokoro, maxVoices, selectedVoices, availableVoices, configVoice]);
 
   return (
     <div className="relative">
-      {isKokoro ? (
+      {(isKokoro && maxVoices > 1) ? (
         <Listbox
           multiple
           value={selectedVoices}
@@ -70,17 +62,14 @@ export const VoicesControl = ({ availableVoices, setVoiceAndRestart }: {
 
             let next = vals;
 
-            // Enforce deepinfra max selection of 2 voices
-            if (maxVoices !== Infinity && vals.length > maxVoices) {
-              // Determine the newly added voice
+            // Enforce provider max selection
+            if (vals.length > maxVoices) {
               const newlyAdded = vals.find(v => !selectedVoices.includes(v));
               if (newlyAdded) {
                 const lastPrev = selectedVoices[selectedVoices.length - 1] ?? selectedVoices[0] ?? '';
-                // Build next as [last previously selected, newly added], deduped, limited to max
                 const pair = Array.from(new Set([lastPrev, newlyAdded])).filter(Boolean);
                 next = pair.slice(0, maxVoices);
               } else {
-                // Fallback: keep the last maxVoices options
                 next = vals.slice(-maxVoices);
               }
             }

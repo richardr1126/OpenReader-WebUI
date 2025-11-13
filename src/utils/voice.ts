@@ -66,8 +66,8 @@ export const stripVoiceWeights = (voiceString: string): string => {
 export const getMaxVoicesForProvider = (provider: string, model: string): number => {
   if (!isKokoroModel(model)) return 1;
   
-  // Deepinfra Kokoro supports up to 2 voices
-  if (provider === 'deepinfra') return 2;
+  // Deepinfra Kokoro does not support multiple voices
+  if (provider === 'deepinfra') return 1;
   
   // Other providers with Kokoro support unlimited voices
   return Infinity;

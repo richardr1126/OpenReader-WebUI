@@ -1,13 +1,49 @@
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { SpeechCreateParams } from 'openai/resources/audio/speech.mjs';
-import { isKokoroModel, stripVoiceWeights } from '@/utils/voice';
+import { isKokoroModel } from '@/utils/voice';
+import { LRUCache } from 'lru-cache';
+import { createHash } from 'crypto';
+
+export const runtime = 'nodejs';
 
 type CustomVoice = string;
 type ExtendedSpeechParams = Omit<SpeechCreateParams, 'voice'> & {
   voice: SpeechCreateParams['voice'] | CustomVoice;
   instructions?: string;
 };
+type AudioBufferValue = ArrayBuffer;
+
+const TTS_CACHE_MAX_SIZE_BYTES = Number(process.env.TTS_CACHE_MAX_SIZE_BYTES || 256 * 1024 * 1024); // 256MB
+const TTS_CACHE_TTL_MS = Number(process.env.TTS_CACHE_TTL_MS || 1000 * 60 * 30); // 30 minutes
+
+const ttsAudioCache = new LRUCache<string, AudioBufferValue>({
+  maxSize: TTS_CACHE_MAX_SIZE_BYTES,
+  sizeCalculation: (value) => value.byteLength,
+  ttl: TTS_CACHE_TTL_MS,
+});
+
+function makeCacheKey(input: {
+  provider: string;
+  model: string | null | undefined;
+  voice: string | undefined;
+  speed: number;
+  format: string;
+  text: string;
+  instructions?: string;
+}) {
+  const canonical = {
+    provider: input.provider,
+    model: input.model || '',
+    voice: input.voice || '',
+    speed: input.speed,
+    format: input.format,
+    text: input.text,
+    // Only include instructions when present (for models like gpt-4o-mini-tts)
+    instructions: input.instructions || undefined,
+  };
+  return createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -15,24 +51,14 @@ export async function POST(req: NextRequest) {
     const openApiKey = req.headers.get('x-openai-key') || process.env.API_KEY || 'none';
     const openApiBaseUrl = req.headers.get('x-openai-base-url') || process.env.API_BASE;
     const provider = req.headers.get('x-tts-provider') || 'openai';
-    const { text, voice, speed, format, model, instructions } = await req.json();
-    console.log('Received TTS request:', { provider, model, voice, speed, format, hasInstructions: Boolean(instructions) });
+    const { text, voice, speed, format, model: req_model, instructions } = await req.json();
+    console.log('Received TTS request:', { provider, req_model, voice, speed, format, hasInstructions: Boolean(instructions) });
 
     if (!text || !voice || !speed) {
       return NextResponse.json({ error: 'Missing required parameters' }, { status: 400 });
     }
-
-    // Apply Deepinfra defaults if provider is deepinfra
-    const finalModel = provider === 'deepinfra' && !model ? 'hexgrad/Kokoro-82M' : model;
-    const initialVoice = provider === 'deepinfra' && !voice ? 'af_bella' : voice;
-
-    // For SDK providers (OpenAI/Deepinfra), preserve multi-voice for Kokoro models, otherwise normalize to first token
-    const isKokoro = isKokoroModel(finalModel);
-    let normalizedVoice = initialVoice;
-    if (!isKokoro && typeof normalizedVoice === 'string' && normalizedVoice.includes('+')) {
-      normalizedVoice = stripVoiceWeights(normalizedVoice.split('+')[0]);
-      console.log('Normalized multi-voice to single for non-Kokoro SDK provider:', normalizedVoice);
-    }
+    // Use default Kokoro model for Deepinfra if none specified
+    const model = provider === 'deepinfra' && !req_model ? 'hexgrad/Kokoro-82M' : req_model;
 
     // Initialize OpenAI client with abort signal (OpenAI/deepinfra)
     const openai = new OpenAI({
@@ -40,20 +66,51 @@ export async function POST(req: NextRequest) {
       baseURL: openApiBaseUrl,
     });
 
-    // Unified path: all providers (openai, deepinfra, custom-openai) go through the SDK below.
-
-    // Request audio from OpenAI and pass along the abort signal
+    const normalizedVoice = (
+      !isKokoroModel(model) && voice.includes('+')
+      ? (voice.split('+')[0].trim())
+      : voice
+    ) as SpeechCreateParams['voice'];
+    
     const createParams: ExtendedSpeechParams = {
-      model: finalModel || 'tts-1',
-      voice: normalizedVoice as SpeechCreateParams['voice'],
+      model: model,
+      voice: normalizedVoice,
       input: text,
       speed: speed,
       response_format: format === 'aac' ? 'aac' : 'mp3',
     };
-
     // Only add instructions if model is gpt-4o-mini-tts and instructions are provided
-    if (finalModel === 'gpt-4o-mini-tts' && instructions) {
+    if (model === 'gpt-4o-mini-tts' && instructions) {
       createParams.instructions = instructions;
+    }
+
+    // Compute cache key and check LRU before making provider call
+    const contentType = format === 'aac' ? 'audio/aac' : 'audio/mpeg';
+
+    // Preserve voice string as-is for cache key (no weight stripping)
+    const voiceForKey = typeof createParams.voice === 'string'
+      ? createParams.voice
+      : String(createParams.voice);
+
+    const cacheKey = makeCacheKey({
+      provider,
+      model: createParams.model,
+      voice: voiceForKey,
+      speed: Number(createParams.speed),
+      format: String(createParams.response_format),
+      text,
+      instructions: createParams.instructions,
+    });
+
+    const cachedBuffer = ttsAudioCache.get(cacheKey);
+    if (cachedBuffer) {
+      console.log('TTS cache HIT for key:', cacheKey.slice(0, 8));
+      return new NextResponse(cachedBuffer, {
+        headers: {
+          'Content-Type': contentType,
+          'X-Cache': 'HIT',
+        }
+      });
     }
 
     const response = await openai.audio.speech.create(createParams as SpeechCreateParams, { signal: req.signal });
@@ -61,10 +118,14 @@ export async function POST(req: NextRequest) {
     // Read the audio data as an ArrayBuffer and return it with appropriate headers
     // This will also be aborted if the client cancels
     const buffer = await response.arrayBuffer();
-    const contentType = format === 'aac' ? 'audio/aac' : 'audio/mpeg';
+
+    // Save to cache
+    ttsAudioCache.set(cacheKey, buffer);
+
     return new NextResponse(buffer, {
       headers: {
-        'Content-Type': contentType
+        'Content-Type': contentType,
+        'X-Cache': 'MISS'
       }
     });
   } catch (error) {
