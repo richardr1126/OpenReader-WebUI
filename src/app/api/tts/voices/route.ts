@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { isKokoroModel } from '@/utils/voice';
 
 const OPENAI_VOICES = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'];
 const GPT4O_MINI_VOICES = ['alloy', 'ash', 'coral', 'echo', 'fable', 'onyx', 'nova', 'sage', 'shimmer'];
@@ -29,6 +30,10 @@ function getDefaultVoices(provider: string, model: string): string[] {
   
   // For Custom OpenAI-Like provider
   if (provider === 'custom-openai') {
+    // If using Kokoro-FastAPI (model string contains 'kokoro'), expose full Kokoro voices
+    if (isKokoroModel(model)) {
+      return KOKORO_VOICES;
+    }
     return CUSTOM_OPENAI_VOICES;
   }
   
@@ -72,7 +77,7 @@ async function fetchDeepinfraVoices(apiKey: string): Promise<string[]> {
     }
 
     const data = await response.json();
-    //console.log('Deepinfra voices response:', data);
+    
     // Extract voice names from the response, excluding preset voices
     if (data.voices && Array.isArray(data.voices)) {
       return data.voices

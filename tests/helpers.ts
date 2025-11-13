@@ -93,13 +93,15 @@ export async function pauseTTSAndVerify(page: Page) {
 export async function setupTest(page: Page) {
   // Navigate to the home page before each test
   await page.goto('/');
-  await page.waitForLoadState('networkidle');
+  //await page.waitForLoadState('networkidle');
 
+  // If running in CI, select the "Custom OpenAI-Like" model and "Deepinfra" provider
+  //if (process.env.CI) {
   await page.getByRole('button', { name: 'Custom OpenAI-Like' }).click();
   await page.getByText('Deepinfra').click();
+  //}
 
   // Click the "done" button to dismiss the welcome message
-  await page.getByRole('tab', { name: '🔑 API' }).click();
   await page.getByRole('button', { name: 'Save' }).click();
 }
 

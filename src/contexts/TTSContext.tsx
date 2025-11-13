@@ -38,6 +38,7 @@ import { getLastDocumentLocation, setLastDocumentLocation } from '@/utils/indexe
 import { useBackgroundState } from '@/hooks/audio/useBackgroundState';
 import { withRetry } from '@/utils/audio';
 import { processTextToSentences } from '@/utils/nlp';
+import { isKokoroModel } from '@/utils/voice';
 
 // Media globals
 declare global {
@@ -155,6 +156,8 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
   const activeAbortControllers = useRef<Set<AbortController>>(new Set());
   // Track if we're restoring from a saved position
   const [pendingRestoreIndex, setPendingRestoreIndex] = useState<number | null>(null);
+  // Guard to coalesce rapid restarts and only resume the latest change
+  const restartSeqRef = useRef(0);
 
   /**
    * Processes text into sentences using the shared NLP utility
@@ -412,19 +415,31 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
    */
   useEffect(() => {
     if (availableVoices.length > 0) {
+      // Allow Kokoro multi-voice strings (e.g., "voice1(0.5)+voice2(0.5)") for any provider
+      const isKokoro = isKokoroModel(configTTSModel);
+
+      if (isKokoro) {
+        // If Kokoro and we have any voice string (including plus/weights), don't override it.
+        // Only default when voice is empty.
+        if (!voice) {
+          setVoice(availableVoices[0]);
+        }
+        return;
+      }
+
       if (!voice || !availableVoices.includes(voice)) {
         console.log(`Voice "${voice || '(empty)'}" not found in available voices. Using "${availableVoices[0]}"`);
         setVoice(availableVoices[0]);
         // Don't save to config - just use it temporarily until user explicitly selects one
       }
     }
-  }, [availableVoices, voice]);
+  }, [availableVoices, voice, configTTSModel]);
 
   /**
    * Generates and plays audio for the current sentence
    * 
    * @param {string} sentence - The sentence to generate audio for
-   * @returns {Promise<AudioBuffer | undefined>} The generated audio buffer
+   * @returns {Promise<ArrayBuffer | undefined>} The generated audio buffer
    */
   const getAudio = useCallback(async (sentence: string): Promise<ArrayBuffer | undefined> => {
     // Check if the audio is already cached
@@ -791,6 +806,9 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
   const setSpeedAndRestart = useCallback((newSpeed: number) => {
     const wasPlaying = isPlaying;
 
+    // Bump restart sequence to invalidate older restarts
+    const mySeq = ++restartSeqRef.current;
+
     // Set a flag to prevent double audio requests during config update
     setIsProcessing(true);
 
@@ -806,8 +824,8 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     // Update config after state changes
     updateConfigKey('voiceSpeed', newSpeed).then(() => {
       setIsProcessing(false);
-      // Resume playback if it was playing before
-      if (wasPlaying) {
+      // Resume playback if it was playing before and this is the latest restart
+      if (wasPlaying && mySeq === restartSeqRef.current) {
         setIsPlaying(true);
       }
     });
@@ -820,6 +838,9 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
    */
   const setVoiceAndRestart = useCallback((newVoice: string) => {
     const wasPlaying = isPlaying;
+
+    // Bump restart sequence to invalidate older restarts
+    const mySeq = ++restartSeqRef.current;
 
     // Set a flag to prevent double audio requests during config update
     setIsProcessing(true);
@@ -836,8 +857,8 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     // Update config after state changes
     updateConfigKey('voice', newVoice).then(() => {
       setIsProcessing(false);
-      // Resume playback if it was playing before
-      if (wasPlaying) {
+      // Resume playback if it was playing before and this is the latest restart
+      if (wasPlaying && mySeq === restartSeqRef.current) {
         setIsPlaying(true);
       }
     });
@@ -850,6 +871,9 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
    */
   const setAudioPlayerSpeedAndRestart = useCallback((newSpeed: number) => {
     const wasPlaying = isPlaying;
+
+    // Bump restart sequence to invalidate older restarts
+    const mySeq = ++restartSeqRef.current;
 
     // Set a flag to prevent double audio requests during config update
     setIsProcessing(true);
@@ -865,8 +889,8 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     // Update config after state changes
     updateConfigKey('audioPlayerSpeed', newSpeed).then(() => {
       setIsProcessing(false);
-      // Resume playback if it was playing before
-      if (wasPlaying) {
+      // Resume playback if it was playing before and this is the latest restart
+      if (wasPlaying && mySeq === restartSeqRef.current) {
         setIsPlaying(true);
       }
     });

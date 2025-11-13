@@ -42,11 +42,14 @@ export const splitIntoSentences = (text: string): string[] => {
     const doc = nlp(cleanedText);
     const rawSentences = doc.sentences().out('array') as string[];
     
+    // Merge multi-sentence dialogue enclosed in quotes into single items
+    const mergedSentences = mergeQuotedDialogue(rawSentences);
+
     let currentBlock = '';
 
-    for (const sentence of rawSentences) {
+    for (const sentence of mergedSentences) {
       const trimmedSentence = sentence.trim();
-      
+
       if (currentBlock && (currentBlock.length + trimmedSentence.length + 1) > MAX_BLOCK_LENGTH) {
         blocks.push(currentBlock.trim());
         currentBlock = trimmedSentence;
@@ -151,3 +154,70 @@ export const processTextWithMapping = (text: string): {
     sentenceMapping
   };
 }; 
+// Helper functions to merge quoted dialogue across sentences
+const countDoubleQuotes = (s: string): number => {
+  const matches = s.match(/["“”]/g);
+  return matches ? matches.length : 0;
+};
+
+const countCurlySingleQuotes = (s: string): number => {
+  const matches = s.match(/[‘’]/g);
+  return matches ? matches.length : 0;
+};
+
+const countStandaloneStraightSingles = (s: string): number => {
+  let count = 0;
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] === "'") {
+      const prev = i > 0 ? s[i - 1] : '';
+      const next = i + 1 < s.length ? s[i + 1] : '';
+      const isPrevAlphaNum = /[A-Za-z0-9]/.test(prev);
+      const isNextAlphaNum = /[A-Za-z0-9]/.test(next);
+      // Count only when not clearly an apostrophe inside a word (e.g., don't)
+      if (!(isPrevAlphaNum && isNextAlphaNum)) {
+        count++;
+      }
+    }
+  }
+  return count;
+};
+
+const mergeQuotedDialogue = (rawSentences: string[]): string[] => {
+  const result: string[] = [];
+  let buffer = '';
+  let insideDouble = false;
+  let insideSingle = false;
+
+  for (const s of rawSentences) {
+    const t = s.trim();
+    const dblCount = countDoubleQuotes(t);
+    const singleCount = countCurlySingleQuotes(t) + countStandaloneStraightSingles(t);
+
+    if (insideDouble || insideSingle) {
+      buffer = buffer ? `${buffer} ${t}` : t;
+    } else {
+      // Start buffering if this sentence opens an unclosed quote
+      if ((dblCount % 2 === 1) || (singleCount % 2 === 1)) {
+        buffer = t;
+      } else {
+        result.push(t);
+      }
+    }
+
+    // Toggle quote states after processing this sentence
+    if (dblCount % 2 === 1) insideDouble = !insideDouble;
+    if (singleCount % 2 === 1) insideSingle = !insideSingle;
+
+    // If all open quotes are closed, flush buffer
+    if (!(insideDouble || insideSingle) && buffer) {
+      result.push(buffer);
+      buffer = '';
+    }
+  }
+
+  if (buffer) {
+    result.push(buffer);
+  }
+
+  return result;
+};
