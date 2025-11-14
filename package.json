@@ -17,6 +17,8 @@
     "cmpstr": "^3.0.4",
     "compromise": "^14.14.4",
     "core-js": "^3.46.0",
+    "dexie": "^4.2.1",
+    "dexie-react-hooks": "^4.2.0",
     "epubjs": "^0.3.93",
     "howler": "^2.2.4",
     "lru-cache": "^11.2.2",

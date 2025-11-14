@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { getItem, indexedDBService, setItem, removeItem } from '@/utils/indexedDB';
+import { getItem, setItem, removeItem, initDB } from '@/utils/dexie';
 
 const isDev = process.env.NEXT_PUBLIC_NODE_ENV !== 'production' || process.env.NODE_ENV == null;
 
@@ -95,7 +95,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     const initializeDB = async () => {
       try {
         setIsLoading(true);
-        await indexedDBService.init();
+        await initDB();
         setIsDBReady(true);
         
         // Load config from IndexedDB

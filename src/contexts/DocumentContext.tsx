@@ -25,10 +25,6 @@ interface DocumentContextType {
   removeHTMLDocument: (id: string) => Promise<void>;
   isHTMLLoading: boolean;
 
-  refreshPDFs: () => Promise<void>;
-  refreshEPUBs: () => Promise<void>;
-  refreshHTML: () => Promise<void>;
-
   clearPDFs: () => Promise<void>;
   clearEPUBs: () => Promise<void>;
   clearHTML: () => Promise<void>;
@@ -42,7 +38,6 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
     addDocument: addPDFDocument,
     removeDocument: removePDFDocument,
     isLoading: isPDFLoading,
-    refresh: refreshPDFs,
     clearDocuments: clearPDFs
   } = usePDFDocuments();
 
@@ -51,7 +46,6 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
     addDocument: addEPUBDocument,
     removeDocument: removeEPUBDocument,
     isLoading: isEPUBLoading,
-    refresh: refreshEPUBs,
     clearDocuments: clearEPUBs
   } = useEPUBDocuments();
 
@@ -60,7 +54,6 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
     addDocument: addHTMLDocument,
     removeDocument: removeHTMLDocument,
     isLoading: isHTMLLoading,
-    refresh: refreshHTML,
     clearDocuments: clearHTML
   } = useHTMLDocuments();
 
@@ -78,9 +71,6 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
       addHTMLDocument,
       removeHTMLDocument,
       isHTMLLoading,
-      refreshPDFs,
-      refreshEPUBs,
-      refreshHTML,
       clearPDFs,
       clearEPUBs,
       clearHTML

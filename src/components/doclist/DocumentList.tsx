@@ -5,7 +5,7 @@ import { useDocuments } from '@/contexts/DocumentContext';
 import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 import { DocumentType, DocumentListDocument, Folder, DocumentListState, SortBy, SortDirection } from '@/types/documents';
-import { getDocumentListState, saveDocumentListState } from '@/utils/indexedDB';
+import { getDocumentListState, saveDocumentListState } from '@/utils/dexie';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { DocumentListItem } from '@/components/doclist/DocumentListItem';
 import { DocumentFolder } from '@/components/doclist/DocumentFolder';

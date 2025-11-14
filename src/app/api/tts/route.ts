@@ -23,36 +23,6 @@ const ttsAudioCache = new LRUCache<string, AudioBufferValue>({
   ttl: TTS_CACHE_TTL_MS,
 });
 
-// Concurrency controls and in-flight de-duplication
-const TTS_MAX_CONCURRENCY = Number(process.env.TTS_MAX_CONCURRENCY || 4);
-
-class Semaphore {
-  private permits: number;
-  private queue: Array<() => void> = [];
-  constructor(max: number) {
-    this.permits = Math.max(1, max);
-  }
-  async acquire(): Promise<() => void> {
-    if (this.permits > 0) {
-      this.permits -= 1;
-      return this.release.bind(this);
-    }
-    return new Promise<() => void>((resolve) => {
-      this.queue.push(() => {
-        this.permits -= 1;
-        resolve(this.release.bind(this));
-      });
-    });
-  }
-  private release() {
-    this.permits += 1;
-    const next = this.queue.shift();
-    if (next) next();
-  }
-}
-
-const ttsSemaphore = new Semaphore(TTS_MAX_CONCURRENCY);
-
 type InflightEntry = {
   promise: Promise<ArrayBuffer>;
   controller: AbortController;
@@ -211,7 +181,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // De-duplicate identical in-flight requests and bound upstream concurrency
+    // De-duplicate identical in-flight requests
     const existing = inflightRequests.get(cacheKey);
     if (existing) {
       console.log('TTS in-flight JOIN for key:', cacheKey.slice(0, 8));
@@ -247,14 +217,12 @@ export async function POST(req: NextRequest) {
       controller,
       consumers: 1,
       promise: (async () => {
-        const release = await ttsSemaphore.acquire();
         try {
           const buffer = await fetchTTSBufferWithRetry(openai, createParams, controller.signal);
           // Save to cache
           ttsAudioCache.set(cacheKey, buffer);
           return buffer;
         } finally {
-          release();
           inflightRequests.delete(cacheKey);
         }
       })()

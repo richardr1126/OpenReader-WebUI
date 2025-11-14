@@ -22,9 +22,8 @@ import {
 import { useTheme } from '@/contexts/ThemeContext';
 import { useConfig } from '@/contexts/ConfigContext';
 import { ChevronUpDownIcon, CheckIcon, SettingsIcon } from '@/components/icons/Icons';
-import { indexedDBService } from '@/utils/indexedDB';
+import { syncDocumentsToServer, loadDocumentsFromServer, setItem, getItem } from '@/utils/dexie';
 import { useDocuments } from '@/contexts/DocumentContext';
-import { setItem, getItem } from '@/utils/indexedDB';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { ProgressPopup } from '@/components/ProgressPopup';
 import { useTimeEstimation } from '@/hooks/useTimeEstimation';
@@ -42,7 +41,7 @@ export function SettingsModal() {
 
   const { theme, setTheme } = useTheme();
   const { apiKey, baseUrl, ttsProvider, ttsModel, ttsInstructions, updateConfig, updateConfigKey } = useConfig();
-  const { refreshPDFs, refreshEPUBs, clearPDFs, clearEPUBs } = useDocuments();
+  const { clearPDFs, clearEPUBs, clearHTML } = useDocuments();
   const [localApiKey, setLocalApiKey] = useState(apiKey);
   const [localBaseUrl, setLocalBaseUrl] = useState(baseUrl);
   const [localTTSProvider, setLocalTTSProvider] = useState(ttsProvider);
@@ -158,7 +157,7 @@ export function SettingsModal() {
       setProgress(0);
       setOperationType('sync');
       setStatusMessage('Preparing documents...');
-      await indexedDBService.syncToServer((progress, status) => {
+      await syncDocumentsToServer((progress, status) => {
         if (controller.signal.aborted) return;
         setProgress(progress);
         if (status) setStatusMessage(status);
@@ -190,14 +189,13 @@ export function SettingsModal() {
       setProgress(0);
       setOperationType('load');
       setStatusMessage('Downloading documents from server...');
-      await indexedDBService.loadFromServer((progress, status) => {
+      await loadDocumentsFromServer((progress, status) => {
         if (controller.signal.aborted) return;
         setProgress(progress);
         if (status) setStatusMessage(status);
       }, controller.signal);
       if (controller.signal.aborted) return;
-      setStatusMessage('Refreshing document list...');
-      await Promise.all([refreshPDFs(), refreshEPUBs()]);
+      setStatusMessage('Documents loaded from server');
     } catch (error) {
       if (controller.signal.aborted) {
         console.log('Load operation cancelled');
@@ -218,6 +216,7 @@ export function SettingsModal() {
   const handleClearLocal = async () => {
     await clearPDFs();
     await clearEPUBs();
+    await clearHTML();
     setShowClearLocalConfirm(false);
   };
 

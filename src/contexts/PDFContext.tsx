@@ -25,7 +25,7 @@ import {
   useRef,
 } from 'react';
 
-import { indexedDBService } from '@/utils/indexedDB';
+import { getPdfDocument } from '@/utils/dexie';
 import { useTTS } from '@/contexts/TTSContext';
 import { useConfig } from '@/contexts/ConfigContext';
 import {
@@ -215,7 +215,7 @@ export function PDFProvider({ children }: { children: ReactNode }) {
    */
   const setCurrentDocument = useCallback(async (id: string): Promise<void> => {
     try {
-      const doc = await indexedDBService.getDocument(id);
+      const doc = await getPdfDocument(id);
       if (doc) {
         setCurrDocName(doc.name);
         setCurrDocData(doc.data);

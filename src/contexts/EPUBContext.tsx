@@ -10,12 +10,11 @@ import {
   useRef,
   RefObject
 } from 'react';
-import { indexedDBService } from '@/utils/indexedDB';
+import { getEpubDocument, setLastDocumentLocation } from '@/utils/dexie';
 import { useTTS } from '@/contexts/TTSContext';
 import { Book, Rendition } from 'epubjs';
 import { createRangeCfi } from '@/utils/epub';
 import type { NavItem } from 'epubjs';
-import { setLastDocumentLocation } from '@/utils/indexedDB';
 import { SpineItem } from 'epubjs/types/section';
 import { useParams } from 'next/navigation';
 import { useConfig } from './ConfigContext';
@@ -176,7 +175,7 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
    */
   const setCurrentDocument = useCallback(async (id: string): Promise<void> => {
     try {
-      const doc = await indexedDBService.getEPUBDocument(id);
+      const doc = await getEpubDocument(id);
       if (doc) {
         console.log('Retrieved document size:', doc.size);
         console.log('Retrieved ArrayBuffer size:', doc.data.byteLength);

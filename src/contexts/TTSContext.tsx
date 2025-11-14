@@ -34,7 +34,7 @@ import { useAudioCache } from '@/hooks/audio/useAudioCache';
 import { useVoiceManagement } from '@/hooks/audio/useVoiceManagement';
 import { useMediaSession } from '@/hooks/audio/useMediaSession';
 import { useAudioContext } from '@/hooks/audio/useAudioContext';
-import { getLastDocumentLocation, setLastDocumentLocation } from '@/utils/indexedDB';
+import { getLastDocumentLocation, setLastDocumentLocation } from '@/utils/dexie';
 import { useBackgroundState } from '@/hooks/audio/useBackgroundState';
 import { withRetry } from '@/utils/audio';
 import { preprocessSentenceForAudio, processTextToSentences } from '@/utils/nlp';

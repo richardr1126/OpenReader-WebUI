@@ -8,7 +8,7 @@ import {
   useCallback,
   useMemo,
 } from 'react';
-import { indexedDBService } from '@/utils/indexedDB';
+import { getHtmlDocument } from '@/utils/dexie';
 import { useTTS } from '@/contexts/TTSContext';
 import { useConfig } from '@/contexts/ConfigContext';
 import { combineAudioChunks, withRetry } from '@/utils/audio';
@@ -58,7 +58,7 @@ export function HTMLProvider({ children }: { children: ReactNode }) {
    */
   const setCurrentDocument = useCallback(async (id: string): Promise<void> => {
     try {
-      const doc = await indexedDBService.getHTMLDocument(id);
+      const doc = await getHtmlDocument(id);
       if (doc) {
         setCurrDocName(doc.name);
         setCurrDocData(doc.data);
