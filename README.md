@@ -36,9 +36,12 @@ OpenReader WebUI is a document reader with Text-to-Speech capabilities, offering
 - Recent version of Docker installed on your machine
 - A TTS API server (Kokoro-FastAPI, Orpheus-FastAPI, Deepinfra, OpenAI, etc.) running and accessible
 
+> **Note:** If you have good hardware, you can run [Kokoro-FastAPI with Docker locally](#🗣️-local-kokoro-fastapi-quick-start-cpu-or-gpu) (see below).
+
 ### 1. 🐳 Start the Docker container:
   ```bash
   docker run --name openreader-webui \
+    --restart unless-stopped \
     -p 3003:3003 \
     -v openreader_docstore:/app/docstore \
     ghcr.io/richardr1126/openreader-webui:latest
@@ -47,6 +50,7 @@ OpenReader WebUI is a document reader with Text-to-Speech capabilities, offering
   (Optionally): Set the TTS `API_BASE` URL and/or `API_KEY` to be default for all devices
   ```bash
   docker run --name openreader-webui \
+    --restart unless-stopped \
     -e API_KEY=none \
     -e API_BASE=http://host.docker.internal:8880/v1 \
     -p 3003:3003 \
@@ -72,35 +76,47 @@ docker rm openreader-webui && \
 docker pull ghcr.io/richardr1126/openreader-webui:latest
 ```
 
-### (Alternate) 🐳 Configuration with Docker Compose and Kokoro-FastAPI
+### 🗣️ Local Kokoro-FastAPI Quick-start (CPU or GPU)
 
-A complete example docker-compose file with Kokoro-FastAPI and OpenReader WebUI is available in [`docs/examples/docker-compose.yml`](docs/examples/docker-compose.yml). You can download and use it:
+You can run the Kokoro TTS API server directly with Docker. **We are not responsible for issues with Kokoro-FastAPI.** For best performance, use an NVIDIA GPU (for GPU version) or Apple Silicon (for CPU version).
 
+> **Note:** When using these, set the `API_BASE` env var to `http://host.docker.internal:8880/v1` or `http://kokoro-tts:8880/v1`.
+> You can also use the example `docker-compose.yml` in `examples/docker-compose.yml` if you prefer Docker Compose.
+
+**CPU Version:**
 ```bash
-# Download example docker-compose.yml
-curl --create-dirs -L -o openreader-compose/docker-compose.yml https://raw.githubusercontent.com/richardr1126/OpenReader-WebUI/main/docs/examples/docker-compose.yml
-
-cd openreader-compose
-docker compose up -d
+docker run -d \
+  --name kokoro-tts \
+  --restart unless-stopped \
+  -p 8880:8880 \
+  -e ONNX_NUM_THREADS=8 \
+  -e ONNX_INTER_OP_THREADS=4 \
+  -e ONNX_EXECUTION_MODE=parallel \
+  -e ONNX_OPTIMIZATION_LEVEL=all \
+  -e ONNX_MEMORY_PATTERN=true \
+  -e ONNX_ARENA_EXTEND_STRATEGY=kNextPowerOfTwo \
+  -e API_LOG_LEVEL=DEBUG \
+  ghcr.io/remsky/kokoro-fastapi-cpu:v0.2.4
 ```
 
-Or add OpenReader WebUI to your existing `docker-compose.yml`:
-```yaml
-services:
-  openreader-webui:
-    container_name: openreader-webui
-    image: ghcr.io/richardr1126/openreader-webui:latest
-    environment:
-      - API_BASE=http://host.docker.internal:8880/v1
-    ports:
-      - "3003:3003"
-    volumes:
-      - docstore:/app/docstore
-    restart: unless-stopped
-
-volumes:
-  docstore:
+**GPU Version:**
+```bash
+docker run -d \
+  --name kokoro-tts \
+  --gpus all \
+  --user 1001:1001 \
+  --restart unless-stopped \
+  -p 8880:8880 \
+  -e USE_GPU=true \
+  -e PYTHONUNBUFFERED=1 \
+  -e API_LOG_LEVEL=DEBUG \
+  ghcr.io/remsky/kokoro-fastapi-gpu:v0.2.4
 ```
+
+> **Note:**
+> - These commands are for running the Kokoro TTS API server only. For issues or support, see the [Kokoro-FastAPI repository](https://github.com/remsky/Kokoro-FastAPI).
+> - The GPU version requires NVIDIA Docker support and works best with NVIDIA GPUs. The CPU version works best on Apple Silicon or modern x86 CPUs.
+> - Adjust environment variables as needed for your hardware and use case.
 
 ## Dev Installation
 

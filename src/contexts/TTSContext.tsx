@@ -37,7 +37,7 @@ import { useAudioContext } from '@/hooks/audio/useAudioContext';
 import { getLastDocumentLocation, setLastDocumentLocation } from '@/utils/indexedDB';
 import { useBackgroundState } from '@/hooks/audio/useBackgroundState';
 import { withRetry } from '@/utils/audio';
-import { processTextToSentences } from '@/utils/nlp';
+import { preprocessSentenceForAudio, processTextToSentences } from '@/utils/nlp';
 import { isKokoroModel } from '@/utils/voice';
 
 // Media globals
@@ -72,15 +72,184 @@ interface TTSContextType {
   pause: () => void;
   stop: () => void;
   stopAndPlayFromIndex: (index: number) => void;
-  setText: (text: string, shouldPause?: boolean) => void;
+  setText: (text: string, options?: boolean | SetTextOptions) => void;
   setCurrDocPages: (num: number | undefined) => void;
   setSpeedAndRestart: (speed: number) => void;
   setAudioPlayerSpeedAndRestart: (speed: number) => void;
   setVoiceAndRestart: (voice: string) => void;
   skipToLocation: (location: string | number, shouldPause?: boolean) => void;
   registerLocationChangeHandler: (handler: (location: string | number) => void) => void;  // EPUB-only: Handles chapter navigation
+  registerVisualPageChangeHandler: (handler: (location: string | number) => void) => void;
   setIsEPUB: (isEPUB: boolean) => void;
 }
+
+interface SetTextOptions {
+  shouldPause?: boolean;
+  location?: string | number;
+  nextLocation?: string | number;
+  nextText?: string;
+}
+
+interface ContinuationMergeResult {
+  text: string;
+  carried: string;
+}
+
+interface PageTurnEstimate {
+  location: string | number;
+  sentenceIndex: number;
+  fraction: number;
+}
+
+const CONTINUATION_LOOKAHEAD = 600;
+const SENTENCE_ENDING = /[.?!…]["'”’)\]]*\s*$/;
+
+const normalizeLocationKey = (location: string | number) =>
+  typeof location === 'number' ? `num:${location}` : `str:${location}`;
+
+const isWhitespaceChar = (char: string) => /\s/.test(char);
+
+const skipWhitespace = (source: string, start: number) => {
+  let index = start;
+  while (index < source.length && isWhitespaceChar(source[index])) {
+    index++;
+  }
+  return index;
+};
+
+const matchNormalizedPrefixLength = (text: string, prefix: string): number | null => {
+  let textIndex = 0;
+  let prefixIndex = 0;
+
+  while (prefixIndex < prefix.length) {
+    const prefixChar = prefix[prefixIndex];
+
+    if (isWhitespaceChar(prefixChar)) {
+      prefixIndex = skipWhitespace(prefix, prefixIndex);
+      textIndex = skipWhitespace(text, textIndex);
+      continue;
+    }
+
+    if (textIndex >= text.length) {
+      return null;
+    }
+
+    const textChar = text[textIndex];
+
+    if (textChar === prefixChar || textChar.toLowerCase() === prefixChar.toLowerCase()) {
+      textIndex++;
+      prefixIndex++;
+      continue;
+    }
+
+    return null;
+  }
+
+  return textIndex;
+};
+
+const needsSentenceContinuation = (text: string) => {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return false;
+  }
+  return !SENTENCE_ENDING.test(trimmed);
+};
+
+const stripContinuationPrefix = (text: string, prefix: string) => {
+  if (!prefix) return { text, removed: false };
+
+  // Try literal match first since PDF text is normalized already
+  if (text.startsWith(prefix)) {
+    return {
+      text: text.slice(prefix.length).trimStart(),
+      removed: true,
+    };
+  }
+
+  const trimmedPrefix = prefix.trimStart();
+  const trimmedText = text.trimStart();
+
+  if (trimmedText.startsWith(trimmedPrefix)) {
+    const offset = text.length - trimmedText.length;
+    return {
+      text: text.slice(offset + trimmedPrefix.length).trimStart(),
+      removed: true,
+    };
+  }
+
+  const matchedLength = matchNormalizedPrefixLength(text, prefix);
+  if (matchedLength !== null) {
+    return {
+      text: text.slice(matchedLength).trimStart(),
+      removed: true,
+    };
+  }
+
+  return { text, removed: false };
+};
+
+const extractContinuationSlice = (nextText: string): ContinuationMergeResult | null => {
+  if (!nextText?.trim()) {
+    return null;
+  }
+
+  const snippet = nextText.trim().slice(0, CONTINUATION_LOOKAHEAD);
+  let boundaryIndex = -1;
+
+  for (let i = 0; i < snippet.length; i++) {
+    const char = snippet[i];
+    if (/[.?!…]/.test(char)) {
+      let j = i + 1;
+      while (j < snippet.length && /["'”’)\]]/.test(snippet[j])) {
+        j++;
+      }
+      while (j < snippet.length && /\s/.test(snippet[j])) {
+        j++;
+      }
+      boundaryIndex = j;
+      break;
+    }
+  }
+
+  if (boundaryIndex === -1) {
+    return null;
+  }
+
+  const rawSlice = snippet.slice(0, boundaryIndex);
+  const addition = rawSlice.trim();
+
+  if (!addition) {
+    return null;
+  }
+
+  return {
+    text: addition,
+    carried: rawSlice,
+  };
+};
+
+const mergeContinuation = (text: string, nextText: string): ContinuationMergeResult | null => {
+  if (!needsSentenceContinuation(text)) {
+    return null;
+  }
+
+  const slice = extractContinuationSlice(nextText);
+  if (!slice) {
+    return null;
+  }
+
+  const trimmed = text.trimEnd();
+  const endsWithHyphen = trimmed.endsWith('-');
+  const base = endsWithHyphen ? trimmed.slice(0, -1) : trimmed;
+  const joiner = endsWithHyphen ? '' : (base ? ' ' : '');
+  const mergedText = `${base}${joiner}${slice.text}`.trim();
+
+  return {
+    text: mergedText,
+    carried: slice.carried,
+  };
+};
 
 // Create the context
 const TTSContext = createContext<TTSContextType | undefined>(undefined);
@@ -107,6 +276,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     ttsInstructions: configTTSInstructions,
     updateConfigKey,
     skipBlank,
+    smartSentenceSplitting,
   } = useConfig();
 
   // Remove OpenAI client reference as it's no longer needed
@@ -116,6 +286,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
 
   // Add ref for location change handler
   const locationChangeHandlerRef = useRef<((location: string | number) => void) | null>(null);
+  const visualPageChangeHandlerRef = useRef<((location: string | number) => void) | null>(null);
 
   /**
    * Registers a handler function for location changes in EPUB documents
@@ -125,6 +296,10 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
    */
   const registerLocationChangeHandler = useCallback((handler: (location: string | number) => void) => {
     locationChangeHandlerRef.current = handler;
+  }, []);
+
+  const registerVisualPageChangeHandler = useCallback((handler: (location: string | number) => void) => {
+    visualPageChangeHandlerRef.current = handler;
   }, []);
 
   // Get document ID from URL params
@@ -158,6 +333,11 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
   const [pendingRestoreIndex, setPendingRestoreIndex] = useState<number | null>(null);
   // Guard to coalesce rapid restarts and only resume the latest change
   const restartSeqRef = useRef(0);
+  // Track continuation slices for PDF/EPUB page transitions
+  const continuationCarryRef = useRef<Map<string, string>>(new Map());
+  const epubContinuationRef = useRef<string | null>(null);
+  const pageTurnEstimateRef = useRef<PageTurnEstimate | null>(null);
+  const pageTurnTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /**
    * Processes text into sentences using the shared NLP utility
@@ -181,19 +361,21 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
   const abortAudio = useCallback((clearPending = false) => {
     if (activeHowl) {
       activeHowl.stop();
-      activeHowl.unload(); // Ensure Howl instance is fully cleaned up
+      activeHowl.unload();
       setActiveHowl(null);
     }
 
     if (clearPending) {
-      // Abort all active TTS requests
-      console.log('Aborting active TTS requests');
       activeAbortControllers.current.forEach(controller => {
         controller.abort();
       });
       activeAbortControllers.current.clear();
-      // Clear any pending preload requests
       preloadRequests.current.clear();
+    }
+
+    if (pageTurnTimeoutRef.current) {
+      clearTimeout(pageTurnTimeoutRef.current);
+      pageTurnTimeoutRef.current = null;
     }
   }, [activeHowl]);
 
@@ -211,7 +393,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
    * Works for both PDF pages and EPUB locations
    * 
    * @param {string | number} location - The target location to navigate to
-   * @param {boolean} keepPlaying - Whether to maintain playback state
+   * @param {boolean} shouldPause - Whether to pause playback
    */
   const skipToLocation = useCallback((location: string | number, shouldPause = false) => {
     // Reset state for new content in correct order
@@ -233,7 +415,6 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
 
     // Handle within current page bounds
     if (nextIndex < sentences.length && nextIndex >= 0) {
-      console.log('isEPUB', isEPUB!);
       setCurrentIndex(nextIndex);
       return;
     }
@@ -297,9 +478,65 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
    * 
    * @param {string} text - The text to be processed
    */
-  const setText = useCallback((text: string, shouldPause = false) => {
-    // Check for blank section first
-    if (handleBlankSection(text)) return;
+  const setText = useCallback((text: string, options?: boolean | SetTextOptions) => {
+    const normalizedOptions: SetTextOptions = typeof options === 'boolean'
+      ? { shouldPause: options }
+      : (options || {});
+
+    let workingText = text;
+
+    // Apply or clear sentence continuation logic based on config
+    let continuationCarried: string | undefined;
+    if (smartSentenceSplitting) {
+      if (isEPUB && epubContinuationRef.current) {
+        const { text: strippedText, removed } = stripContinuationPrefix(workingText, epubContinuationRef.current);
+        workingText = strippedText;
+        if (removed) {
+          epubContinuationRef.current = null;
+        }
+      }
+
+      if (!isEPUB && normalizedOptions.location !== undefined) {
+        const key = normalizeLocationKey(normalizedOptions.location);
+        const carried = continuationCarryRef.current.get(key);
+        if (carried) {
+          const { text: strippedText, removed } = stripContinuationPrefix(workingText, carried);
+          workingText = strippedText;
+          if (removed) {
+            continuationCarryRef.current.delete(key);
+          }
+        }
+      }
+
+      if (normalizedOptions.nextText) {
+        const merged = mergeContinuation(workingText, normalizedOptions.nextText);
+        if (merged) {
+          workingText = merged.text;
+          continuationCarried = merged.carried;
+        }
+      }
+
+      if (continuationCarried) {
+        if (isEPUB) {
+          epubContinuationRef.current = continuationCarried;
+        } else if (normalizedOptions.nextLocation !== undefined) {
+          continuationCarryRef.current.set(
+            normalizeLocationKey(normalizedOptions.nextLocation),
+            continuationCarried
+          );
+        }
+      }
+    } else {
+      // When disabled, clear any stale continuation state
+      epubContinuationRef.current = null;
+      continuationCarryRef.current.clear();
+      pageTurnEstimateRef.current = null;
+    }
+
+    // Check for blank section after adjustments
+    if (handleBlankSection(workingText)) return;
+
+    const shouldPause = normalizedOptions.shouldPause ?? false;
 
     // Keep track of previous state and pause playback
     const wasPlaying = isPlaying;
@@ -307,8 +544,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     abortAudio(true); // Clear pending requests since text is changing
     setIsProcessing(true); // Set processing state before text processing starts
 
-    console.log('Setting text:', text);
-    processTextToSentencesLocal(text)
+    processTextToSentencesLocal(workingText)
       .then(newSentences => {
         if (newSentences.length === 0) {
           console.warn('No sentences found in text');
@@ -318,7 +554,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
 
         // Set all state updates in a predictable order
         setSentences(newSentences);
-        
+
         // Check if we have a pending restore index for PDF
         if (pendingRestoreIndex !== null && !isEPUB) {
           const restoreIndex = Math.min(pendingRestoreIndex, newSentences.length - 1);
@@ -328,7 +564,42 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
         } else {
           setCurrentIndex(0);
         }
-        
+
+        // Compute auto page-turn estimate for PDFs when we have a continuation
+        if (smartSentenceSplitting && !isEPUB && continuationCarried && normalizedOptions.nextLocation !== undefined) {
+          const continuationNormalized = preprocessSentenceForAudio(continuationCarried);
+          if (continuationNormalized) {
+            let bestEstimate: PageTurnEstimate | null = null;
+
+            newSentences.forEach((sentence, index) => {
+              const normalizedSentence = preprocessSentenceForAudio(sentence);
+              if (!normalizedSentence) return;
+
+              if (!normalizedSentence.toLowerCase().endsWith(continuationNormalized.toLowerCase())) return;
+
+              const totalLength = normalizedSentence.length;
+              const continuationLength = continuationNormalized.length;
+              if (totalLength <= continuationLength) return;
+
+              const baseLength = totalLength - continuationLength;
+              const fraction = baseLength / totalLength;
+              if (fraction <= 0 || fraction >= 1) return;
+
+              bestEstimate = {
+                location: normalizedOptions.nextLocation!,
+                sentenceIndex: index,
+                fraction,
+              };
+            });
+
+            pageTurnEstimateRef.current = bestEstimate;
+          } else {
+            pageTurnEstimateRef.current = null;
+          }
+        } else {
+          pageTurnEstimateRef.current = null;
+        }
+
         setIsProcessing(false);
 
         // Restore playback state if needed
@@ -347,7 +618,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
           duration: 3000,
         });
       });
-  }, [isPlaying, handleBlankSection, abortAudio, processTextToSentencesLocal, pendingRestoreIndex, isEPUB]);
+  }, [isPlaying, handleBlankSection, abortAudio, processTextToSentencesLocal, pendingRestoreIndex, isEPUB, smartSentenceSplitting]);
 
   /**
    * Toggles the playback state between playing and paused
@@ -547,7 +818,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
       try {
         const audioBuffer = await getAudio(sentence);
         if (!audioBuffer) throw new Error('No audio data generated');
-        
+
         // Convert to base64 data URI
         const bytes = new Uint8Array(audioBuffer);
         const binaryString = bytes.reduce((acc, byte) => acc + String.fromCharCode(byte), '');
@@ -576,7 +847,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
    * 
    * @param {string} sentence - The sentence to play
    */
-  const playSentenceWithHowl = useCallback(async (sentence: string) => {
+  const playSentenceWithHowl = useCallback(async (sentence: string, sentenceIndex: number) => {
     if (!sentence) {
       console.log('No sentence to play');
       setIsProcessing(false);
@@ -606,13 +877,35 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
           preload: true,
           pool: 5,
           rate: audioSpeed,
+          onload: function (this: Howl) {
+            const estimate = pageTurnEstimateRef.current;
+            if (!estimate || estimate.sentenceIndex !== sentenceIndex) return;
+            if (!visualPageChangeHandlerRef.current) return;
+
+            const duration = this.duration();
+            if (!duration || !Number.isFinite(duration)) return;
+
+            const delayMs = duration * estimate.fraction * 1000;
+            if (delayMs <= 0 || delayMs >= duration * 1000) return;
+
+            if (pageTurnTimeoutRef.current) {
+              clearTimeout(pageTurnTimeoutRef.current);
+            }
+
+            pageTurnTimeoutRef.current = setTimeout(() => {
+              if (!isPlaying) return;
+              const currentEstimate = pageTurnEstimateRef.current;
+              if (!currentEstimate || currentEstimate.sentenceIndex !== sentenceIndex) return;
+              visualPageChangeHandlerRef.current?.(currentEstimate.location);
+            }, delayMs);
+          },
           onplay: () => {
             setIsProcessing(false);
             if ('mediaSession' in navigator) {
               navigator.mediaSession.playbackState = 'playing';
             }
           },
-          onplayerror: function(this: Howl, error) {
+          onplayerror: function (this: Howl, error) {
             console.warn('Howl playback error:', error);
             // Try to recover by forcing HTML5 audio mode
             if (this.state() === 'loaded') {
@@ -623,17 +916,17 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
               this.load();
             }
           },
-          onloaderror: async function(this: Howl, error) {
+          onloaderror: async function (this: Howl, error) {
             console.warn(`Error loading audio (attempt ${retryCount + 1}/${MAX_RETRIES}):`, error);
-            
+
             if (retryCount < MAX_RETRIES) {
               // Calculate exponential backoff delay
               const delay = INITIAL_RETRY_DELAY * Math.pow(2, retryCount);
               console.log(`Retrying in ${delay}ms...`);
-              
+
               // Wait for the delay
               await new Promise(resolve => setTimeout(resolve, delay));
-              
+
               // Try to create a new Howl instance
               const retryHowl = await createHowl(retryCount + 1);
               if (retryHowl) {
@@ -646,7 +939,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
               setActiveHowl(null);
               this.unload();
               setIsPlaying(false);
-              
+
               toast.error('Audio loading failed after retries. Moving to next sentence...', {
                 id: 'audio-load-error',
                 style: {
@@ -655,18 +948,22 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
                 },
                 duration: 2000,
               });
-              
+
               advance();
             }
           },
-          onend: function(this: Howl) {
+          onend: function (this: Howl) {
             this.unload();
             setActiveHowl(null);
+            if (pageTurnTimeoutRef.current) {
+              clearTimeout(pageTurnTimeoutRef.current);
+              pageTurnTimeoutRef.current = null;
+            }
             if (isPlaying) {
               advance();
             }
           },
-          onstop: function(this: Howl) {
+          onstop: function (this: Howl) {
             setIsProcessing(false);
             this.unload();
           }
@@ -705,7 +1002,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
   }, [isPlaying, advance, activeHowl, processSentence, audioSpeed]);
 
   const playAudio = useCallback(async () => {
-    const howl = await playSentenceWithHowl(sentences[currentIndex]);
+    const howl = await playSentenceWithHowl(sentences[currentIndex], currentIndex);
     if (howl) {
       howl.play();
     }
@@ -777,6 +1074,8 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     // Cancel any ongoing request
     abortAudio();
     locationChangeHandlerRef.current = null;
+    epubContinuationRef.current = null;
+    continuationCarryRef.current.clear();
     setIsPlaying(false);
     setCurrentIndex(0);
     setSentences([]);
@@ -921,6 +1220,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     setVoiceAndRestart,
     skipToLocation,
     registerLocationChangeHandler,
+    registerVisualPageChangeHandler,
     setIsEPUB
   }), [
     isPlaying,
@@ -945,6 +1245,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     setVoiceAndRestart,
     skipToLocation,
     registerLocationChangeHandler,
+    registerVisualPageChangeHandler,
     setIsEPUB
   ]);
 
@@ -961,7 +1262,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
       getLastDocumentLocation(id as string).then(lastLocation => {
         if (lastLocation) {
           console.log('Setting last location:', lastLocation);
-          
+
           if (isEPUB && locationChangeHandlerRef.current) {
             // For EPUB documents, use the location change handler
             locationChangeHandlerRef.current(lastLocation);
@@ -971,7 +1272,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
               const [pageStr, sentenceIndexStr] = lastLocation.split(':');
               const page = parseInt(pageStr, 10);
               const sentenceIndex = parseInt(sentenceIndexStr, 10);
-              
+
               if (!isNaN(page) && !isNaN(sentenceIndex)) {
                 console.log(`Restoring PDF position: page ${page}, sentence ${sentenceIndex}`);
                 // Skip to the page first, then the sentence index will be restored when setText is called

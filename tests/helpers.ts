@@ -1,6 +1,30 @@
 import { Page, expect } from '@playwright/test';
+import fs from 'fs';
+import path from 'path';
 
 const DIR = './tests/files/';
+const TTS_MOCK_PATH = path.join(__dirname, 'files', 'sample.mp3');
+let ttsMockBuffer: Buffer | null = null;
+
+async function ensureTtsRouteMock(page: Page) {
+  if (!ttsMockBuffer) {
+    ttsMockBuffer = fs.readFileSync(TTS_MOCK_PATH);
+  }
+
+  await page.route('**/api/tts', async (route) => {
+    // Only mock the POST TTS generation calls; let anything else pass through.
+    if (route.request().method().toUpperCase() !== 'POST') {
+      return route.continue();
+    }
+
+    await route.fulfill({
+      status: 200,
+      contentType: 'audio/mpeg',
+      body: ttsMockBuffer as Buffer,
+    });
+  });
+}
+
 // Small util to safely use filenames inside regex patterns
 function escapeRegExp(input: string) {
   return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -79,6 +103,9 @@ export async function pauseTTSAndVerify(page: Page) {
  * Common test setup function
  */
 export async function setupTest(page: Page) {
+  // Mock the TTS API so tests don't hit the real TTS service.
+  await ensureTtsRouteMock(page);
+
   // Navigate to the home page before each test
   await page.goto('/');
   await page.waitForLoadState('networkidle');
@@ -341,7 +368,7 @@ export async function expectMediaState(page: Page, state: 'playing' | 'paused') 
     } catch {
       return false;
     }
-  }, state, { timeout: 25000 });
+  }, state);
 }
 
 // Use Navigator to go to a specific page number (PDF)

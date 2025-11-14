@@ -27,6 +27,7 @@ export function DocumentSettings({ isOpen, setIsOpen, epub, html }: {
     viewType,
     skipBlank,
     epubTheme,
+    smartSentenceSplitting,
     headerMargin,
     footerMargin,
     leftMargin,
@@ -308,6 +309,24 @@ export function DocumentSettings({ isOpen, setIsOpen, epub, html }: {
                         Automatically skip pages with no text content
                       </p>
                     </div>}
+                    {!html && (
+                      <div className="space-y-1">
+                        <label className="flex items-center space-x-2">
+                          <input
+                            type="checkbox"
+                            checked={smartSentenceSplitting}
+                            onChange={(e) => updateConfigKey('smartSentenceSplitting', e.target.checked)}
+                            className="form-checkbox h-4 w-4 text-accent rounded border-muted"
+                          />
+                          <span className="text-sm font-medium text-foreground">
+                            Smart sentence splitting
+                          </span>
+                        </label>
+                        <p className="text-sm text-muted pl-6">
+                          Merge sentences across page or section breaks for smoother TTS.
+                        </p>
+                      </div>
+                    )}
                     {epub && (
                       <div className="space-y-1">
                         <label className="flex items-center space-x-2">

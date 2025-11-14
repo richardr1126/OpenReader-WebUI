@@ -8,7 +8,7 @@ import {
   useCallback,
   useMemo,
   useRef,
-  RefObject,
+  RefObject
 } from 'react';
 import { indexedDBService } from '@/utils/indexedDB';
 import { useTTS } from '@/contexts/TTSContext';
@@ -43,6 +43,81 @@ interface EPUBContextType {
 
 const EPUBContext = createContext<EPUBContextType | undefined>(undefined);
 
+const EPUB_CONTINUATION_CHARS = 600;
+
+const stepToNextNode = (node: Node | null, root: Node): Node | null => {
+  if (!node) return null;
+  if (node.firstChild) {
+    return node.firstChild;
+  }
+
+  let current: Node | null = node;
+  while (current) {
+    if (current === root) {
+      return null;
+    }
+    if (current.nextSibling) {
+      return current.nextSibling;
+    }
+    current = current.parentNode;
+  }
+
+  return null;
+};
+
+const getNextTextNode = (node: Node | null, root: Node): Text | null => {
+  let next = stepToNextNode(node, root);
+  while (next) {
+    if (next.nodeType === Node.TEXT_NODE) {
+      return next as Text;
+    }
+    next = stepToNextNode(next, root);
+  }
+  return null;
+};
+
+const collectContinuationFromRange = (range: Range | null | undefined, limit = EPUB_CONTINUATION_CHARS): string => {
+  if (typeof window === 'undefined' || !range) {
+    return '';
+  }
+
+  const root = range.commonAncestorContainer;
+  if (!root) {
+    return '';
+  }
+
+  const parts: string[] = [];
+  let remaining = limit;
+
+  const appendFromTextNode = (textNode: Text, offset: number) => {
+    if (remaining <= 0) return;
+    const textContent = textNode.textContent || '';
+    if (offset >= textContent.length) return;
+    const slice = textContent.slice(offset, offset + remaining);
+    if (slice) {
+      parts.push(slice);
+      remaining -= slice.length;
+    }
+  };
+
+  if (range.endContainer.nodeType === Node.TEXT_NODE) {
+    appendFromTextNode(range.endContainer as Text, range.endOffset);
+    let nextNode = getNextTextNode(range.endContainer, root);
+    while (nextNode && remaining > 0) {
+      appendFromTextNode(nextNode, 0);
+      nextNode = getNextTextNode(nextNode, root);
+    }
+  } else {
+    let nextNode = getNextTextNode(range.endContainer, root);
+    while (nextNode && remaining > 0) {
+      appendFromTextNode(nextNode, 0);
+      nextNode = getNextTextNode(nextNode, root);
+    }
+  }
+
+  return parts.join(' ').replace(/\s+/g, ' ').trim();
+};
+
 /**
  * Provider component for EPUB functionality
  * Manages the state and operations for EPUB document handling
@@ -61,6 +136,7 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
     ttsProvider,
     ttsModel,
     ttsInstructions,
+    smartSentenceSplitting,
   } = useConfig();
   // Current document state
   const [currDocData, setCurrDocData] = useState<ArrayBuffer>();
@@ -141,8 +217,23 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
         return '';
       }
       const textContent = range.toString().trim();
+      const continuationPreview = collectContinuationFromRange(range);
 
-      setTTSText(textContent, shouldPause);
+      if (smartSentenceSplitting) {
+        setTTSText(textContent, {
+          shouldPause,
+          location: start.cfi,
+          nextLocation: end.cfi,
+          nextText: continuationPreview
+        });
+      } else {
+        // When smart splitting is disabled, behave like the original implementation:
+        // send only the current page/location text without any continuation preview.
+        setTTSText(textContent, {
+          shouldPause,
+          location: start.cfi,
+        });
+      }
       setCurrDocText(textContent);
 
       return textContent;
@@ -150,7 +241,7 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
       console.error('Error extracting EPUB text:', error);
       return '';
     }
-  }, [setTTSText]);
+  }, [setTTSText, smartSentenceSplitting]);
 
   /**
    * Extracts text content from the entire EPUB book

@@ -29,6 +29,7 @@ type ConfigValues = {
   ttsModel: string;
   ttsInstructions: string;
   savedVoices: SavedVoices;
+  smartSentenceSplitting: boolean;
 };
 
 /** Interface defining the configuration context shape and functionality */
@@ -41,6 +42,7 @@ interface ConfigContextType {
   voice: string;
   skipBlank: boolean;
   epubTheme: boolean;
+  smartSentenceSplitting: boolean;
   headerMargin: number;
   footerMargin: number;
   leftMargin: number;
@@ -73,6 +75,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   const [voice, setVoice] = useState<string>('af_sarah');
   const [skipBlank, setSkipBlank] = useState<boolean>(true);
   const [epubTheme, setEpubTheme] = useState<boolean>(false);
+  const [smartSentenceSplitting, setSmartSentenceSplitting] = useState<boolean>(true);
   const [headerMargin, setHeaderMargin] = useState<number>(0.07);
   const [footerMargin, setFooterMargin] = useState<number>(0.07);
   const [leftMargin, setLeftMargin] = useState<number>(0.07);
@@ -103,6 +106,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
         const cachedAudioPlayerSpeed = await getItem('audioPlayerSpeed');
         const cachedSkipBlank = await getItem('skipBlank');
         const cachedEpubTheme = await getItem('epubTheme');
+        const cachedSmartSentenceSplitting = await getItem('smartSentenceSplitting');
         const cachedHeaderMargin = await getItem('headerMargin');
         const cachedFooterMargin = await getItem('footerMargin');
         const cachedLeftMargin = await getItem('leftMargin');
@@ -187,6 +191,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
         setAudioPlayerSpeed(parseFloat(cachedAudioPlayerSpeed || '1'));
         setSkipBlank(cachedSkipBlank === 'false' ? false : true);
         setEpubTheme(cachedEpubTheme === 'true');
+        setSmartSentenceSplitting(cachedSmartSentenceSplitting === 'false' ? false : true);
         setHeaderMargin(parseFloat(cachedHeaderMargin || '0.07'));
         setFooterMargin(parseFloat(cachedFooterMargin || '0.07'));
         setLeftMargin(parseFloat(cachedLeftMargin || '0.07'));
@@ -210,6 +215,9 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
         }
         if (cachedEpubTheme === null) {
           await setItem('epubTheme', 'false');
+        }
+        if (cachedSmartSentenceSplitting === null) {
+          await setItem('smartSentenceSplitting', 'true');
         }
         if (cachedHeaderMargin === null) await setItem('headerMargin', '0.07');
         if (cachedFooterMargin === null) await setItem('footerMargin', '0.07');
@@ -353,6 +361,9 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
           case 'epubTheme':
             setEpubTheme(value as boolean);
             break;
+          case 'smartSentenceSplitting':
+            setSmartSentenceSplitting(value as boolean);
+            break;
           case 'headerMargin':
             setHeaderMargin(value as number);
             break;
@@ -388,6 +399,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
       voice,
       skipBlank,
       epubTheme,
+      smartSentenceSplitting,
       headerMargin,
       footerMargin,
       leftMargin,

@@ -22,6 +22,7 @@ import {
   useCallback,
   useMemo,
   RefObject,
+  useRef,
 } from 'react';
 
 import { indexedDBService } from '@/utils/indexedDB';
@@ -33,6 +34,7 @@ import {
   clearHighlights,
   handleTextClick,
 } from '@/utils/pdf';
+import { processTextToSentences } from '@/utils/nlp';
 
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { withRetry } from '@/utils/audio';
@@ -70,6 +72,8 @@ interface PDFContextType {
 // Create the context
 const PDFContext = createContext<PDFContextType | undefined>(undefined);
 
+const CONTINUATION_PREVIEW_CHARS = 600;
+
 /**
  * PDFProvider Component
  * 
@@ -83,10 +87,11 @@ export function PDFProvider({ children }: { children: ReactNode }) {
   const { 
     setText: setTTSText, 
     stop, 
-    currDocPageNumber: currDocPage, 
+    currDocPageNumber,
     currDocPages, 
     setCurrDocPages,
-    setIsEPUB 
+    setIsEPUB,
+    registerVisualPageChangeHandler,
   } = useTTS();
   const { 
     headerMargin,
@@ -100,6 +105,7 @@ export function PDFProvider({ children }: { children: ReactNode }) {
     ttsProvider,
     ttsModel,
     ttsInstructions,
+    smartSentenceSplitting,
   } = useConfig();
 
   // Current document state
@@ -108,6 +114,12 @@ export function PDFProvider({ children }: { children: ReactNode }) {
   const [currDocText, setCurrDocText] = useState<string>();
   const [pdfDocument, setPdfDocument] = useState<PDFDocumentProxy>();
   const [isAudioCombining] = useState(false);
+  const pageTextCacheRef = useRef<Map<number, string>>(new Map());
+  const [currDocPage, setCurrDocPage] = useState<number>(currDocPageNumber);
+
+  useEffect(() => {
+    setCurrDocPage(currDocPageNumber);
+  }, [currDocPageNumber]);
 
   /**
    * Handles successful PDF document load
@@ -129,22 +141,60 @@ export function PDFProvider({ children }: { children: ReactNode }) {
   const loadCurrDocText = useCallback(async () => {
     try {
       if (!pdfDocument) return;
-      const text = await extractTextFromPDF(pdfDocument, currDocPage, {
+
+      const margins = {
         header: headerMargin,
         footer: footerMargin,
         left: leftMargin,
         right: rightMargin
-      });
-      // Only update TTS text if the content has actually changed
-      // This prevents unnecessary resets of the sentence index
+      };
+
+      const getPageText = async (pageNumber: number, shouldCache = false): Promise<string> => {
+        if (pageTextCacheRef.current.has(pageNumber)) {
+          const cached = pageTextCacheRef.current.get(pageNumber)!;
+          if (!shouldCache) {
+            pageTextCacheRef.current.delete(pageNumber);
+          }
+          return cached;
+        }
+
+        const extracted = await extractTextFromPDF(pdfDocument, pageNumber, margins);
+        if (shouldCache) {
+          pageTextCacheRef.current.set(pageNumber, extracted);
+        }
+        return extracted;
+      };
+
+      const totalPages = currDocPages ?? pdfDocument.numPages;
+      const nextPageNumber = currDocPageNumber < totalPages ? currDocPageNumber + 1 : undefined;
+
+      const [text, nextText] = await Promise.all([
+        getPageText(currDocPageNumber),
+        nextPageNumber ? getPageText(nextPageNumber, true) : Promise.resolve<string | undefined>(undefined),
+      ]);
+
       if (text !== currDocText || text === '') {
         setCurrDocText(text);
-        setTTSText(text);
+        setTTSText(text, {
+          location: currDocPageNumber,
+          nextLocation: nextPageNumber,
+          nextText: nextText?.slice(0, CONTINUATION_PREVIEW_CHARS),
+        });
       }
     } catch (error) {
       console.error('Error loading PDF text:', error);
     }
-  }, [pdfDocument, currDocPage, setTTSText, currDocText, headerMargin, footerMargin, leftMargin, rightMargin]);
+  }, [
+    pdfDocument,
+    currDocPageNumber,
+    currDocPages,
+    setTTSText,
+    currDocText,
+    headerMargin,
+    footerMargin,
+    leftMargin,
+    rightMargin,
+  ]);
 
   /**
    * Effect hook to update document text when the page changes
@@ -154,7 +204,7 @@ export function PDFProvider({ children }: { children: ReactNode }) {
     if (currDocData) {
       loadCurrDocText();
     }
-  }, [currDocPage, currDocData, loadCurrDocText]);
+  }, [currDocPageNumber, currDocData, loadCurrDocText]);
 
   /**
    * Sets the current document based on its ID
@@ -185,6 +235,7 @@ export function PDFProvider({ children }: { children: ReactNode }) {
     setCurrDocText(undefined);
     setCurrDocPages(undefined);
     setPdfDocument(undefined);
+    pageTextCacheRef.current.clear();
     stop();
   }, [setCurrDocPages, stop]);
 
@@ -212,16 +263,20 @@ export function PDFProvider({ children }: { children: ReactNode }) {
       let totalLength = 0;
       
       for (let pageNum = 1; pageNum <= pdfDocument.numPages; pageNum++) {
-        const text = await extractTextFromPDF(pdfDocument, pageNum, {
+        const rawText = await extractTextFromPDF(pdfDocument, pageNum, {
           header: headerMargin,
           footer: footerMargin,
           left: leftMargin,
           right: rightMargin
         });
-        const trimmedText = text.trim();
+        const trimmedText = rawText.trim();
         if (trimmedText) {
-          textPerPage.push(trimmedText);
-          totalLength += trimmedText.length;
+          const processedText = smartSentenceSplitting
+            ? processTextToSentences(trimmedText).join(' ')
+            : trimmedText;
+
+          textPerPage.push(processedText);
+          totalLength += processedText.length;
         }
       }
 
@@ -405,7 +460,7 @@ export function PDFProvider({ children }: { children: ReactNode }) {
       console.error('Error creating audiobook:', error);
       throw error;
     }
-  }, [pdfDocument, headerMargin, footerMargin, leftMargin, rightMargin, apiKey, baseUrl, voice, voiceSpeed, ttsProvider, ttsModel, ttsInstructions]);
+  }, [pdfDocument, headerMargin, footerMargin, leftMargin, rightMargin, apiKey, baseUrl, voice, voiceSpeed, ttsProvider, ttsModel, ttsInstructions, smartSentenceSplitting]);
 
   /**
    * Regenerates a specific chapter (page) of the PDF audiobook
@@ -444,17 +499,21 @@ export function PDFProvider({ children }: { children: ReactNode }) {
       const pageNum = nonEmptyPages[chapterIndex];
 
       // Extract text from the mapped page
-      const text = await extractTextFromPDF(pdfDocument, pageNum, {
+      const rawText = await extractTextFromPDF(pdfDocument, pageNum, {
         header: headerMargin,
         footer: footerMargin,
         left: leftMargin,
         right: rightMargin
       });
 
-      const trimmedText = text.trim();
+      const trimmedText = rawText.trim();
       if (!trimmedText) {
         throw new Error('No text content found on page');
       }
+
+      const textForTTS = smartSentenceSplitting
+        ? processTextToSentences(trimmedText).join(' ')
+        : trimmedText;
 
       // Use logical chapter numbering (index + 1) to match original generation titles
       const chapterTitle = `Page ${chapterIndex + 1}`;
@@ -475,7 +534,7 @@ export function PDFProvider({ children }: { children: ReactNode }) {
               'x-tts-provider': ttsProvider,
             },
             body: JSON.stringify({
-              text: trimmedText,
+              text: textForTTS,
               voice: voice || (ttsProvider === 'openai' ? 'alloy' : (ttsProvider === 'deepinfra' ? 'af_bella' : 'af_sarah')),
               speed: voiceSpeed,
               format: 'mp3',
@@ -549,7 +608,7 @@ export function PDFProvider({ children }: { children: ReactNode }) {
       console.error('Error regenerating page:', error);
       throw error;
     }
-  }, [pdfDocument, headerMargin, footerMargin, leftMargin, rightMargin, apiKey, baseUrl, voice, voiceSpeed, ttsProvider, ttsModel, ttsInstructions]);
+  }, [pdfDocument, headerMargin, footerMargin, leftMargin, rightMargin, apiKey, baseUrl, voice, voiceSpeed, ttsProvider, ttsModel, ttsInstructions, smartSentenceSplitting]);
 
   /**
    * Effect hook to initialize TTS as non-EPUB mode
@@ -557,6 +616,16 @@ export function PDFProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     setIsEPUB(false);
   }, [setIsEPUB]);
+
+  useEffect(() => {
+    registerVisualPageChangeHandler(location => {
+      if (typeof location !== 'number') return;
+      if (!pdfDocument) return;
+      const totalPages = currDocPages ?? pdfDocument.numPages;
+      const clamped = Math.min(Math.max(location, 1), totalPages);
+      setCurrDocPage(clamped);
+    });
+  }, [registerVisualPageChangeHandler, currDocPages, pdfDocument]);
 
   // Context value memoization
   const contextValue = useMemo(

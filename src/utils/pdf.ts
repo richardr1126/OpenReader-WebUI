@@ -1,6 +1,6 @@
 import { pdfjs } from 'react-pdf';
 import type { TextItem } from 'pdfjs-dist/types/src/display/api';
-import type { PDFDocumentProxy } from 'pdfjs-dist';
+import { type PDFDocumentProxy, TextLayer } from 'pdfjs-dist';
 import "core-js/proposals/promise-with-resolvers";
 import { processTextToSentences } from '@/utils/nlp';
 import { CmpStr } from 'cmpstr';
@@ -51,6 +51,26 @@ function initPDFWorker() {
 
 // Initialize the worker
 initPDFWorker();
+
+// Patch TextLayer.render to treat cancelled renders as non-errors
+try {
+  const textLayerProto = TextLayer?.prototype;
+  const originalRender = textLayerProto?.render;
+  if (typeof originalRender === 'function') {
+    textLayerProto.render = async function patchedRender(...args) {
+      const task = originalRender.apply(this, args);
+      if (!task || typeof task.then !== 'function') return task;
+      return task.catch((error) => {
+        if (error && (error.name === 'AbortException' || error.name === 'RenderingCancelledException')) {
+          return;
+        }
+        throw error;
+      });
+    };
+  }
+} catch (e) {
+  console.error('Error patching TextLayer.render:', e);
+}
 
 interface TextMatch {
   elements: HTMLElement[];

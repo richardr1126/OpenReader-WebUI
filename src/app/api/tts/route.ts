@@ -217,7 +217,7 @@ export async function POST(req: NextRequest) {
       console.log('TTS in-flight JOIN for key:', cacheKey.slice(0, 8));
       existing.consumers += 1;
 
-      const onAbort = (_evt: Event) => {
+      const onAbort = () => {
         existing.consumers = Math.max(0, existing.consumers - 1);
         if (existing.consumers === 0) {
           existing.controller.abort();
@@ -262,7 +262,7 @@ export async function POST(req: NextRequest) {
 
     inflightRequests.set(cacheKey, entry);
 
-    const onAbort = (_evt: Event) => {
+    const onAbort = () => {
       entry.consumers = Math.max(0, entry.consumers - 1);
       if (entry.consumers === 0) {
         entry.controller.abort();
