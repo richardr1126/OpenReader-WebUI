@@ -32,7 +32,8 @@ export function DocumentSettings({ isOpen, setIsOpen, epub, html }: {
     footerMargin,
     leftMargin,
     rightMargin,
-    updateConfigKey
+    updateConfigKey,
+    pdfHighlightEnabled,
   } = useConfig();
   const { createFullAudioBook: createEPUBAudioBook, regenerateChapter: regenerateEPUBChapter } = useEPUB();
   const { createFullAudioBook: createPDFAudioBook, regenerateChapter: regeneratePDFChapter } = usePDF();
@@ -324,6 +325,22 @@ export function DocumentSettings({ isOpen, setIsOpen, epub, html }: {
                         </label>
                         <p className="text-sm text-muted pl-6">
                           Merge sentences across page or section breaks for smoother TTS.
+                        </p>
+                      </div>
+                    )}
+                    {!epub && !html && (
+                      <div className="space-y-1">
+                        <label className="flex items-center space-x-2">
+                          <input
+                            type="checkbox"
+                            checked={pdfHighlightEnabled}
+                            onChange={(e) => updateConfigKey('pdfHighlightEnabled', e.target.checked)}
+                            className="form-checkbox h-4 w-4 text-accent rounded border-muted"
+                          />
+                          <span className="text-sm font-medium text-foreground">Highlight text during playback</span>
+                        </label>
+                        <p className="text-sm text-muted pl-6">
+                          Show visual highlighting in the PDF viewer while TTS is reading.
                         </p>
                       </div>
                     )}

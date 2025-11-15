@@ -62,7 +62,8 @@ interface PDFContextType {
     pdfText: string,
     containerRef: RefObject<HTMLDivElement>,
     stopAndPlayFromIndex: (index: number) => void,
-    isProcessing: boolean
+    isProcessing: boolean,
+    enableHighlight?: boolean
   ) => void;
   createFullAudioBook: (onProgress: (progress: number) => void, signal?: AbortSignal, onChapterComplete?: (chapter: { index: number; title: string; duration?: number; status: 'pending' | 'generating' | 'completed' | 'error'; bookId?: string; format?: 'mp3' | 'm4b' }) => void, bookId?: string, format?: 'mp3' | 'm4b') => Promise<string>;
   regenerateChapter: (chapterIndex: number, bookId: string, format: 'mp3' | 'm4b', onProgress: (progress: number) => void, signal: AbortSignal) => Promise<{ index: number; title: string; duration?: number; status: 'pending' | 'generating' | 'completed' | 'error'; bookId?: string; format?: 'mp3' | 'm4b' }>;

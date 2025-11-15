@@ -5,7 +5,76 @@ import "core-js/proposals/promise-with-resolvers";
 import { processTextToSentences } from '@/utils/nlp';
 import { CmpStr } from 'cmpstr';
 
-const cmp = CmpStr.create().setMetric( 'levenshtein' ).setFlags( 'i' );
+const cmp = CmpStr.create().setMetric( 'dice' ).setFlags( 'itw' );
+
+// Worker coordination for offloading highlight token matching
+interface HighlightTokenMatchRequest {
+  id: string;
+  type: 'tokenMatch';
+  pattern: string;
+  tokenTexts: string[];
+}
+
+interface HighlightTokenMatchResponse {
+  id: string;
+  type: 'tokenMatchResult';
+  bestStart: number;
+  bestEnd: number;
+  rating: number;
+  lengthDiff: number;
+}
+
+let highlightWorker: Worker | null = null;
+
+function getHighlightWorker(): Worker | null {
+  if (typeof window === 'undefined') return null;
+  if (highlightWorker) return highlightWorker;
+
+  try {
+    highlightWorker = new Worker(
+      new URL('pdfHighlightWorker.ts', import.meta.url),
+      { type: 'module' }
+    );
+    return highlightWorker;
+  } catch (e) {
+    console.error('Failed to initialize PDF highlight worker:', e);
+    highlightWorker = null;
+    return null;
+  }
+}
+
+function runHighlightTokenMatch(
+  pattern: string,
+  tokenTexts: string[]
+): Promise<HighlightTokenMatchResponse | null> {
+  const worker = getHighlightWorker();
+  if (!worker) {
+    return Promise.resolve(null);
+  }
+
+  const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+  return new Promise((resolve) => {
+    const handleMessage = (event: MessageEvent) => {
+      const data = event.data as HighlightTokenMatchResponse;
+      if (!data || data.id !== id || data.type !== 'tokenMatchResult') {
+        return;
+      }
+      worker.removeEventListener('message', handleMessage as EventListener);
+      resolve(data);
+    };
+
+    worker.addEventListener('message', handleMessage as EventListener);
+
+    const message: HighlightTokenMatchRequest = {
+      id,
+      type: 'tokenMatch',
+      pattern,
+      tokenTexts,
+    };
+    worker.postMessage(message);
+  });
+}
 
 // Function to detect if we need to use legacy build
 function shouldUseLegacyBuild() {
@@ -202,6 +271,14 @@ export function clearHighlights() {
     element.style.backgroundColor = '';
     element.style.opacity = '1';
   });
+
+  const overlays = document.querySelectorAll('.pdf-text-highlight-overlay');
+  overlays.forEach((node) => {
+    const element = node as HTMLElement;
+    if (element.parentElement) {
+      element.parentElement.removeChild(element);
+    }
+  });
 }
 
 export function findBestTextMatch(
@@ -256,55 +333,268 @@ export function highlightPattern(
   clearHighlights();
 
   if (!pattern?.trim()) return;
-
-  const cleanPattern = pattern.trim().replace(/\s+/g, ' ');
   const container = containerRef.current;
   if (!container) return;
 
-  const textNodes = container.querySelectorAll('.react-pdf__Page__textContent span');
-  const allText = Array.from(textNodes).map((node) => ({
-    element: node as HTMLElement,
-    text: (node.textContent || '').trim(),
-  })).filter((node) => node.text.length > 0);
+  const cleanPattern = pattern.trim().replace(/\s+/g, ' ');
+  if (!cleanPattern) return;
 
-  const containerRect = container.getBoundingClientRect();
-  const visibleTop = container.scrollTop;
-  const visibleBottom = visibleTop + containerRect.height;
-  const bufferSize = containerRect.height;
+  const spanNodes = Array.from(
+    container.querySelectorAll('.react-pdf__Page__textContent span')
+  ) as HTMLElement[];
 
-  const visibleNodes = allText.filter(({ element }) => {
-    const rect = element.getBoundingClientRect();
-    const elementTop = rect.top - containerRect.top + container.scrollTop;
-    return elementTop >= (visibleTop - bufferSize) && elementTop <= (visibleBottom + bufferSize);
+  if (!spanNodes.length) return;
+
+  type Token = {
+    spanIndex: number;
+    textNode: Text;
+    text: string;
+    startOffset: number;
+    endOffset: number;
+  };
+
+  const tokens: Token[] = [];
+
+  spanNodes.forEach((span, spanIndex) => {
+    const node = span.firstChild;
+    if (!node || node.nodeType !== Node.TEXT_NODE) return;
+
+    const textNode = node as Text;
+    const textContent = textNode.textContent || '';
+    const wordRegex = /\S+/g;
+    let match: RegExpExecArray | null;
+
+    while ((match = wordRegex.exec(textContent)) !== null) {
+      const word = match[0];
+      tokens.push({
+        spanIndex,
+        textNode,
+        text: word,
+        startOffset: match.index,
+        endOffset: match.index + word.length,
+      });
+    }
   });
 
-  let bestMatch = findBestTextMatch(visibleNodes, cleanPattern, cleanPattern.length * 2);
+  if (!tokens.length) return;
 
-  if (bestMatch.rating < 0.3) {
-    bestMatch = findBestTextMatch(allText, cleanPattern, cleanPattern.length * 2);
-  }
+  const patternLen = cleanPattern.length;
 
-  const similarityThreshold = bestMatch.lengthDiff < cleanPattern.length * 0.3 ? 0.3 : 0.5;
+  // Core application of highlight logic once we know the best token window (if any)
+  const applyHighlightFromTokens = (
+    tokenMatch:
+      | {
+          bestStart: number;
+          bestEnd: number;
+          rating: number;
+          lengthDiff: number;
+        }
+      | null
+  ) => {
+    const highlightRanges: Array<{
+      textNode: Text;
+      startOffset: number;
+      endOffset: number;
+      span: HTMLElement;
+    }> = [];
 
-  if (bestMatch.rating >= similarityThreshold) {
-    bestMatch.elements.forEach((element) => {
-      element.style.backgroundColor = 'grey';
-      element.style.opacity = '0.4';
-    });
+    let bestStart = -1;
+    let bestEnd = -1;
+    let bestRating = 0;
+    let bestLengthDiff = Infinity;
 
-    if (bestMatch.elements.length > 0) {
-      const element = bestMatch.elements[0];
-      const elementRect = element.getBoundingClientRect();
-      const elementTop = elementRect.top - containerRect.top + container.scrollTop;
+    if (tokenMatch) {
+      bestStart = tokenMatch.bestStart;
+      bestEnd = tokenMatch.bestEnd;
+      bestRating = tokenMatch.rating;
+      bestLengthDiff = tokenMatch.lengthDiff;
+    }
 
-      if (elementTop < visibleTop || elementTop > visibleBottom) {
-        container.scrollTo({
-          top: elementTop - containerRect.height / 3,
-          behavior: 'smooth',
+    const hasTokenMatch = bestStart !== -1;
+    const similarityThreshold =
+      bestLengthDiff < patternLen * 0.3 ? 0.3 : 0.5;
+
+    if (hasTokenMatch && bestRating >= similarityThreshold) {
+      const rangesBySpan = new Map<
+        number,
+        { startOffset: number; endOffset: number }
+      >();
+
+      for (let i = bestStart; i <= bestEnd; i++) {
+        const token = tokens[i];
+        const existing = rangesBySpan.get(token.spanIndex);
+        if (!existing) {
+          rangesBySpan.set(token.spanIndex, {
+            startOffset: token.startOffset,
+            endOffset: token.endOffset,
+          });
+        } else {
+          existing.startOffset = Math.min(
+            existing.startOffset,
+            token.startOffset
+          );
+          existing.endOffset = Math.max(
+            existing.endOffset,
+            token.endOffset
+          );
+        }
+      }
+
+      rangesBySpan.forEach(({ startOffset, endOffset }, spanIndex) => {
+        const span = spanNodes[spanIndex];
+        const node = span.firstChild;
+        if (!node || node.nodeType !== Node.TEXT_NODE) return;
+
+        highlightRanges.push({
+          textNode: node as Text,
+          startOffset,
+          endOffset,
+          span,
+        });
+      });
+    }
+
+    // Fallback: if token-level matching failed, use span-based fuzzy matching
+    if (!highlightRanges.length) {
+      const spanEntries = spanNodes
+        .map((node) => ({
+          element: node as HTMLElement,
+          text: (node.textContent || '').trim(),
+        }))
+        .filter((entry) => entry.text.length > 0);
+
+      const containerRect = container.getBoundingClientRect();
+      const visibleTop = container.scrollTop;
+      const visibleBottom = visibleTop + containerRect.height;
+      const bufferSize = containerRect.height;
+
+      const visibleNodes = spanEntries.filter(({ element }) => {
+        const rect = element.getBoundingClientRect();
+        const elementTop =
+          rect.top - containerRect.top + container.scrollTop;
+        return (
+          elementTop >= visibleTop - bufferSize &&
+          elementTop <= visibleBottom + bufferSize
+        );
+      });
+
+      let bestMatch = findBestTextMatch(
+        visibleNodes,
+        cleanPattern,
+        cleanPattern.length * 2
+      );
+
+      if (bestMatch.rating < 0.3) {
+        bestMatch = findBestTextMatch(
+          spanEntries,
+          cleanPattern,
+          cleanPattern.length * 2
+        );
+      }
+
+      const spanSimilarityThreshold =
+        bestMatch.lengthDiff < cleanPattern.length * 0.3 ? 0.3 : 0.5;
+
+      if (bestMatch.rating >= spanSimilarityThreshold) {
+        bestMatch.elements.forEach((element) => {
+          const node = element.firstChild;
+          if (!node || node.nodeType !== Node.TEXT_NODE) return;
+          const textNode = node as Text;
+          const content = textNode.textContent || '';
+          if (!content) return;
+
+          highlightRanges.push({
+            textNode,
+            startOffset: 0,
+            endOffset: content.length,
+            span: element,
+          });
         });
       }
     }
-  }
+
+    if (!highlightRanges.length) return;
+
+    // Create overlay rectangles for each range, relative to its page text layer
+    const scrollIntoViewRects: DOMRect[] = [];
+
+    highlightRanges.forEach(({ textNode, startOffset, endOffset, span }) => {
+      try {
+        const range = document.createRange();
+        range.setStart(textNode, startOffset);
+        range.setEnd(textNode, endOffset);
+
+        const pageLayer = span.closest(
+          '.react-pdf__Page__textContent'
+        ) as HTMLElement | null;
+        if (!pageLayer) return;
+
+        const pageRect = pageLayer.getBoundingClientRect();
+        const rects = Array.from(range.getClientRects());
+
+        rects.forEach((rect) => {
+          const highlight = document.createElement('div');
+          highlight.className = 'pdf-text-highlight-overlay';
+          highlight.style.position = 'absolute';
+          highlight.style.backgroundColor = 'grey';
+          highlight.style.opacity = '0.4';
+          highlight.style.pointerEvents = 'none';
+          highlight.style.left = `${rect.left - pageRect.left}px`;
+          highlight.style.top = `${rect.top - pageRect.top}px`;
+          highlight.style.width = `${rect.width}px`;
+          highlight.style.height = `${rect.height}px`;
+          pageLayer.appendChild(highlight);
+
+          scrollIntoViewRects.push(rect);
+        });
+      } catch {
+        // If range creation fails for any reason, skip this segment
+      }
+    });
+
+    if (!scrollIntoViewRects.length) return;
+
+    // Scroll the first highlighted rect into view if needed
+    const containerRect = container.getBoundingClientRect();
+    const visibleTop = container.scrollTop;
+    const visibleBottom = visibleTop + containerRect.height;
+
+    const firstRect = scrollIntoViewRects[0];
+    const elementTop =
+      firstRect.top - containerRect.top + container.scrollTop;
+
+    if (elementTop < visibleTop || elementTop > visibleBottom) {
+      container.scrollTo({
+        top: elementTop - containerRect.height / 3,
+        behavior: 'smooth',
+      });
+    }
+  };
+
+  const tokenTexts = tokens.map((t) => t.text);
+
+  // Fire-and-forget async worker call; UI thread returns immediately
+  runHighlightTokenMatch(cleanPattern, tokenTexts)
+    .then((result) => {
+      if (!result || result.bestStart === -1) {
+        // No worker result or no good match; rely on span-level fallback
+        applyHighlightFromTokens(null);
+      } else {
+        applyHighlightFromTokens({
+          bestStart: result.bestStart,
+          bestEnd: result.bestEnd,
+          rating: result.rating,
+          lengthDiff: result.lengthDiff,
+        });
+      }
+    })
+    .catch((error) => {
+      console.error(
+        'Error in PDF highlight worker, falling back to span-based matching:',
+        error
+      );
+      applyHighlightFromTokens(null);
+    });
 }
 
 // Text Click Handler
@@ -313,7 +603,8 @@ export function handleTextClick(
   pdfText: string,
   containerRef: React.RefObject<HTMLDivElement>,
   stopAndPlayFromIndex: (index: number) => void,
-  isProcessing: boolean
+  isProcessing: boolean,
+  enableHighlight = true
 ) {
   if (isProcessing) return;
 
@@ -337,6 +628,26 @@ export function handleTextClick(
   if (!contextText?.trim()) return;
 
   const cleanContext = contextText.trim().replace(/\s+/g, ' ');
+
+  // Fast path when highlight overlays are disabled:
+  // avoid expensive span-level fuzzy matching and just map
+  // the clicked context to a sentence using cheap string checks.
+  if (!enableHighlight) {
+    const sentences = processTextToSentences(pdfText);
+    const idx = sentences.findIndex((sentence) => {
+      const cleanSentence = sentence.trim().replace(/\s+/g, ' ');
+      return (
+        cleanSentence.includes(cleanContext) ||
+        cleanContext.includes(cleanSentence)
+      );
+    });
+
+    if (idx !== -1) {
+      stopAndPlayFromIndex(idx);
+    }
+    return;
+  }
+
   const allText = Array.from(parentElement.querySelectorAll('span')).map((node) => ({
     element: node as HTMLElement,
     text: (node.textContent || '').trim(),
@@ -363,7 +674,9 @@ export function handleTextClick(
       const sentenceIndex = sentences.findIndex((sentence) => sentence === bestSentenceMatch.sentence);
       if (sentenceIndex !== -1) {
         stopAndPlayFromIndex(sentenceIndex);
-        highlightPattern(pdfText, bestSentenceMatch.sentence, containerRef);
+        if (enableHighlight) {
+          highlightPattern(pdfText, bestSentenceMatch.sentence, containerRef);
+        }
       }
     }
   }

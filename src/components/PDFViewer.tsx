@@ -25,13 +25,11 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
   const { containerWidth } = usePDFResize(containerRef);
 
   // Config context
-  const { viewType } = useConfig();
+  const { viewType, pdfHighlightEnabled } = useConfig();
 
   // TTS context
   const {
     currentSentence,
-    stopAndPlayFromIndex,
-    isProcessing,
     skipToLocation,
   } = useTTS();
 
@@ -39,58 +37,12 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
   const {
     highlightPattern,
     clearHighlights,
-    handleTextClick,
     onDocumentLoadSuccess,
     currDocData,
     currDocPages,
     currDocText,
     currDocPage,
   } = usePDF();
-
-  // Add static styles once during component mount
-  useEffect(() => {
-    const styleElement = document.createElement('style');
-    styleElement.textContent = `
-      .react-pdf__Page__textContent span {
-        cursor: pointer;
-        transition: background-color 0.2s ease;
-      }
-      .react-pdf__Page__textContent span:hover {
-        background-color: rgba(255, 255, 0, 0.2) !important;
-      }
-    `;
-    document.head.appendChild(styleElement);
-    return () => {
-      styleElement.remove();
-    };
-  }, []);
-
-  useEffect(() => {
-    /*
-     * Sets up click event listeners for text selection in the PDF.
-     * Cleans up by removing the event listener when component unmounts.
-     * 
-     * Dependencies:
-     * - pdfText: Re-run when the extracted text content changes
-     * - handleTextClick: Function from context that could change
-     * - stopAndPlayFromIndex: Function from context that could change
-     */
-    const container = containerRef.current;
-    if (!container) return;
-    if (!currDocText) return;
-
-    const handleClick = (event: MouseEvent) => handleTextClick(
-      event,
-      currDocText,
-      containerRef as RefObject<HTMLDivElement>,
-      stopAndPlayFromIndex,
-      isProcessing
-    );
-    container.addEventListener('click', handleClick);
-    return () => {
-      container.removeEventListener('click', handleClick);
-    };
-  }, [currDocText, handleTextClick, stopAndPlayFromIndex, isProcessing]);
 
   useEffect(() => {
     /*
@@ -103,7 +55,11 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
      * - highlightPattern: Function from context that could change
      * - clearHighlights: Function from context that could change
      */
-    if (!currDocText) return;
+
+    if (!currDocText || !pdfHighlightEnabled) {
+      clearHighlights();
+      return;
+    }
 
     const highlightTimeout = setTimeout(() => {
       if (containerRef.current) {
@@ -115,7 +71,7 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
       clearTimeout(highlightTimeout);
       clearHighlights();
     };
-  }, [currDocText, currentSentence, highlightPattern, clearHighlights]);
+  }, [currDocText, currentSentence, highlightPattern, clearHighlights, pdfHighlightEnabled]);
 
   // Add page dimensions state
   const [pageWidth, setPageWidth] = useState<number>(595); // default A4 width

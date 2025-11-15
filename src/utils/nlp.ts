@@ -7,7 +7,7 @@
 
 import nlp from 'compromise';
 
-const MAX_BLOCK_LENGTH = 300;
+const MAX_BLOCK_LENGTH = 450;
 
 /**
  * Preprocesses text for audio generation by cleaning up various text artifacts
@@ -79,13 +79,8 @@ export const processTextToSentences = (text: string): string[] => {
     return [];
   }
 
-  if (text.length <= MAX_BLOCK_LENGTH) {
-    // Single sentence preprocessing
-    const cleanedText = preprocessSentenceForAudio(text);
-    return [cleanedText];
-  }
-
-  // Full text splitting into sentences
+  // Always use the full splitting logic so we consistently respect
+  // sentence boundaries and quoted dialogue, even for shorter texts.
   return splitIntoSentences(text);
 };
 
@@ -160,20 +155,18 @@ const countDoubleQuotes = (s: string): number => {
   return matches ? matches.length : 0;
 };
 
-const countCurlySingleQuotes = (s: string): number => {
-  const matches = s.match(/[‘’]/g);
-  return matches ? matches.length : 0;
-};
-
-const countStandaloneStraightSingles = (s: string): number => {
+// Replace the old curly single-quote counter and standalone-straight counter with a unified, context-aware counter
+const countNonApostropheSingleQuotes = (s: string): number => {
   let count = 0;
   for (let i = 0; i < s.length; i++) {
-    if (s[i] === "'") {
+    const ch = s[i];
+    if (ch === "'" || ch === '‘' || ch === '’') {
       const prev = i > 0 ? s[i - 1] : '';
       const next = i + 1 < s.length ? s[i + 1] : '';
       const isPrevAlphaNum = /[A-Za-z0-9]/.test(prev);
       const isNextAlphaNum = /[A-Za-z0-9]/.test(next);
-      // Count only when not clearly an apostrophe inside a word (e.g., don't)
+      // Treat as a real quote mark only when it's not clearly an apostrophe
+      // between two alphanumeric characters (e.g., don't, WizardLM’s).
       if (!(isPrevAlphaNum && isNextAlphaNum)) {
         count++;
       }
@@ -191,7 +184,10 @@ const mergeQuotedDialogue = (rawSentences: string[]): string[] => {
   for (const s of rawSentences) {
     const t = s.trim();
     const dblCount = countDoubleQuotes(t);
-    const singleCount = countCurlySingleQuotes(t) + countStandaloneStraightSingles(t);
+    // Use the new context-aware single-quote counter so curly apostrophes
+    // inside words don't incorrectly toggle quote state and merge large
+    // regions of plain prose into one block.
+    const singleCount = countNonApostropheSingleQuotes(t);
 
     if (insideDouble || insideSingle) {
       buffer = buffer ? `${buffer} ${t}` : t;

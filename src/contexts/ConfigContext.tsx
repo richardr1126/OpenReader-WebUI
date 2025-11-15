@@ -30,6 +30,7 @@ type ConfigValues = {
   ttsInstructions: string;
   savedVoices: SavedVoices;
   smartSentenceSplitting: boolean;
+  pdfHighlightEnabled: boolean;
 };
 
 /** Interface defining the configuration context shape and functionality */
@@ -55,6 +56,7 @@ interface ConfigContextType {
   updateConfigKey: <K extends keyof ConfigValues>(key: K, value: ConfigValues[K]) => Promise<void>;
   isLoading: boolean;
   isDBReady: boolean;
+  pdfHighlightEnabled: boolean;
 }
 
 const ConfigContext = createContext<ConfigContextType | undefined>(undefined);
@@ -76,14 +78,15 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   const [skipBlank, setSkipBlank] = useState<boolean>(true);
   const [epubTheme, setEpubTheme] = useState<boolean>(false);
   const [smartSentenceSplitting, setSmartSentenceSplitting] = useState<boolean>(true);
-  const [headerMargin, setHeaderMargin] = useState<number>(0.07);
-  const [footerMargin, setFooterMargin] = useState<number>(0.07);
-  const [leftMargin, setLeftMargin] = useState<number>(0.07);
-  const [rightMargin, setRightMargin] = useState<number>(0.07);
+  const [headerMargin, setHeaderMargin] = useState<number>(0.0);
+  const [footerMargin, setFooterMargin] = useState<number>(0.0);
+  const [leftMargin, setLeftMargin] = useState<number>(0.0);
+  const [rightMargin, setRightMargin] = useState<number>(0.0);
   const [ttsProvider, setTTSProvider] = useState<string>('custom-openai');
   const [ttsModel, setTTSModel] = useState<string>('kokoro');
   const [ttsInstructions, setTTSInstructions] = useState<string>('');
   const [savedVoices, setSavedVoices] = useState<SavedVoices>({});
+  const [pdfHighlightEnabled, setPdfHighlightEnabled] = useState<boolean>(true);
 
   const [isLoading, setIsLoading] = useState(true);
   const [isDBReady, setIsDBReady] = useState(false);
@@ -115,6 +118,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
         const cachedTTSModel = await getItem('ttsModel');
         const cachedTTSInstructions = await getItem('ttsInstructions');
         const cachedSavedVoices = await getItem('savedVoices');
+        const cachedPdfHighlightEnabled = await getItem('pdfHighlightEnabled');
 
         // Migration logic: infer provider and baseUrl for returning users
         let inferredProvider = cachedTTSProvider || '';
@@ -200,6 +204,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
         const finalModel = cachedTTSModel || (inferredProvider === 'openai' ? 'tts-1' : inferredProvider === 'deepinfra' ? 'hexgrad/Kokoro-82M' : 'kokoro');
         setTTSModel(finalModel);
         setTTSInstructions(cachedTTSInstructions || '');
+        setPdfHighlightEnabled(cachedPdfHighlightEnabled === 'false' ? false : true);
 
         // Restore voice for current provider-model if available in savedVoices
         const voiceKey = getVoiceKey(inferredProvider || 'custom-openai', finalModel);
@@ -219,8 +224,8 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
         if (cachedSmartSentenceSplitting === null) {
           await setItem('smartSentenceSplitting', 'true');
         }
-        if (cachedHeaderMargin === null) await setItem('headerMargin', '0.07');
-        if (cachedFooterMargin === null) await setItem('footerMargin', '0.07');
+        if (cachedHeaderMargin === null) await setItem('headerMargin', '0.0');
+        if (cachedFooterMargin === null) await setItem('footerMargin', '0.0');
         if (cachedLeftMargin === null) await setItem('leftMargin', '0.0');
         if (cachedRightMargin === null) await setItem('rightMargin', '0.0');
         if (cachedTTSProvider === null && inferredProvider) {
@@ -246,6 +251,10 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
         }
         // Always ensure voice is not stored standalone - only in savedVoices
         await removeItem('voice');
+        
+        if (cachedPdfHighlightEnabled === null) {
+          await setItem('pdfHighlightEnabled', 'true');
+        }
         
       } catch (error) {
         console.error('Error initializing:', error);
@@ -379,6 +388,9 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
           case 'ttsInstructions':
             setTTSInstructions(value as string);
             break;
+          case 'pdfHighlightEnabled':
+            setPdfHighlightEnabled(value as boolean);
+            break;
         }
       }
     } catch (error) {
@@ -411,7 +423,8 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
       updateConfig,
       updateConfigKey,
       isLoading,
-      isDBReady
+      isDBReady,
+      pdfHighlightEnabled
     }}>
       {children}
     </ConfigContext.Provider>
