@@ -6,12 +6,30 @@ import {
   clickDocumentLink,
   expectViewerForFile,
   uploadAndDisplay,
-  navigateToPdfPageViaNavigator,
-  countRenderedPdfPages,
-  triggerViewportResize,
   playTTSAndWaitForASecond,
   expectProcessingTransition,
 } from './helpers';
+
+// Single-spec helpers kept local to avoid cluttering shared helpers:
+async function navigateToPdfPageViaNavigator(page: any, targetPage: number) {
+  // Navigator popover shows "X / Y"
+  const navTrigger = page.getByRole('button', { name: /\d+\s*\/\s*\d+/ });
+  await expect(navTrigger).toBeVisible({ timeout: 10000 });
+  await navTrigger.click();
+
+  const input = page.getByLabel('Page number');
+  await expect(input).toBeVisible({ timeout: 10000 });
+  await input.fill(String(targetPage));
+  await input.press('Enter');
+}
+
+async function countRenderedPdfPages(page: any): Promise<number> {
+  return await page.locator('.react-pdf__Page').count();
+}
+
+async function triggerViewportResize(page: any, width: number, height: number) {
+  await page.setViewportSize({ width, height });
+}
 
 test.describe('Document link navigation by type', () => {
   test.beforeEach(async ({ page }) => {

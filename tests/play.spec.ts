@@ -2,13 +2,47 @@ import { test, expect } from '@playwright/test';
 import {
   setupTest,
   playTTSAndWaitForASecond,
-  pauseTTSAndVerify,
   openVoicesMenu,
   selectVoiceAndAssertPlayback,
-  changeNativeSpeedAndAssert,
   expectMediaState,
   expectProcessingTransition,
 } from './helpers';
+
+// Single-spec helpers kept local instead of living in shared helpers:
+async function pauseTTSAndVerify(page: any) {
+  // Click pause to stop playback
+  await page.getByRole('button', { name: 'Pause' }).click();
+  // Check for play button to be visible
+  await expect(page.getByRole('button', { name: 'Play' })).toBeVisible({ timeout: 10000 });
+}
+
+async function openSpeedPopover(page: any) {
+  const ttsbar = page.locator('[data-app-ttsbar]');
+  const buttons = ttsbar.getByRole('button');
+  // Heuristic: the Speed control is the first button in the TTS bar and shows something like "1x"
+  const speedBtn = buttons.first();
+  await expect(speedBtn).toBeVisible({ timeout: 10000 });
+  await speedBtn.click();
+  // Popover panel should appear with sliders
+  await page.waitForSelector('input[type="range"]', { timeout: 10000 });
+}
+
+async function changeNativeSpeedAndAssert(page: any, newSpeed: number) {
+  await openSpeedPopover(page);
+  const slider = page.locator('input[type="range"]').first();
+
+  // Set the slider value programmatically and dispatch events to trigger handlers
+  const valueStr = String(newSpeed);
+  await slider.evaluate((input: HTMLInputElement, v: string) => {
+    input.value = v;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('mouseup', { bubbles: true }));
+    input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'ArrowRight' }));
+    input.dispatchEvent(new Event('touchend', { bubbles: true }));
+  }, valueStr);
+
+  await expectProcessingTransition(page);
+}
 
 test.describe('Play/Pause Tests', () => {
   test.beforeEach(async ({ page }) => {

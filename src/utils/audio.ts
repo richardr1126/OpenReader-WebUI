@@ -39,7 +39,13 @@ export const withRetry = async <T>(
       return await operation();
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
-      
+
+      // Do not retry on explicit cancellation/abort errors - surface them
+      // immediately so callers can stop work quickly when the user cancels.
+      if (lastError.name === 'AbortError' || lastError.message.includes('cancelled')) {
+        break;
+      }
+
       if (attempt === maxRetries - 1) {
         break;
       }

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { setupTest, uploadFiles, ensureDocumentsListed, deleteAllLocalDocuments, waitForDocumentListHintPersist } from './helpers';
+import { setupTest, uploadFiles, ensureDocumentsListed, waitForDocumentListHintPersist } from './helpers';
 
 test.describe('Document folders and hint persistence', () => {
   test.beforeEach(async ({ page }) => {

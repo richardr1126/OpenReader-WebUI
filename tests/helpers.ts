@@ -212,32 +212,6 @@ export async function deleteAllLocalDocuments(page: Page) {
   await page.keyboard.press('Escape');
 }
 
-// Extract the current list order (by visible .document-link elements)
-export async function getNamesInOrder(page: Page): Promise<string[]> {
-  const texts = await page.locator('.document-link').allInnerTexts();
-  return texts.map(t => t.split('\n')[0].trim());
-}
-
-// Set sort field (by listbox button) to a given field label
-export async function setSortField(page: Page, fieldLabel: string) {
-  // The listbox trigger shows current field (e.g. "Name"|"Size")
-  await page.getByRole('button', { name: /Name|Size|Date/i }).click();
-  await page.getByRole('option', { name: new RegExp(`^${escapeRegExp(fieldLabel)}$`, 'i') }).click();
-  // Verify it reflects the chosen field
-  await expect(page.getByRole('button', { name: new RegExp(`^${escapeRegExp(fieldLabel)}$`, 'i') })).toBeVisible();
-}
-
-// Ensure sort direction button shows an expected label (toggle as needed)
-export async function ensureSortDirection(page: Page, expectedLabel: RegExp) {
-  // Direction button text is one of: A-Z, Z-A, Newest, Oldest, Smallest, Largest
-  const directionButton = page.getByRole('button', { name: /A-Z|Z-A|Newest|Oldest|Smallest|Largest/ });
-  const current = (await directionButton.textContent())?.trim() ?? '';
-  if (!expectedLabel.test(current)) {
-    await directionButton.click();
-    await expect(directionButton).toHaveText(expectedLabel);
-  }
-}
-
 // Open the Voices dropdown from the TTS bar and return the button locator
 export async function openVoicesMenu(page: Page) {
   const ttsbar = page.locator('[data-app-ttsbar]');
@@ -303,37 +277,6 @@ export async function expectProcessingTransition(page: Page) {
 
   // Ensure media session is playing
   await expectMediaState(page, 'playing');
-}
-
-// Open Speed popover in TTS bar
-export async function openSpeedPopover(page: Page) {
-  const ttsbar = page.locator('[data-app-ttsbar]');
-  const buttons = ttsbar.getByRole('button');
-  // Heuristic: the Speed control is the first button in the TTS bar and shows something like "1x"
-  const speedBtn = buttons.first();
-  await expect(speedBtn).toBeVisible({ timeout: 10000 });
-  await speedBtn.click();
-  // Popover panel should appear with sliders
-  await page.waitForSelector('input[type="range"]', { timeout: 10000 });
-}
-
-// Change the "Native model speed" slider to a specific value and assert processing -> playing
-export async function changeNativeSpeedAndAssert(page: Page, newSpeed: number) {
-  await openSpeedPopover(page);
-  const slider = page.locator('input[type="range"]').first();
-
-  // Set the slider value programmatically and dispatch events to trigger handlers
-  const valueStr = String(newSpeed);
-  await slider.evaluate((el, v) => {
-    const input = el as HTMLInputElement;
-    input.value = v;
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-    input.dispatchEvent(new Event('mouseup', { bubbles: true }));
-    input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'ArrowRight' }));
-    input.dispatchEvent(new Event('touchend', { bubbles: true }));
-  }, valueStr);
-
-  await expectProcessingTransition(page);
 }
 
 // Expect navigator.mediaSession.playbackState to equal given state
