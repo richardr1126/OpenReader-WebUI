@@ -22,7 +22,7 @@ OpenReader WebUI is an open source text to speech document reader web app built 
 - 🚀 **(New) Optimized TTS Pipeline**: Next.js TTS backend with in-memory LRU audio cache, ETag-aware responses, and in-flight request de-duplication for faster repeat playback
 - 💾 **Local-First Architecture**: IndexedDB browser storage for documents and settings (now using Dexie.js)
 - 🛜 **Optional Server-side documents**: Manually upload documents to the Next.js backend (and Docker `docstore`) for all users to download
-- 📖 **Read Along Experience**: Follow along with highlighted text as the TTS narrates PDF files, with per-sentence navigation and skip controls
+- 📖 **Read Along Experience**: Follow along with real-time highlighted text as the TTS narrates PDF files, using an overlay-based highlighter, per-sentence navigation, and skip controls
 - 📄 **Document formats**: EPUB, PDF, TXT, MD, DOCX (with libreoffice installed, plus hardened DOCX→PDF conversion for better reliability)
 - 🎨 **Customizable Experience**: 
   - 🔑 Select TTS provider (OpenAI, Deepinfra, or Custom OpenAI-compatible)
@@ -38,8 +38,14 @@ OpenReader WebUI is an open source text to speech document reader web app built 
 </summary>
 
 - 🧠 **Smart sentence continuation**  
+  - Improved NLP handling of complex structures and quoted dialogue provides more natural sentence boundaries and a smoother audio-text flow.  
   - EPUB and PDF playback now use smarter sentence splitting and continuation metadata so sentences that cross page/chapter boundaries are merged before hitting the TTS API.  
-  - This yields more natural narration and fewer awkward pauses when a sentence spans multiple pages or EPUB spine items
+  - This yields more natural narration and fewer awkward pauses when a sentence spans multiple pages or EPUB spine items.
+- 📄 **Modernized PDF text highlighting pipeline**  
+  - Real-time PDF text highlighting is now offloaded to a dedicated Web Worker so scrolling and playback controls remain responsive during narration.  
+  - A new overlay-based highlighting system draws independent highlight layers on top of the PDF, avoiding interference with the underlying text layer.  
+  - Upgraded fuzzy matching with Dice-based similarity improves the accuracy of mapping spoken words to on-screen text.  
+  - A new per-device setting lets you enable or disable real-time PDF highlighting during playback for a more tailored reading experience.  
 - 🎧 **Chapter/page-based audiobook export with resume & regeneration**  
   - Per-chapter/per-page generation to disk with persistent `bookId`  
   - Resumable generation (can cancel and continue later)  
@@ -61,7 +67,7 @@ OpenReader WebUI is an open source text to speech document reader web app built 
   - PDF/EPUB/HTML readers use a full-height app shell with a sticky bottom TTS bar, improved scrollbars, and refined focus styles.
 - ✅ **End-to-end Playwright test suite with TTS mocks**  
   - Deterministic TTS responses in tests via a reusable Playwright route mock.  
-  - Coverage for accessibility, upload, navigation, folder management, deletion flows, and playback across all document types.
+  - Coverage for accessibility, upload, navigation, folder management, deletion flows, audiobook generation/export and playback across all document types.
 
 </details>
 
