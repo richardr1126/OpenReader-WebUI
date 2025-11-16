@@ -1,20 +1,22 @@
 import Dexie, { type EntityTable } from 'dexie';
-import {
-  PDFDocument,
-  EPUBDocument,
-  HTMLDocument,
-  DocumentListState,
-  SyncedDocument,
-} from '@/types/documents';
+import { APP_CONFIG_DEFAULTS, type ViewType, type SavedVoices, type AppConfigRow } from '@/types/appConfig';
+import { PDFDocument, EPUBDocument, HTMLDocument, DocumentListState, SyncedDocument } from '@/types/documents';
 
 const DB_NAME = 'openreader-db';
 // Managed via Dexie (version bumped from the original manual IndexedDB)
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 
 const PDF_TABLE = 'pdf-documents' as const;
 const EPUB_TABLE = 'epub-documents' as const;
 const HTML_TABLE = 'html-documents' as const;
 const CONFIG_TABLE = 'config' as const;
+const APP_CONFIG_TABLE = 'app-config' as const;
+const LAST_LOCATION_TABLE = 'last-locations' as const;
+
+export interface LastLocationRow {
+  docId: string;
+  location: string;
+}
 
 export interface ConfigRow {
   key: string;
@@ -26,15 +28,159 @@ type OpenReaderDB = Dexie & {
   [EPUB_TABLE]: EntityTable<EPUBDocument, 'id'>;
   [HTML_TABLE]: EntityTable<HTMLDocument, 'id'>;
   [CONFIG_TABLE]: EntityTable<ConfigRow, 'key'>;
+  [APP_CONFIG_TABLE]: EntityTable<AppConfigRow, 'id'>;
+  [LAST_LOCATION_TABLE]: EntityTable<LastLocationRow, 'docId'>;
 };
 
 export const db = new Dexie(DB_NAME) as OpenReaderDB;
 
+const isDev = process.env.NEXT_PUBLIC_NODE_ENV !== 'production' || process.env.NODE_ENV == null;
+
+const PROVIDER_DEFAULT_BASE_URL: Record<string, string> = {
+  openai: 'https://api.openai.com/v1',
+  deepinfra: 'https://api.deepinfra.com/v1/openai',
+  'custom-openai': '',
+};
+
+type RawConfigMap = Record<string, string | undefined>;
+
+function inferProviderAndBaseUrl(raw: RawConfigMap): { provider: string; baseUrl: string } {
+  const cachedApiKey = raw.apiKey;
+  const cachedBaseUrl = raw.baseUrl;
+  let inferredProvider = raw.ttsProvider || '';
+
+  if (!isDev && !raw.ttsProvider) {
+    inferredProvider = 'deepinfra';
+  } else if (!inferredProvider) {
+    if (cachedBaseUrl) {
+      const baseUrlLower = cachedBaseUrl.toLowerCase();
+      if (baseUrlLower.includes('deepinfra.com')) {
+        inferredProvider = 'deepinfra';
+      } else if (baseUrlLower.includes('openai.com')) {
+        inferredProvider = 'openai';
+      } else if (
+        baseUrlLower.includes('localhost') ||
+        baseUrlLower.includes('127.0.0.1') ||
+        baseUrlLower.includes('internal')
+      ) {
+        inferredProvider = 'custom-openai';
+      } else {
+        inferredProvider = cachedApiKey ? 'openai' : 'custom-openai';
+      }
+    } else {
+      inferredProvider = cachedApiKey ? 'openai' : 'custom-openai';
+    }
+  }
+
+  let baseUrl = cachedBaseUrl || '';
+  if (!baseUrl) {
+    if (inferredProvider === 'openai') {
+      baseUrl = PROVIDER_DEFAULT_BASE_URL.openai;
+    } else if (inferredProvider === 'deepinfra') {
+      baseUrl = PROVIDER_DEFAULT_BASE_URL.deepinfra;
+    } else {
+      baseUrl = PROVIDER_DEFAULT_BASE_URL['custom-openai'];
+    }
+  }
+
+  return { provider: inferredProvider, baseUrl };
+}
+
+function buildAppConfigFromRaw(raw: RawConfigMap): AppConfigRow {
+  const { provider, baseUrl } = inferProviderAndBaseUrl(raw);
+
+  let savedVoices: SavedVoices = {};
+  if (raw.savedVoices) {
+    try {
+      savedVoices = JSON.parse(raw.savedVoices) as SavedVoices;
+    } catch (error) {
+      console.error('Error parsing savedVoices during migration:', error);
+    }
+  }
+
+  let documentListState: DocumentListState = APP_CONFIG_DEFAULTS.documentListState;
+  if (raw.documentListState) {
+    try {
+      documentListState = JSON.parse(raw.documentListState) as DocumentListState;
+    } catch (error) {
+      console.error('Error parsing documentListState during migration:', error);
+    }
+  }
+
+  const config: AppConfigRow = {
+    id: 'singleton',
+    ...APP_CONFIG_DEFAULTS,
+    apiKey: raw.apiKey ?? APP_CONFIG_DEFAULTS.apiKey,
+    baseUrl,
+    viewType: (raw.viewType as ViewType) || APP_CONFIG_DEFAULTS.viewType,
+    voiceSpeed: raw.voiceSpeed ? parseFloat(raw.voiceSpeed) : APP_CONFIG_DEFAULTS.voiceSpeed,
+    audioPlayerSpeed: raw.audioPlayerSpeed ? parseFloat(raw.audioPlayerSpeed) : APP_CONFIG_DEFAULTS.audioPlayerSpeed,
+    voice: '',
+    skipBlank: raw.skipBlank === 'false' ? false : APP_CONFIG_DEFAULTS.skipBlank,
+    epubTheme: raw.epubTheme === 'true',
+    smartSentenceSplitting:
+      raw.smartSentenceSplitting === 'false' ? false : APP_CONFIG_DEFAULTS.smartSentenceSplitting,
+    headerMargin: raw.headerMargin ? parseFloat(raw.headerMargin) : APP_CONFIG_DEFAULTS.headerMargin,
+    footerMargin: raw.footerMargin ? parseFloat(raw.footerMargin) : APP_CONFIG_DEFAULTS.footerMargin,
+    leftMargin: raw.leftMargin ? parseFloat(raw.leftMargin) : APP_CONFIG_DEFAULTS.leftMargin,
+    rightMargin: raw.rightMargin ? parseFloat(raw.rightMargin) : APP_CONFIG_DEFAULTS.rightMargin,
+    ttsProvider: provider || APP_CONFIG_DEFAULTS.ttsProvider,
+    ttsModel:
+      raw.ttsModel ||
+      (provider === 'openai'
+        ? 'tts-1'
+        : provider === 'deepinfra'
+        ? 'hexgrad/Kokoro-82M'
+        : APP_CONFIG_DEFAULTS.ttsModel),
+    ttsInstructions: raw.ttsInstructions ?? APP_CONFIG_DEFAULTS.ttsInstructions,
+    savedVoices,
+    pdfHighlightEnabled:
+      raw.pdfHighlightEnabled === 'false' ? false : APP_CONFIG_DEFAULTS.pdfHighlightEnabled,
+    firstVisit: raw.firstVisit === 'true',
+    documentListState,
+  };
+
+  const voiceKey = `${config.ttsProvider}:${config.ttsModel}`;
+  config.voice = config.savedVoices[voiceKey] || '';
+
+  return config;
+}
+
+// Version 5: introduce app-config and last-locations tables, migrate scattered config keys,
+// and drop the legacy config table in a single upgrade step.
 db.version(DB_VERSION).stores({
   [PDF_TABLE]: 'id, type, name, lastModified, size, folderId',
   [EPUB_TABLE]: 'id, type, name, lastModified, size, folderId',
   [HTML_TABLE]: 'id, type, name, lastModified, size, folderId',
-  [CONFIG_TABLE]: 'key',
+  [APP_CONFIG_TABLE]: 'id',
+  [LAST_LOCATION_TABLE]: 'docId',
+  // `null` here means: drop the old 'config' table after upgrade runs,
+  // but Dexie still lets us read it inside the upgrade transaction.
+  [CONFIG_TABLE]: null,
+}).upgrade(async (trans) => {
+  const appConfig = await trans.table<AppConfigRow, string>(APP_CONFIG_TABLE).get('singleton');
+  if (appConfig) {
+    return;
+  }
+
+  const configRows = await trans.table<ConfigRow, string>(CONFIG_TABLE).toArray();
+  const raw: RawConfigMap = {};
+
+  for (const row of configRows) {
+    raw[row.key] = row.value;
+  }
+
+  const built = buildAppConfigFromRaw(raw);
+  await trans.table<AppConfigRow, string>(APP_CONFIG_TABLE).put(built);
+
+  // Migrate any legacy lastLocation_* keys into the dedicated last-locations table.
+  const locationTable = trans.table<LastLocationRow, string>(LAST_LOCATION_TABLE);
+  for (const row of configRows) {
+    if (row.key.startsWith('lastLocation_')) {
+      const docId = row.key.substring('lastLocation_'.length);
+      await locationTable.put({ docId, location: row.value });
+    }
+  }
 });
 
 let dbOpenPromise: Promise<void> | null = null;
@@ -90,10 +236,9 @@ export async function getAllPdfDocuments(): Promise<PDFDocument[]> {
 export async function removePdfDocument(id: string): Promise<void> {
   await withDB(async () => {
     console.log('Removing PDF document via Dexie:', id);
-    const locationKey = `lastLocation_${id}`;
-    await db.transaction('readwrite', db[PDF_TABLE], db[CONFIG_TABLE], async () => {
+    await db.transaction('readwrite', db[PDF_TABLE], db[LAST_LOCATION_TABLE], async () => {
       await db[PDF_TABLE].delete(id);
-      await db[CONFIG_TABLE].delete(locationKey);
+      await db[LAST_LOCATION_TABLE].delete(id);
     });
   });
 }
@@ -140,10 +285,9 @@ export async function getAllEpubDocuments(): Promise<EPUBDocument[]> {
 export async function removeEpubDocument(id: string): Promise<void> {
   await withDB(async () => {
     console.log('Removing EPUB document via Dexie:', id);
-    const locationKey = `lastLocation_${id}`;
-    await db.transaction('readwrite', db[EPUB_TABLE], db[CONFIG_TABLE], async () => {
+    await db.transaction('readwrite', db[EPUB_TABLE], db[LAST_LOCATION_TABLE], async () => {
       await db[EPUB_TABLE].delete(id);
-      await db[CONFIG_TABLE].delete(locationKey);
+      await db[LAST_LOCATION_TABLE].delete(id);
     });
   });
 }
@@ -192,71 +336,66 @@ export async function clearHtmlDocuments(): Promise<void> {
   });
 }
 
-// Config helpers
+export async function getAppConfig(): Promise<AppConfigRow | null> {
+  return withDB(async () => {
+    const row = await db[APP_CONFIG_TABLE].get('singleton');
+    return row ?? null;
+  });
+}
 
-export async function setConfigItem(key: string, value: string): Promise<void> {
+export async function updateAppConfig(partial: Partial<AppConfigRow>): Promise<void> {
   await withDB(async () => {
-    console.log('Setting config item via Dexie:', key);
-    await db[CONFIG_TABLE].put({ key, value });
+    const table = db[APP_CONFIG_TABLE];
+    const existing = await table.get('singleton');
+
+    if (!existing) {
+      await table.put({
+        id: 'singleton',
+        ...APP_CONFIG_DEFAULTS,
+        ...partial,
+      });
+    } else {
+      await table.update('singleton', partial);
+    }
   });
 }
-
-export async function getConfigItem(key: string): Promise<string | null> {
-  const row = await withDB(() => db[CONFIG_TABLE].get(key));
-  console.log('Fetching config item via Dexie:', key, row ? 'found' : 'not found');
-  return row ? row.value : null;
-}
-
-export async function getAllConfigItems(): Promise<Record<string, string>> {
-  const rows = await withDB(() => db[CONFIG_TABLE].toArray());
-  const config: Record<string, string> = {};
-  rows.forEach((row) => {
-    config[row.key] = row.value;
-  });
-  console.log('Fetched config items via Dexie:', rows.length);
-  return config;
-}
-
-export async function removeConfigItem(key: string): Promise<void> {
-  await withDB(async () => {
-    console.log('Removing config item via Dexie:', key);
-    await db[CONFIG_TABLE].delete(key);
-  });
-}
-
-// Legacy-style config accessors retained for convenience
-
-export const getItem = getConfigItem;
-export const setItem = setConfigItem;
-export const removeItem = removeConfigItem;
 
 // Document list state helpers
 
 export async function saveDocumentListState(state: DocumentListState): Promise<void> {
-  await setConfigItem('documentListState', JSON.stringify(state));
+  await updateAppConfig({ documentListState: state });
 }
 
 export async function getDocumentListState(): Promise<DocumentListState | null> {
-  const stateStr = await getConfigItem('documentListState');
-  if (!stateStr) return null;
-  try {
-    return JSON.parse(stateStr);
-  } catch (error) {
-    console.error('Error parsing document list state:', error);
-    return null;
-  }
+  const config = await getAppConfig();
+  if (!config || !config.documentListState) return null;
+  return config.documentListState;
 }
 
 // Last-location helpers (used by TTS and readers)
 
 export async function getLastDocumentLocation(docId: string): Promise<string | null> {
-  const key = `lastLocation_${docId}`;
-  return getConfigItem(key);
+  return withDB(async () => {
+    const row = await db[LAST_LOCATION_TABLE].get(docId);
+    return row ? row.location : null;
+  });
 }
 
 export async function setLastDocumentLocation(docId: string, location: string): Promise<void> {
-  const key = `lastLocation_${docId}`;
-  await setConfigItem(key, location);
+  await withDB(async () => {
+    await db[LAST_LOCATION_TABLE].put({ docId, location });
+  });
+}
+
+// First-visit helpers (used for onboarding/Settings modal)
+
+export async function getFirstVisit(): Promise<boolean> {
+  const config = await getAppConfig();
+  return config?.firstVisit ?? false;
+}
+
+export async function setFirstVisit(value: boolean): Promise<void> {
+  await updateAppConfig({ firstVisit: value });
 }
 
 // Sync helpers (server round-trip)
@@ -410,4 +549,3 @@ export async function loadDocumentsFromServer(
 
   return { lastSync: Date.now() };
 }
-

@@ -22,7 +22,7 @@ import {
 import { useTheme } from '@/contexts/ThemeContext';
 import { useConfig } from '@/contexts/ConfigContext';
 import { ChevronUpDownIcon, CheckIcon, SettingsIcon } from '@/components/icons/Icons';
-import { syncDocumentsToServer, loadDocumentsFromServer, setItem, getItem } from '@/utils/dexie';
+import { syncDocumentsToServer, loadDocumentsFromServer, getFirstVisit, setFirstVisit } from '@/utils/dexie';
 import { useDocuments } from '@/contexts/DocumentContext';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { ProgressPopup } from '@/components/ProgressPopup';
@@ -122,9 +122,9 @@ export function SettingsModal() {
   // set firstVisit on initial load
   const checkFirstVist = useCallback(async () => {
     if (!isDev) return;
-    const firstVisit = await getItem('firstVisit');
-    if (firstVisit == null) {
-      await setItem('firstVisit', 'true');
+    const firstVisit = await getFirstVisit();
+    if (!firstVisit) {
+      await setFirstVisit(true);
       setIsOpen(true);
     }
   }, [setIsOpen]);

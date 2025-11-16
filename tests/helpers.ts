@@ -342,7 +342,7 @@ export async function triggerViewportResize(page: Page, width: number, height: n
   await page.setViewportSize({ width, height });
 }
 
-// Wait for DocumentListState.showHint to persist in IndexedDB 'config' store
+// Wait for DocumentListState.showHint to persist in IndexedDB 'app-config' store
 export async function waitForDocumentListHintPersist(page: Page, expected: boolean) {
   await page.waitForFunction(async (exp) => {
     try {
@@ -353,21 +353,18 @@ export async function waitForDocumentListHintPersist(page: Page, expected: boole
       });
       const db = await openDb();
       const readConfig = () => new Promise<any>((resolve, reject) => {
-        const tx = db.transaction(['config'], 'readonly');
-        const store = tx.objectStore('config');
-        const getReq = store.get('documentListState');
+        const tx = db.transaction(['app-config'], 'readonly');
+        const store = tx.objectStore('app-config');
+        const getReq = store.get('singleton');
         getReq.onsuccess = () => resolve(getReq.result);
         getReq.onerror = () => reject(getReq.error);
       });
       const item = await readConfig();
       db.close();
-      if (!item || typeof item.value !== 'string') return false;
-      try {
-        const parsed = JSON.parse(item.value);
-        return parsed && parsed.showHint === exp;
-      } catch {
-        return false;
-      }
+      if (!item || typeof item.documentListState !== 'object') return false;
+      const state = item.documentListState;
+      if (!state || typeof state.showHint !== 'boolean') return false;
+      return state.showHint === exp;
     } catch {
       return false;
     }
