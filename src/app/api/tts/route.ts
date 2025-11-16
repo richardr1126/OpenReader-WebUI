@@ -4,6 +4,7 @@ import { SpeechCreateParams } from 'openai/resources/audio/speech.mjs';
 import { isKokoroModel } from '@/utils/voice';
 import { LRUCache } from 'lru-cache';
 import { createHash } from 'crypto';
+import type { TTSRequestPayload, TTSError } from '@/types/tts';
 
 export const runtime = 'nodejs';
 
@@ -102,14 +103,20 @@ export async function POST(req: NextRequest) {
     const openApiKey = req.headers.get('x-openai-key') || process.env.API_KEY || 'none';
     const openApiBaseUrl = req.headers.get('x-openai-base-url') || process.env.API_BASE;
     const provider = req.headers.get('x-tts-provider') || 'openai';
-    const { text, voice, speed, format, model: req_model, instructions } = await req.json();
+    const body = (await req.json()) as TTSRequestPayload;
+    const { text, voice, speed, format, model: req_model, instructions } = body;
     console.log('Received TTS request:', { provider, req_model, voice, speed, format, hasInstructions: Boolean(instructions) });
 
     if (!text || !voice || !speed) {
-      return NextResponse.json({ error: 'Missing required parameters' }, { status: 400 });
+      const errorBody: TTSError = {
+        code: 'MISSING_PARAMETERS',
+        message: 'Missing required parameters',
+      };
+      return NextResponse.json(errorBody, { status: 400 });
     }
-    // Use default Kokoro model for Deepinfra if none specified
-    const model = provider === 'deepinfra' && !req_model ? 'hexgrad/Kokoro-82M' : req_model;
+    // Use default Kokoro model for Deepinfra if none specified, then fall back to a safe default
+    const rawModel = provider === 'deepinfra' && !req_model ? 'hexgrad/Kokoro-82M' : req_model;
+    const model: SpeechCreateParams['model'] = (rawModel ?? 'gpt-4o-mini-tts') as SpeechCreateParams['model'];
 
     // Initialize OpenAI client with abort signal (OpenAI/deepinfra)
     const openai = new OpenAI({
@@ -118,7 +125,7 @@ export async function POST(req: NextRequest) {
     });
 
     const normalizedVoice = (
-      !isKokoroModel(model) && voice.includes('+')
+      !isKokoroModel(model as string) && voice.includes('+')
       ? (voice.split('+')[0].trim())
       : voice
     ) as SpeechCreateParams['voice'];
@@ -131,7 +138,7 @@ export async function POST(req: NextRequest) {
       response_format: format === 'aac' ? 'aac' : 'mp3',
     };
     // Only add instructions if model is gpt-4o-mini-tts and instructions are provided
-    if (model === 'gpt-4o-mini-tts' && instructions) {
+    if ((model as string) === 'gpt-4o-mini-tts' && instructions) {
       createParams.instructions = instructions;
     }
 
@@ -263,8 +270,13 @@ export async function POST(req: NextRequest) {
     }
 
     console.warn('Error generating TTS:', error);
+    const errorBody: TTSError = {
+      code: 'TTS_GENERATION_FAILED',
+      message: 'Failed to generate audio',
+      details: process.env.NODE_ENV !== 'production' ? String(error) : undefined,
+    };
     return NextResponse.json(
-      { error: 'Failed to generate audio' },
+      errorBody,
       { status: 500 }
     );
   }

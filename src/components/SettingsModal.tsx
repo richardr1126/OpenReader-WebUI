@@ -22,7 +22,7 @@ import {
 import { useTheme } from '@/contexts/ThemeContext';
 import { useConfig } from '@/contexts/ConfigContext';
 import { ChevronUpDownIcon, CheckIcon, SettingsIcon } from '@/components/icons/Icons';
-import { syncDocumentsToServer, loadDocumentsFromServer, getFirstVisit, setFirstVisit } from '@/utils/dexie';
+import { syncDocumentsToServer, loadDocumentsFromServer, getFirstVisit, setFirstVisit } from '@/lib/dexie';
 import { useDocuments } from '@/contexts/DocumentContext';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { ProgressPopup } from '@/components/ProgressPopup';
@@ -699,7 +699,6 @@ export function SettingsModal() {
           setOperationType('sync');
           setAbortController(null);
         }}
-        isProcessing={isSyncing || isLoading}
         statusMessage={statusMessage}
         operationType={operationType}
         cancelText="Cancel"

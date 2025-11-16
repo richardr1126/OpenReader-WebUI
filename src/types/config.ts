@@ -4,7 +4,7 @@ export type ViewType = 'single' | 'dual' | 'scroll';
 
 export type SavedVoices = Record<string, string>;
 
-export interface AppConfigDefaults {
+export interface AppConfigValues {
   apiKey: string;
   baseUrl: string;
   viewType: ViewType;
@@ -27,7 +27,7 @@ export interface AppConfigDefaults {
   documentListState: DocumentListState;
 }
 
-export const APP_CONFIG_DEFAULTS: AppConfigDefaults = {
+export const APP_CONFIG_DEFAULTS: AppConfigValues = {
   apiKey: '',
   baseUrl: '',
   viewType: 'single',
@@ -56,6 +56,6 @@ export const APP_CONFIG_DEFAULTS: AppConfigDefaults = {
   },
 };
 
-export interface AppConfigRow extends AppConfigDefaults {
+export interface AppConfigRow extends AppConfigValues {
   id: string;
 }

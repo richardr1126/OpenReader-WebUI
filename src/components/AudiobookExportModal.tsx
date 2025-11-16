@@ -388,7 +388,6 @@ export function AudiobookExportModal({
         progress={progress}
         estimatedTimeRemaining={estimatedTimeRemaining || undefined}
         onCancel={handleCancel}
-        isProcessing={isCombining}
         cancelText="Cancel"
         operationType="audiobook"
         onClick={() => setIsOpen(true)}
@@ -531,7 +530,6 @@ export function AudiobookExportModal({
                         progress={progress}
                         estimatedTimeRemaining={estimatedTimeRemaining || undefined}
                         onCancel={handleCancel}
-                        isProcessing={isCombining}
                         operationType="audiobook"
                         currentChapter={currentChapter}
                         completedChapters={chapters.filter(c => c.status === 'completed').length}

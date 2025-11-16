@@ -2,7 +2,7 @@ import { pdfjs } from 'react-pdf';
 import type { TextItem } from 'pdfjs-dist/types/src/display/api';
 import { type PDFDocumentProxy, TextLayer } from 'pdfjs-dist';
 import "core-js/proposals/promise-with-resolvers";
-import { processTextToSentences } from '@/utils/nlp';
+import { processTextToSentences } from '@/lib/nlp';
 import { CmpStr } from 'cmpstr';
 
 const cmp = CmpStr.create().setMetric( 'dice' ).setFlags( 'itw' );

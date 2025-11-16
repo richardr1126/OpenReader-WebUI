@@ -2,12 +2,11 @@
 
 import { createContext, useContext, useEffect, useMemo, useState, ReactNode } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db, initDB, updateAppConfig } from '@/utils/dexie';
-import { APP_CONFIG_DEFAULTS, type ViewType, type SavedVoices, type AppConfigRow } from '@/types/appConfig';
-export type { ViewType } from '@/types/appConfig';
+import { db, initDB, updateAppConfig } from '@/lib/dexie';
+import { APP_CONFIG_DEFAULTS, type ViewType, type SavedVoices, type AppConfigValues, type AppConfigRow } from '@/types/config';
+export type { ViewType } from '@/types/config';
 
 /** Configuration values for the application */
-type ConfigValues = Omit<AppConfigRow, 'id'>;
 
 /** Interface defining the configuration context shape and functionality */
 interface ConfigContextType {
@@ -29,7 +28,7 @@ interface ConfigContextType {
   ttsInstructions: string;
   savedVoices: SavedVoices;
   updateConfig: (newConfig: Partial<{ apiKey: string; baseUrl: string; viewType: ViewType }>) => Promise<void>;
-  updateConfigKey: <K extends keyof ConfigValues>(key: K, value: ConfigValues[K]) => Promise<void>;
+  updateConfigKey: <K extends keyof AppConfigValues>(key: K, value: AppConfigValues[K]) => Promise<void>;
   isLoading: boolean;
   isDBReady: boolean;
   pdfHighlightEnabled: boolean;
@@ -76,7 +75,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     null,
   );
 
-  const config: ConfigValues | null = useMemo(() => {
+  const config: AppConfigValues | null = useMemo(() => {
     if (!appConfig) return null;
     const { id, ...rest } = appConfig;
     void id;
@@ -131,9 +130,9 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   /**
    * Updates a single configuration value by key
    * @param {K} key - The configuration key to update
-   * @param {ConfigValues[K]} value - The new value for the configuration
+   * @param {AppConfigValues[K]} value - The new value for the configuration
    */
-  const updateConfigKey = async <K extends keyof ConfigValues>(key: K, value: ConfigValues[K]) => {
+  const updateConfigKey = async <K extends keyof AppConfigValues>(key: K, value: AppConfigValues[K]) => {
     try {
       setIsLoading(true);
       
@@ -153,7 +152,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
         const voiceKey = getVoiceKey(newProvider, newModel);
         const restoredVoice = savedVoices[voiceKey] || '';
         await updateAppConfig({
-          [key]: value as ConfigValues[keyof ConfigValues],
+          [key]: value as AppConfigValues[keyof AppConfigValues],
           voice: restoredVoice,
         } as Partial<AppConfigRow>);
       }
@@ -165,7 +164,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
       }
       else {
         await updateAppConfig({
-          [key]: value as ConfigValues[keyof ConfigValues],
+          [key]: value as AppConfigValues[keyof AppConfigValues],
         } as Partial<AppConfigRow>);
       }
     } catch (error) {

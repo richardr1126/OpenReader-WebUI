@@ -47,16 +47,6 @@ export const isKokoroModel = (modelName: string | undefined): boolean => {
 };
 
 /**
- * Strips weight annotations from a voice string
- * 
- * @param voiceString - Voice string with or without weights
- * @returns Voice string without weights
- */
-export const stripVoiceWeights = (voiceString: string): string => {
-  return voiceString.replace(/\([^)]*\)/g, '').trim();
-};
-
-/**
  * Determines the maximum number of voices allowed for a provider/model combination
  * 
  * @param provider - TTS provider name

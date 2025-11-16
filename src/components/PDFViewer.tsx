@@ -2,6 +2,7 @@
 
 import { RefObject, useCallback, useState, useEffect, useRef } from 'react';
 import { Document, Page } from 'react-pdf';
+import type { Dest } from 'react-pdf/src/shared/types.js';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 import { DocumentSkeleton } from '@/components/DocumentSkeleton';
@@ -14,9 +15,9 @@ interface PDFViewerProps {
   zoomLevel: number;
 }
 
-interface OnItemClickArgs {
+interface PDFOnLinkClickArgs {
   pageNumber?: number;
-  dest?: unknown;
+  dest?: Dest;
 }
 
 export function PDFViewer({ zoomLevel }: PDFViewerProps) {
@@ -126,12 +127,12 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
         onLoadSuccess={(pdf) => {
           onDocumentLoadSuccess(pdf);
         }}
-        onItemClick={(args: OnItemClickArgs) => {
+        onItemClick={(args: PDFOnLinkClickArgs) => {
           if (args?.pageNumber) {
             skipToLocation(args.pageNumber, true);
           } else if (args?.dest) {
-            const destArray = Array.isArray(args.dest) ? args.dest : [];
-            const pageNum = typeof destArray[0] === 'number' ? destArray[0] + 1 : undefined;
+            const destArray = args.dest as Array<number> || [];
+            const pageNum = destArray[0] + 1 || null;
             if (pageNum) {
               skipToLocation(pageNum, true);
             }

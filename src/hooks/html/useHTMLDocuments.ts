@@ -3,7 +3,7 @@
 import { useCallback } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '@/utils/dexie';
+import { db } from '@/lib/dexie';
 import type { HTMLDocument } from '@/types/documents';
 
 export function useHTMLDocuments() {

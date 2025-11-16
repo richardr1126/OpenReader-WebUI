@@ -34,11 +34,20 @@ import { useAudioCache } from '@/hooks/audio/useAudioCache';
 import { useVoiceManagement } from '@/hooks/audio/useVoiceManagement';
 import { useMediaSession } from '@/hooks/audio/useMediaSession';
 import { useAudioContext } from '@/hooks/audio/useAudioContext';
-import { getLastDocumentLocation, setLastDocumentLocation } from '@/utils/dexie';
+import { getLastDocumentLocation, setLastDocumentLocation } from '@/lib/dexie';
 import { useBackgroundState } from '@/hooks/audio/useBackgroundState';
 import { withRetry } from '@/utils/audio';
-import { preprocessSentenceForAudio, processTextToSentences } from '@/utils/nlp';
+import { preprocessSentenceForAudio, processTextToSentences } from '@/lib/nlp';
 import { isKokoroModel } from '@/utils/voice';
+import type {
+  TTSLocation,
+  ContinuationMergeResult,
+  PageTurnEstimate,
+  TTSPlaybackState,
+  TTSRequestPayload,
+  TTSRequestHeaders,
+  TTSRetryOptions,
+} from '@/types/tts';
 
 // Media globals
 declare global {
@@ -50,18 +59,7 @@ declare global {
 /**
  * Interface defining all available methods and properties in the TTS context
  */
-interface TTSContextType {
-  // Playback state
-  isPlaying: boolean;
-  isProcessing: boolean;
-  currentSentence: string;
-  isBackgrounded: boolean;  // Add this new property
-
-  // Navigation
-  currDocPage: string | number;  // Change this to allow both types
-  currDocPageNumber: number; // For PDF
-  currDocPages: number | undefined;
-
+interface TTSContextType extends TTSPlaybackState {
   // Voice settings
   availableVoices: string[];
 
@@ -77,34 +75,23 @@ interface TTSContextType {
   setSpeedAndRestart: (speed: number) => void;
   setAudioPlayerSpeedAndRestart: (speed: number) => void;
   setVoiceAndRestart: (voice: string) => void;
-  skipToLocation: (location: string | number, shouldPause?: boolean) => void;
-  registerLocationChangeHandler: (handler: (location: string | number) => void) => void;  // EPUB-only: Handles chapter navigation
-  registerVisualPageChangeHandler: (handler: (location: string | number) => void) => void;
+  skipToLocation: (location: TTSLocation, shouldPause?: boolean) => void;
+  registerLocationChangeHandler: (handler: (location: TTSLocation) => void) => void;  // EPUB-only: Handles chapter navigation
+  registerVisualPageChangeHandler: (handler: (location: TTSLocation) => void) => void;
   setIsEPUB: (isEPUB: boolean) => void;
 }
 
 interface SetTextOptions {
   shouldPause?: boolean;
-  location?: string | number;
-  nextLocation?: string | number;
+  location?: TTSLocation;
+  nextLocation?: TTSLocation;
   nextText?: string;
-}
-
-interface ContinuationMergeResult {
-  text: string;
-  carried: string;
-}
-
-interface PageTurnEstimate {
-  location: string | number;
-  sentenceIndex: number;
-  fraction: number;
 }
 
 const CONTINUATION_LOOKAHEAD = 600;
 const SENTENCE_ENDING = /[.?!…]["'”’)\]]*\s*$/;
 
-const normalizeLocationKey = (location: string | number) =>
+const normalizeLocationKey = (location: TTSLocation) =>
   typeof location === 'number' ? `num:${location}` : `str:${location}`;
 
 const isWhitespaceChar = (char: string) => /\s/.test(char);
@@ -279,14 +266,14 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     smartSentenceSplitting,
   } = useConfig();
 
-  // Remove OpenAI client reference as it's no longer needed
+  // Audio and voice management hooks
   const audioContext = useAudioContext();
   const audioCache = useAudioCache(25);
   const { availableVoices, fetchVoices } = useVoiceManagement(openApiKey, openApiBaseUrl, configTTSProvider, configTTSModel);
 
   // Add ref for location change handler
-  const locationChangeHandlerRef = useRef<((location: string | number) => void) | null>(null);
-  const visualPageChangeHandlerRef = useRef<((location: string | number) => void) | null>(null);
+  const locationChangeHandlerRef = useRef<((location: TTSLocation) => void) | null>(null);
+  const visualPageChangeHandlerRef = useRef<((location: TTSLocation) => void) | null>(null);
 
   /**
    * Registers a handler function for location changes in EPUB documents
@@ -294,11 +281,17 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
    * 
    * @param {Function} handler - Function to handle location changes
    */
-  const registerLocationChangeHandler = useCallback((handler: (location: string | number) => void) => {
+  const registerLocationChangeHandler = useCallback((handler: (location: TTSLocation) => void) => {
     locationChangeHandlerRef.current = handler;
   }, []);
 
-  const registerVisualPageChangeHandler = useCallback((handler: (location: string | number) => void) => {
+  /**
+   * Registers a handler function for visual page changes in EPUB documents
+   * This is only used for EPUB documents to handle visual page navigation
+   * 
+   * @param {Function} handler - Function to handle visual page changes
+   */
+  const registerVisualPageChangeHandler = useCallback((handler: (location: TTSLocation) => void) => {
     visualPageChangeHandlerRef.current = handler;
   }, []);
 
@@ -312,7 +305,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
   const [isEPUB, setIsEPUB] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
 
-  const [currDocPage, setCurrDocPage] = useState<string | number>(1);
+  const [currDocPage, setCurrDocPage] = useState<TTSLocation>(1);
   const currDocPageNumber = (!isEPUB ? parseInt(currDocPage.toString()) : 1); // PDF uses numbers only
   const [currDocPages, setCurrDocPages] = useState<number>();
 
@@ -395,7 +388,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
    * @param {string | number} location - The target location to navigate to
    * @param {boolean} shouldPause - Whether to pause playback
    */
-  const skipToLocation = useCallback((location: string | number, shouldPause = false) => {
+  const skipToLocation = useCallback((location: TTSLocation, shouldPause = false) => {
     // Reset state for new content in correct order
     abortAudio();
     if (shouldPause) setIsPlaying(false);
@@ -727,23 +720,37 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
       const controller = new AbortController();
       activeAbortControllers.current.add(controller);
 
+      const reqHeaders: TTSRequestHeaders = {
+        'Content-Type': 'application/json',
+        'x-openai-key': openApiKey || '',
+        'x-tts-provider': configTTSProvider,
+      };
+      if (openApiBaseUrl) {
+        reqHeaders['x-openai-base-url'] = openApiBaseUrl;
+      }
+
+      const reqBody: TTSRequestPayload = {
+        text: sentence,
+        voice,
+        speed,
+        model: ttsModel,
+        instructions: ttsModel === 'gpt-4o-mini-tts' ? ttsInstructions : undefined,
+      };
+
+      const retryOptions: TTSRetryOptions = {
+        maxRetries: 3,
+        initialDelay: 1000,
+        maxDelay: 5000,
+        backoffFactor: 2
+      };
+
       const arrayBuffer = await withRetry(
         async () => {
+          
           const response = await fetch('/api/tts', {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-openai-key': openApiKey || '',
-              'x-openai-base-url': openApiBaseUrl || '',
-              'x-tts-provider': configTTSProvider,
-            },
-            body: JSON.stringify({
-              text: sentence,
-              voice: voice,
-              speed: speed,
-              model: ttsModel,
-              instructions: ttsModel === 'gpt-4o-mini-tts' ? ttsInstructions : undefined
-            }),
+            headers: reqHeaders,
+            body: JSON.stringify(reqBody),
             signal: controller.signal,
           });
 
@@ -753,12 +760,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
 
           return response.arrayBuffer();
         },
-        {
-          maxRetries: 3,
-          initialDelay: 1000,
-          maxDelay: 5000,
-          backoffFactor: 2
-        }
+        retryOptions
       );
 
       // Remove the controller once the request is complete
@@ -1319,7 +1321,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
 
 /**
  * Custom hook to consume the TTS context
- * Ensures the context is used within a provider
+ * Ensures the context is used within a TTSProvider
  * 
  * @throws {Error} If used outside of TTSProvider
  * @returns {TTSContextType} The TTS context value

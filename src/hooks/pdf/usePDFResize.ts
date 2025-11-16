@@ -1,5 +1,5 @@
 import { RefObject, useState, useEffect } from 'react';
-import { debounce } from '@/utils/pdf';
+import { debounce } from '@/lib/pdf';
 
 interface UsePDFResizeResult {
   containerWidth: number;

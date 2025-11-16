@@ -1,5 +1,5 @@
 import Dexie, { type EntityTable } from 'dexie';
-import { APP_CONFIG_DEFAULTS, type ViewType, type SavedVoices, type AppConfigRow } from '@/types/appConfig';
+import { APP_CONFIG_DEFAULTS, type ViewType, type SavedVoices, type AppConfigRow } from '@/types/config';
 import { PDFDocument, EPUBDocument, HTMLDocument, DocumentListState, SyncedDocument } from '@/types/documents';
 
 const DB_NAME = 'openreader-db';

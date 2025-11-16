@@ -1,10 +1,7 @@
-import { LoadingSpinner } from './Spinner';
-
 interface ProgressCardProps {
   progress: number;
   estimatedTimeRemaining?: string;
   onCancel: (e?: React.MouseEvent) => void;
-  isProcessing?: boolean;
   operationType?: 'sync' | 'load' | 'audiobook';
   cancelText?: string;
   currentChapter?: string;
@@ -16,7 +13,6 @@ export function ProgressCard({
   progress, 
   estimatedTimeRemaining, 
   onCancel, 
-  isProcessing = false,
   operationType, 
   cancelText = 'Cancel',
   currentChapter,
@@ -58,11 +54,6 @@ export function ProgressCard({
           className="shrink-0 inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium text-foreground hover:text-accent hover:bg-background/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent transition-colors"
           onClick={(e) => onCancel(e)}
         >
-          {isProcessing && (
-            <span className="w-3 h-3">
-              <LoadingSpinner />
-            </span>
-          )}
           <span>{cancelText}</span>
         </button>
       </div>

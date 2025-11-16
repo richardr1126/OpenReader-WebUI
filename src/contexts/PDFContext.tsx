@@ -25,19 +25,21 @@ import {
   useRef,
 } from 'react';
 
-import { getPdfDocument } from '@/utils/dexie';
+import type { PDFDocumentProxy } from 'pdfjs-dist';
+
+import { getPdfDocument } from '@/lib/dexie';
 import { useTTS } from '@/contexts/TTSContext';
 import { useConfig } from '@/contexts/ConfigContext';
+import { processTextToSentences } from '@/lib/nlp';
+import { withRetry } from '@/utils/audio';
 import {
   extractTextFromPDF,
   highlightPattern,
   clearHighlights,
   handleTextClick,
-} from '@/utils/pdf';
-import { processTextToSentences } from '@/utils/nlp';
+} from '@/lib/pdf';
 
-import type { PDFDocumentProxy } from 'pdfjs-dist';
-import { withRetry } from '@/utils/audio';
+import type { TTSRequestHeaders, TTSRequestPayload, TTSRetryOptions } from '@/types/tts';
 
 /**
  * Interface defining all available methods and properties in the PDF context
@@ -328,6 +330,30 @@ export function PDFProvider({ children }: { children: ReactNode }) {
           onProgress((processedLength / totalLength) * 100);
           continue;
         }
+
+        const reqHeaders: TTSRequestHeaders = {
+          'Content-Type': 'application/json',
+          'x-openai-key': apiKey,
+          'x-openai-base-url': baseUrl,
+          'x-tts-provider': ttsProvider,
+        };
+
+        const reqBody: TTSRequestPayload = {
+          text,
+          voice: voice || (ttsProvider === 'openai' ? 'alloy' : (ttsProvider === 'deepinfra' ? 'af_bella' : 'af_sarah')),
+          speed: voiceSpeed,
+          format: 'mp3',
+          model: ttsModel,
+          instructions: ttsModel === 'gpt-4o-mini-tts' ? ttsInstructions : undefined
+        };
+
+        const retryOptions: TTSRetryOptions = {
+          maxRetries: 3,
+          initialDelay: 1000,
+          maxDelay: 5000,
+          backoffFactor: 2
+        };
+
         try {
           const audioBuffer = await withRetry(
             async () => {
@@ -338,20 +364,8 @@ export function PDFProvider({ children }: { children: ReactNode }) {
 
               const ttsResponse = await fetch('/api/tts', {
                 method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'x-openai-key': apiKey,
-                  'x-openai-base-url': baseUrl,
-                  'x-tts-provider': ttsProvider,
-                },
-                body: JSON.stringify({
-                  text,
-                  voice: voice || (ttsProvider === 'openai' ? 'alloy' : (ttsProvider === 'deepinfra' ? 'af_bella' : 'af_sarah')),
-                  speed: voiceSpeed,
-                  format: 'mp3',
-                  model: ttsModel,
-                  instructions: ttsModel === 'gpt-4o-mini-tts' ? ttsInstructions : undefined
-                }),
+                headers: reqHeaders,
+                body: JSON.stringify(reqBody),
                 signal
               });
 
@@ -365,12 +379,7 @@ export function PDFProvider({ children }: { children: ReactNode }) {
               }
               return buffer;
             },
-            {
-              maxRetries: 3,
-              initialDelay: 1000,
-              maxDelay: 5000,
-              backoffFactor: 2
-            }
+            retryOptions
           );
 
           const chapterTitle = `Page ${i + 1}`;
@@ -520,6 +529,29 @@ export function PDFProvider({ children }: { children: ReactNode }) {
       const chapterTitle = `Page ${chapterIndex + 1}`;
 
       // Generate audio with retry logic
+      const reqHeaders: TTSRequestHeaders = {
+        'Content-Type': 'application/json',
+        'x-openai-key': apiKey,
+        'x-openai-base-url': baseUrl,
+        'x-tts-provider': ttsProvider,
+      };
+
+      const reqBody: TTSRequestPayload = {
+        text: textForTTS,
+        voice: voice || (ttsProvider === 'openai' ? 'alloy' : (ttsProvider === 'deepinfra' ? 'af_bella' : 'af_sarah')),
+        speed: voiceSpeed,
+        format: 'mp3',
+        model: ttsModel,
+        instructions: ttsModel === 'gpt-4o-mini-tts' ? ttsInstructions : undefined
+      };
+
+      const retryOptions: TTSRetryOptions = {
+        maxRetries: 3,
+        initialDelay: 1000,
+        maxDelay: 5000,
+        backoffFactor: 2
+      };
+
       const audioBuffer = await withRetry(
         async () => {
           if (signal?.aborted) {
@@ -528,20 +560,8 @@ export function PDFProvider({ children }: { children: ReactNode }) {
 
           const ttsResponse = await fetch('/api/tts', {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-openai-key': apiKey,
-              'x-openai-base-url': baseUrl,
-              'x-tts-provider': ttsProvider,
-            },
-            body: JSON.stringify({
-              text: textForTTS,
-              voice: voice || (ttsProvider === 'openai' ? 'alloy' : (ttsProvider === 'deepinfra' ? 'af_bella' : 'af_sarah')),
-              speed: voiceSpeed,
-              format: 'mp3',
-              model: ttsModel,
-              instructions: ttsModel === 'gpt-4o-mini-tts' ? ttsInstructions : undefined
-            }),
+            headers: reqHeaders,
+            body: JSON.stringify(reqBody),
             signal
           });
 
@@ -555,12 +575,7 @@ export function PDFProvider({ children }: { children: ReactNode }) {
           }
           return buffer;
         },
-        {
-          maxRetries: 3,
-          initialDelay: 1000,
-          maxDelay: 5000,
-          backoffFactor: 2
-        }
+        retryOptions
       );
 
       if (signal?.aborted) {

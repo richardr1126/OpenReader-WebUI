@@ -7,7 +7,6 @@ interface ProgressPopupProps {
   progress: number;
   estimatedTimeRemaining?: string;
   onCancel: () => void;
-  isProcessing: boolean;
   statusMessage?: string;
   operationType?: 'sync' | 'load' | 'audiobook';
   cancelText?: string;
@@ -22,7 +21,6 @@ export function ProgressPopup({
   progress,
   estimatedTimeRemaining,
   onCancel,
-  isProcessing,
   statusMessage,
   operationType,
   cancelText = 'Cancel',
@@ -56,7 +54,6 @@ export function ProgressPopup({
                 e?.stopPropagation();
                 onCancel();
               }}
-              isProcessing={isProcessing}
               operationType={operationType}
               cancelText={cancelText}
               currentChapter={currentChapter}

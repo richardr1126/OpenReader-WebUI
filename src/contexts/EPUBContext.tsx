@@ -10,15 +10,18 @@ import {
   useRef,
   RefObject
 } from 'react';
-import { getEpubDocument, setLastDocumentLocation } from '@/utils/dexie';
-import { useTTS } from '@/contexts/TTSContext';
-import { Book, Rendition } from 'epubjs';
-import { createRangeCfi } from '@/utils/epub';
+
 import type { NavItem } from 'epubjs';
-import { SpineItem } from 'epubjs/types/section';
+import type { SpineItem } from 'epubjs/types/section';
+import type { Book, Rendition } from 'epubjs';
+
+import { getEpubDocument, setLastDocumentLocation } from '@/lib/dexie';
+import { useTTS } from '@/contexts/TTSContext';
+import { createRangeCfi } from '@/lib/epub';
 import { useParams } from 'next/navigation';
 import { useConfig } from './ConfigContext';
 import { withRetry } from '@/utils/audio';
+import type { TTSRequestHeaders, TTSRequestPayload, TTSRetryOptions } from '@/types/tts';
 
 interface EPUBContextType {
   currDocData: ArrayBuffer | undefined;
@@ -371,6 +374,29 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
         }
 
         try {
+          const reqHeaders: TTSRequestHeaders = {
+            'Content-Type': 'application/json',
+            'x-openai-key': apiKey,
+            'x-openai-base-url': baseUrl,
+            'x-tts-provider': ttsProvider,
+          };
+
+          const reqBody: TTSRequestPayload = {
+            text: trimmedText,
+            voice: voice || (ttsProvider === 'openai' ? 'alloy' : (ttsProvider === 'deepinfra' ? 'af_bella' : 'af_sarah')),
+            speed: voiceSpeed,
+            format: 'mp3',
+            model: ttsModel,
+            instructions: ttsModel === 'gpt-4o-mini-tts' ? ttsInstructions : undefined
+          };
+
+          const retryOptions: TTSRetryOptions = {
+            maxRetries: 2,
+            initialDelay: 5000,
+            maxDelay: 10000,
+            backoffFactor: 2
+          };
+
           const audioBuffer = await withRetry(
             async () => {
               // Check for abort before starting TTS request
@@ -380,20 +406,8 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
 
               const ttsResponse = await fetch('/api/tts', {
                 method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'x-openai-key': apiKey,
-                  'x-openai-base-url': baseUrl,
-                  'x-tts-provider': ttsProvider,
-                },
-                body: JSON.stringify({
-                  text: trimmedText,
-                  voice: voice || (ttsProvider === 'openai' ? 'alloy' : (ttsProvider === 'deepinfra' ? 'af_bella' : 'af_sarah')),
-                  speed: voiceSpeed,
-                  format: 'mp3',
-                  model: ttsModel,
-                  instructions: ttsModel === 'gpt-4o-mini-tts' ? ttsInstructions : undefined
-                }),
+                headers: reqHeaders,
+                body: JSON.stringify(reqBody),
                 signal
               });
 
@@ -407,12 +421,7 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
               }
               return buffer;
             },
-            {
-              maxRetries: 2,
-              initialDelay: 5000,
-              maxDelay: 10000,
-              backoffFactor: 2
-            }
+            retryOptions
           );
 
           // Get the chapter title from our pre-computed map
@@ -556,6 +565,29 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
       const chapterTitle = sectionTitleMap.get(section.href) || `Chapter ${chapterIndex + 1}`;
 
       // Generate audio with retry logic
+      const reqHeaders: TTSRequestHeaders = {
+        'Content-Type': 'application/json',
+        'x-openai-key': apiKey,
+        'x-openai-base-url': baseUrl,
+        'x-tts-provider': ttsProvider,
+      };
+
+      const reqBody: TTSRequestPayload = {
+        text: trimmedText,
+        voice: voice || (ttsProvider === 'openai' ? 'alloy' : (ttsProvider === 'deepinfra' ? 'af_bella' : 'af_sarah')),
+        speed: voiceSpeed,
+        format: 'mp3',
+        model: ttsModel,
+        instructions: ttsModel === 'gpt-4o-mini-tts' ? ttsInstructions : undefined
+      };
+
+      const retryOptions: TTSRetryOptions = {
+        maxRetries: 2,
+        initialDelay: 5000,
+        maxDelay: 10000,
+        backoffFactor: 2
+      };
+
       const audioBuffer = await withRetry(
         async () => {
           if (signal?.aborted) {
@@ -564,20 +596,8 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
 
           const ttsResponse = await fetch('/api/tts', {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-openai-key': apiKey,
-              'x-openai-base-url': baseUrl,
-              'x-tts-provider': ttsProvider,
-            },
-            body: JSON.stringify({
-              text: trimmedText,
-              voice: voice || (ttsProvider === 'openai' ? 'alloy' : (ttsProvider === 'deepinfra' ? 'af_bella' : 'af_sarah')),
-              speed: voiceSpeed,
-              format: 'mp3',
-              model: ttsModel,
-              instructions: ttsModel === 'gpt-4o-mini-tts' ? ttsInstructions : undefined
-            }),
+            headers: reqHeaders,
+            body: JSON.stringify(reqBody),
             signal
           });
 
@@ -591,12 +611,7 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
           }
           return buffer;
         },
-        {
-          maxRetries: 2,
-          initialDelay: 5000,
-          maxDelay: 10000,
-          backoffFactor: 2
-        }
+        retryOptions
       );
 
       if (signal?.aborted) {
