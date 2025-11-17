@@ -1,6 +1,6 @@
 {
   "name": "openreader-webui",
-  "version": "0.4.0",
+  "version": "v1.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack -p 3003",
