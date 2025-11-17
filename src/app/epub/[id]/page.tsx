@@ -94,10 +94,9 @@ export default function EPUBPage() {
     chapterIndex: number,
     bookId: string,
     format: 'mp3' | 'm4b',
-    onProgress: (progress: number) => void,
     signal: AbortSignal
   ) => {
-    return regenerateEPUBChapter(chapterIndex, bookId, format, onProgress, signal);
+    return regenerateEPUBChapter(chapterIndex, bookId, format, signal);
   }, [regenerateEPUBChapter]);
 
   if (error) {

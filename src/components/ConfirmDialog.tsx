@@ -75,8 +75,8 @@ export function ConfirmDialog({
                 <div className="mt-6 flex justify-end space-x-3">
                   <button
                     type="button"
-                    className="inline-flex justify-center rounded-lg bg-background px-4 py-2 text-sm 
-                             font-medium text-foreground hover:bg-background/90 focus:outline-none 
+                    className="inline-flex justify-center rounded-lg bg-background px-3 py-1.5 text-sm 
+                             font-medium text-foreground hover:bg-offbase focus:outline-none 
                              focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2
                              transform transition-transform duration-200 ease-in-out hover:scale-[1.04] hover:text-accent"
                     onClick={onClose}
@@ -85,12 +85,12 @@ export function ConfirmDialog({
                   </button>
                   <button
                     type="button"
-                    className={`inline-flex justify-center rounded-lg px-4 py-2 text-sm 
+                    className={`inline-flex justify-center rounded-lg px-3 py-1.5 text-sm 
                              font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2
                              transform transition-transform duration-200 ease-in-out hover:scale-[1.04]
                              ${isDangerous 
-                               ? 'bg-accent text-background hover:bg-accent/90 focus-visible:ring-accent' 
-                               : 'bg-accent text-background hover:bg-accent/90 focus-visible:ring-accent'
+                               ? 'bg-accent text-background hover:bg-secondary-accent focus-visible:ring-accent' 
+                               : 'bg-accent text-background hover:bg-secondary-accent focus-visible:ring-accent'
                              }`}
                     onClick={onConfirm}
                   >

@@ -350,7 +350,7 @@ export function SettingsModal() {
                               setCustomModelInput('');
                             }}
                           >
-                            <ListboxButton className="relative w-full cursor-pointer rounded-lg bg-background py-2 pl-3 pr-10 text-left text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-accent transform transition-transform duration-200 ease-in-out hover:scale-[1.01] hover:text-accent">
+                            <ListboxButton className="relative w-full cursor-pointer rounded-lg bg-background py-1.5 pl-3 pr-10 text-left text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-accent transform transition-transform duration-200 ease-in-out hover:scale-[1.009] hover:text-accent hover:bg-offbase">
                               <span className="block truncate">
                                 {ttsProviders.find(p => p.id === localTTSProvider)?.name || 'Select Provider'}
                               </span>
@@ -369,8 +369,8 @@ export function SettingsModal() {
                                   <ListboxOption
                                     key={provider.id}
                                     className={({ active }) =>
-                                      `relative cursor-pointer select-none py-2 pl-10 pr-4 ${
-                                        active ? 'bg-accent/10 text-accent' : 'text-foreground'
+                                      `relative cursor-pointer select-none py-1.5 pl-10 pr-4 ${
+                                        active ? 'bg-offbase text-accent' : 'text-foreground'
                                       }`
                                     }
                                     value={provider}
@@ -405,7 +405,7 @@ export function SettingsModal() {
                               value={localApiKey}
                               onChange={(e) => handleInputChange('apiKey', e.target.value)}
                               placeholder={!isDev && localTTSProvider === 'deepinfra' ? "Deepinfra free or override apikey" : "Using environment variable"}
-                              className="w-full rounded-lg bg-background py-2 px-3 text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                              className="w-full rounded-lg bg-background py-1.5 px-3 text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-accent"
                             />
                           </div>
                         </div>
@@ -425,7 +425,7 @@ export function SettingsModal() {
                                 }
                               }}
                             >
-                              <ListboxButton className="relative w-full cursor-pointer rounded-lg bg-background py-2 pl-3 pr-10 text-left text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-accent transform transition-transform duration-200 ease-in-out hover:scale-[1.01] hover:text-accent">
+                              <ListboxButton className="relative w-full cursor-pointer rounded-lg bg-background py-1.5 pl-3 pr-10 text-left text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-accent transform transition-transform duration-200 ease-in-out hover:scale-[1.009] hover:text-accent hover:bg-offbase">
                                 <span className="block truncate">
                                   {ttsModels.find(m => m.id === selectedModelId)?.name || 'Select Model'}
                                 </span>
@@ -444,8 +444,8 @@ export function SettingsModal() {
                                     <ListboxOption
                                       key={model.id}
                                       className={({ active }) =>
-                                        `relative cursor-pointer select-none py-2 pl-10 pr-4 ${
-                                          active ? 'bg-accent/10 text-accent' : 'text-foreground'
+                                        `relative cursor-pointer select-none py-1.5 pl-10 pr-4 ${
+                                          active ? 'bg-offbase text-accent' : 'text-foreground'
                                         }`
                                       }
                                       value={model}
@@ -477,7 +477,7 @@ export function SettingsModal() {
                                   setModelValue(e.target.value);
                                 }}
                                 placeholder="Enter custom model name"
-                                className="w-full rounded-lg bg-background py-2 px-3 text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                                className="w-full rounded-lg bg-background py-1.5 px-3 text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-accent"
                               />
                             )}
                           </div>
@@ -490,7 +490,7 @@ export function SettingsModal() {
                               value={localTTSInstructions}
                               onChange={(e) => setLocalTTSInstructions(e.target.value)}
                               placeholder="Enter instructions for the TTS model"
-                              className="w-full h-24 rounded-lg bg-background py-2 px-3 text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                              className="w-full h-24 rounded-lg bg-background py-1.5 px-3 text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-accent"
                             />
                           </div>
                         )}
@@ -507,7 +507,7 @@ export function SettingsModal() {
                                 value={localBaseUrl}
                                 onChange={(e) => handleInputChange('baseUrl', e.target.value)}
                                 placeholder="Using environment variable"
-                                className="w-full rounded-lg bg-background py-2 px-3 text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                                className="w-full rounded-lg bg-background py-1.5 px-3 text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-accent"
                               />
                             </div>
                           </div>
@@ -517,7 +517,7 @@ export function SettingsModal() {
                           <Button
                             type="button"
                             className="inline-flex justify-center rounded-lg bg-background px-3 py-1.5 text-sm 
-                               font-medium text-foreground hover:bg-background/90 focus:outline-none 
+                               font-medium text-foreground hover:bg-offbase focus:outline-none 
                                focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2
                                transform transition-transform duration-200 ease-in-out hover:scale-[1.04] hover:text-accent"
                             onClick={async () => {
@@ -534,7 +534,7 @@ export function SettingsModal() {
                           <Button
                             type="button"
                              className="inline-flex justify-center rounded-lg bg-accent px-3 py-1.5 text-sm 
-                               font-medium text-background hover:bg-accent/90 focus:outline-none 
+                               font-medium text-background hover:bg-secondary-accent focus:outline-none 
                                focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2
                                transform transition-transform duration-200 ease-in-out hover:scale-[1.04] hover:text-background"
                             disabled={!canSubmit}
@@ -559,7 +559,7 @@ export function SettingsModal() {
                         <div className="space-y-1">
                           <label className="block text-sm font-medium text-foreground">Theme</label>
                           <Listbox value={selectedTheme} onChange={(newTheme) => setTheme(newTheme.id)}>
-                            <ListboxButton className="relative w-full cursor-pointer rounded-lg bg-background py-2 pl-3 pr-10 text-left text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-accent transform transition-transform duration-200 ease-in-out hover:scale-[1.01] hover:text-accent">
+                            <ListboxButton className="relative w-full cursor-pointer rounded-lg bg-background py-1.5 pl-3 pr-10 text-left text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-accent transform transition-transform duration-200 ease-in-out hover:scale-[1.009] hover:text-accent hover:bg-offbase">
                               <span className="block truncate">{selectedTheme.name}</span>
                               <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2">
                                 <ChevronUpDownIcon className="h-5 w-5 text-muted" />
@@ -571,12 +571,12 @@ export function SettingsModal() {
                               leaveFrom="opacity-100"
                               leaveTo="opacity-0"
                             >
-                              <ListboxOptions className="absolute mt-1 max-h-40 w-full overflow-auto rounded-md bg-background py-1 shadow-lg ring-1 ring-black/5 focus:outline-none">
+                              <ListboxOptions className="absolute mt-1 w-full overflow-auto rounded-md bg-background py-1 shadow-lg ring-1 ring-black/5 focus:outline-none">
                                 {themes.map((theme) => (
                                   <ListboxOption
                                     key={theme.id}
                                     className={({ active }) =>
-                                      `relative cursor-pointer select-none py-2 pl-10 pr-4 ${active ? 'bg-accent/10 text-accent' : 'text-foreground'
+                                      `relative cursor-pointer select-none py-1.5 pl-10 pr-4 ${active ? 'bg-offbase text-accent' : 'text-foreground'
                                       }`
                                     }
                                     value={theme}
@@ -609,7 +609,7 @@ export function SettingsModal() {
                               onClick={handleLoad}
                               disabled={isSyncing || isLoading}
                               className="justify-center rounded-lg bg-background px-3 py-1.5 text-sm 
-                                       font-medium text-foreground hover:bg-background/90 focus:outline-none 
+                                       font-medium text-foreground hover:bg-offbase focus:outline-none 
                                        focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2
                                        transform transition-transform duration-200 ease-in-out hover:scale-[1.04] hover:text-accent
                                        disabled:opacity-50"
@@ -620,7 +620,7 @@ export function SettingsModal() {
                               onClick={handleSync}
                               disabled={isSyncing || isLoading}
                               className="justify-center rounded-lg bg-background px-3 py-1.5 text-sm 
-                                       font-medium text-foreground hover:bg-background/90 focus:outline-none 
+                                       font-medium text-foreground hover:bg-offbase focus:outline-none 
                                        focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2
                                        transform transition-transform duration-200 ease-in-out hover:scale-[1.04] hover:text-accent
                                        disabled:opacity-50"
@@ -636,7 +636,7 @@ export function SettingsModal() {
                             <Button
                               onClick={() => setShowClearLocalConfirm(true)}
                               className="justify-center rounded-lg bg-red-500 px-3 py-1.5 text-sm 
-                                         font-medium text-background hover:bg-accent/90 focus:outline-none 
+                                         font-medium text-background hover:bg-red-500/90 focus:outline-none 
                                          focus-visible:ring-2 focus-visible:bg-red-500 focus-visible:ring-offset-2
                                        transform transition-transform duration-200 ease-in-out hover:scale-[1.04]"
                             >

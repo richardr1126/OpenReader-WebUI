@@ -10,7 +10,7 @@ html.light {
   --base: #f7fafc;
   --offbase: #e2e8f0;
   --accent: #ef4444;
-  --secondary-accent: #3b82f6;
+  --secondary-accent: #ed6868;
   --muted: #718096;
   --prism-gradient: linear-gradient(90deg,
     #fecaca,
@@ -25,7 +25,7 @@ html.dark {
   --base: #171717;
   --offbase: #343434;
   --accent: #f87171;
-  --secondary-accent: #60a5fa;
+  --secondary-accent: #eb6262;
   --muted: #a3a3a3;
   --prism-gradient: linear-gradient(90deg,
     #fca5a5,

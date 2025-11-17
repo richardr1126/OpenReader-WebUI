@@ -41,8 +41,8 @@ import { preprocessSentenceForAudio, processTextToSentences } from '@/lib/nlp';
 import { isKokoroModel } from '@/utils/voice';
 import type {
   TTSLocation,
-  ContinuationMergeResult,
-  PageTurnEstimate,
+  TTSSmartMergeResult,
+  TTSPageTurnEstimate,
   TTSPlaybackState,
   TTSRequestPayload,
   TTSRequestHeaders,
@@ -176,7 +176,7 @@ const stripContinuationPrefix = (text: string, prefix: string) => {
   return { text, removed: false };
 };
 
-const extractContinuationSlice = (nextText: string): ContinuationMergeResult | null => {
+const extractContinuationSlice = (nextText: string): TTSSmartMergeResult | null => {
   if (!nextText?.trim()) {
     return null;
   }
@@ -216,7 +216,7 @@ const extractContinuationSlice = (nextText: string): ContinuationMergeResult | n
   };
 };
 
-const mergeContinuation = (text: string, nextText: string): ContinuationMergeResult | null => {
+const mergeContinuation = (text: string, nextText: string): TTSSmartMergeResult | null => {
   if (!needsSentenceContinuation(text)) {
     return null;
   }
@@ -329,7 +329,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
   // Track continuation slices for PDF/EPUB page transitions
   const continuationCarryRef = useRef<Map<string, string>>(new Map());
   const epubContinuationRef = useRef<string | null>(null);
-  const pageTurnEstimateRef = useRef<PageTurnEstimate | null>(null);
+  const pageTurnEstimateRef = useRef<TTSPageTurnEstimate | null>(null);
   const pageTurnTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /**
@@ -562,7 +562,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
         if (smartSentenceSplitting && !isEPUB && continuationCarried && normalizedOptions.nextLocation !== undefined) {
           const continuationNormalized = preprocessSentenceForAudio(continuationCarried);
           if (continuationNormalized) {
-            let bestEstimate: PageTurnEstimate | null = null;
+            let bestEstimate: TTSPageTurnEstimate | null = null;
 
             newSentences.forEach((sentence, index) => {
               const normalizedSentence = preprocessSentenceForAudio(sentence);

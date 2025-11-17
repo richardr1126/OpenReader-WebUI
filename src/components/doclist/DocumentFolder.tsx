@@ -1,3 +1,5 @@
+"use client";
+
 import { useState, DragEvent } from 'react';
 import { Button, Transition } from '@headlessui/react';
 import { DocumentListItem } from './DocumentListItem';

@@ -21,7 +21,7 @@ COPY . .
 
 # Build the Next.js application
 RUN pnpm exec next telemetry disable
-RUN pnpm run build
+RUN pnpm build
 
 # Expose the port the app runs on
 EXPOSE 3003

@@ -88,10 +88,9 @@ export default function PDFViewerPage() {
     chapterIndex: number,
     bookId: string,
     format: 'mp3' | 'm4b',
-    onProgress: (progress: number) => void,
     signal: AbortSignal
   ) => {
-    return regeneratePDFChapter(chapterIndex, bookId, format, onProgress, signal);
+    return regeneratePDFChapter(chapterIndex, bookId, format, signal);
   }, [regeneratePDFChapter]);
 
   if (error) {

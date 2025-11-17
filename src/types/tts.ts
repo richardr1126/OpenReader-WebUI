@@ -1,18 +1,5 @@
 export type TTSLocation = string | number;
 
-// Result of merging a continuation slice into the current text
-export interface ContinuationMergeResult {
-  text: string;
-  carried: string;
-}
-
-// Estimate for when a visual page/section turn should occur during audio playback
-export interface PageTurnEstimate {
-  location: TTSLocation;
-  sentenceIndex: number;
-  fraction: number;
-}
-
 // Standardized error codes for the TTS API
 export type TTSErrorCode =
   | 'MISSING_PARAMETERS'
@@ -55,9 +42,33 @@ export interface TTSPlaybackState {
   currDocPages?: number;
 }
 
+// Options for retrying TTS requests on failure in withRetry
 export interface TTSRetryOptions {
   maxRetries?: number;
   initialDelay?: number;
   maxDelay?: number;
   backoffFactor?: number;
+}
+
+// Result of merging a continuation slice into the current text
+export interface TTSSmartMergeResult {
+  text: string;
+  carried: string;
+}
+
+// Estimate for when a visual page/section turn should occur during audio playback
+export interface TTSPageTurnEstimate {
+  location: TTSLocation;
+  sentenceIndex: number;
+  fraction: number;
+}
+
+// Metadata for an audiobook chapter
+export interface TTSAudiobookChapter {
+  index: number;
+  title: string;
+  duration?: number;
+  status: 'pending' | 'generating' | 'completed' | 'error';
+  bookId?: string;
+  format?: 'mp3' | 'm4b';
 }

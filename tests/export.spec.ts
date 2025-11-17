@@ -318,6 +318,16 @@ test.describe('Audiobook export', () => {
     const regeneratingLabel = page.getByText(/Regenerating/);
     await expect(regeneratingLabel).toHaveCount(0, { timeout: 120_000 });
 
+    // After regeneration completes in the UI, verify backend chapter state is fully updated
+    // before triggering a full download to avoid races with ffmpeg concat on Alpine.
+    const backendStateAfterRegenerate = await expectChaptersBackendState(page, bookId);
+    expect(backendStateAfterRegenerate.exists).toBe(true);
+    expect(Array.isArray(backendStateAfterRegenerate.chapters)).toBe(true);
+    expect(backendStateAfterRegenerate.chapters.length).toBe(chapterCountBefore);
+    for (const ch of backendStateAfterRegenerate.chapters) {
+      expect(ch.duration).toBeGreaterThan(0);
+    }
+
     // Chapter count should remain exactly the same after regeneration (no duplicates)
     await expect(chapterActionsButtons).toHaveCount(chapterCountBefore, { timeout: 20_000 });
 
