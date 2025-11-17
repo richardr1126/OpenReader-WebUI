@@ -1,7 +1,7 @@
 'use client';
 
 import { Input, Popover, PopoverButton, PopoverPanel } from '@headlessui/react';
-import { ChevronUpDownIcon } from '@/components/icons/Icons';
+import { ChevronUpDownIcon, SpeedometerIcon } from '@/components/icons/Icons';
 import { useConfig } from '@/contexts/ConfigContext';
 import { useCallback, useEffect, useState } from 'react';
 
@@ -54,7 +54,8 @@ export const SpeedControl = ({
 
   return (
     <Popover className="relative">
-      <PopoverButton className="flex items-center space-x-0.5 sm:space-x-1 bg-transparent text-foreground text-xs sm:text-sm focus:outline-none cursor-pointer hover:bg-offbase rounded pl-1.5 sm:pl-2 pr-0.5 sm:pr-1 py-0.5 sm:py-1">
+      <PopoverButton className="flex items-center space-x-0.5 sm:space-x-1 bg-transparent text-foreground text-xs sm:text-sm focus:outline-none cursor-pointer hover:bg-offbase rounded pl-1.5 sm:pl-2 pr-0.5 sm:pr-1 py-0.5 sm:py-1 transform transition-transform duration-200 ease-in-out hover:scale-[1.04] hover:text-accent">
+        <SpeedometerIcon className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
         <span>{Number.isInteger(displaySpeed) ? displaySpeed.toString() : displaySpeed.toFixed(1)}x</span>
         <ChevronUpDownIcon className="h-2.5 w-2.5 sm:h-3 sm:w-3" />
       </PopoverButton>

@@ -1,7 +1,7 @@
 name: Playwright Tests
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, version1.0.0 ]
   pull_request:
     branches: [ main, master ]
 jobs:
@@ -16,12 +16,14 @@ jobs:
     - uses: pnpm/action-setup@v4
       with:
         version: 9
-    - name: Install Deps (FFmpeg is install through Playwright)
+    - name: Install system dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y libreoffice-writer
+        sudo apt-get install -y libreoffice-writer ffmpeg
     - name: Install dependencies
       run: pnpm install --frozen-lockfile
+    - name: Verify ffprobe
+      run: ffprobe -version
     - name: Install Playwright Browsers
       run: pnpm exec playwright install --with-deps
     - name: Run Playwright tests

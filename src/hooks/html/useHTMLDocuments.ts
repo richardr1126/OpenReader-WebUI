@@ -1,32 +1,19 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useCallback } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { indexedDBService } from '@/utils/indexedDB';
+import { useLiveQuery } from 'dexie-react-hooks';
+import { db } from '@/lib/dexie';
 import type { HTMLDocument } from '@/types/documents';
-import { useConfig } from '@/contexts/ConfigContext';
 
 export function useHTMLDocuments() {
-  const { isDBReady } = useConfig();
-  const [documents, setDocuments] = useState<HTMLDocument[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const documents = useLiveQuery(
+    () => db['html-documents'].toArray(),
+    [],
+    undefined,
+  );
 
-  const loadDocuments = useCallback(async () => {
-    if (isDBReady) {
-      try {
-        const docs = await indexedDBService.getAllHTMLDocuments();
-        setDocuments(docs);
-      } catch (error) {
-        console.error('Failed to load HTML documents:', error);
-      } finally {
-        setIsLoading(false);
-      }
-    }
-  }, [isDBReady]);
-
-  useEffect(() => {
-    loadDocuments();
-  }, [loadDocuments]);
+  const isLoading = documents === undefined;
 
   const addDocument = useCallback(async (file: File): Promise<string> => {
     const id = uuidv4();
@@ -41,56 +28,23 @@ export function useHTMLDocuments() {
       data: content,
     };
 
-    try {
-      await indexedDBService.addHTMLDocument(newDoc);
-      setDocuments((prev) => [...prev, newDoc]);
-      return id;
-    } catch (error) {
-      console.error('Failed to add HTML document:', error);
-      throw error;
-    }
+    await db['html-documents'].add(newDoc);
+    return id;
   }, []);
 
   const removeDocument = useCallback(async (id: string): Promise<void> => {
-    try {
-      await indexedDBService.removeHTMLDocument(id);
-      setDocuments((prev) => prev.filter((doc) => doc.id !== id));
-    } catch (error) {
-      console.error('Failed to remove HTML document:', error);
-      throw error;
-    }
+    await db['html-documents'].delete(id);
   }, []);
 
-  const refresh = useCallback(async () => {
-    if (isDBReady) {
-      setIsLoading(true);
-      try {
-        const docs = await indexedDBService.getAllHTMLDocuments();
-        setDocuments(docs);
-      } catch (error) {
-        console.error('Failed to refresh documents:', error);
-      } finally {
-        setIsLoading(false);
-      }
-    }
-  }, [isDBReady]);
-
   const clearDocuments = useCallback(async (): Promise<void> => {
-    try {
-      await indexedDBService.clearHTMLDocuments();
-      setDocuments([]);
-    } catch (error) {
-      console.error('Failed to clear HTML documents:', error);
-      throw error;
-    }
+    await db['html-documents'].clear();
   }, []);
 
   return {
-    documents,
+    documents: documents ?? [],
     isLoading,
     addDocument,
     removeDocument,
-    refresh,
     clearDocuments,
   };
 }

@@ -1,25 +1,20 @@
 'use client';
 
-import { Fragment, useState, useRef, useCallback, useEffect } from 'react';
+import { Fragment, useState, useCallback, useEffect } from 'react';
 import { Dialog, DialogPanel, Transition, TransitionChild, Listbox, ListboxButton, ListboxOptions, ListboxOption, Button } from '@headlessui/react';
 import { useConfig, ViewType } from '@/contexts/ConfigContext';
 import { ChevronUpDownIcon, CheckIcon } from '@/components/icons/Icons';
 import { useEPUB } from '@/contexts/EPUBContext';
 import { usePDF } from '@/contexts/PDFContext';
-import { useTimeEstimation } from '@/hooks/useTimeEstimation';
-import { ProgressPopup } from '@/components/ProgressPopup';
+import { AudiobookExportModal } from '@/components/AudiobookExportModal';
+import { useParams } from 'next/navigation';
 
 const isDev = process.env.NEXT_PUBLIC_NODE_ENV !== 'production' || process.env.NODE_ENV == null;
 
-const viewTypes = [
+const viewTypeTextMapping = [
   { id: 'single', name: 'Single Page' },
   { id: 'dual', name: 'Two Pages' },
   { id: 'scroll', name: 'Continuous Scroll' },
-];
-
-const audioFormats = [
-  { id: 'mp3', name: 'MP3' },
-  { id: 'm4b', name: 'M4B' },
 ];
 
 export function DocumentSettings({ isOpen, setIsOpen, epub, html }: {
@@ -32,25 +27,25 @@ export function DocumentSettings({ isOpen, setIsOpen, epub, html }: {
     viewType,
     skipBlank,
     epubTheme,
+    smartSentenceSplitting,
     headerMargin,
     footerMargin,
     leftMargin,
     rightMargin,
-    updateConfigKey
+    updateConfigKey,
+    pdfHighlightEnabled,
   } = useConfig();
-  const { createFullAudioBook, isAudioCombining } = useEPUB();
-  const { createFullAudioBook: createPDFAudioBook, isAudioCombining: isPDFAudioCombining } = usePDF();
-  const { progress, setProgress, estimatedTimeRemaining } = useTimeEstimation();
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [audioFormat, setAudioFormat] = useState<'mp3' | 'm4b'>('mp3');
+  const { createFullAudioBook: createEPUBAudioBook, regenerateChapter: regenerateEPUBChapter } = useEPUB();
+  const { createFullAudioBook: createPDFAudioBook, regenerateChapter: regeneratePDFChapter } = usePDF();
+  const { id } = useParams();
   const [localMargins, setLocalMargins] = useState({
     header: headerMargin,
     footer: footerMargin,
     left: leftMargin,
     right: rightMargin
   });
-  const abortControllerRef = useRef<AbortController | null>(null);
-  const selectedView = viewTypes.find(v => v.id === viewType) || viewTypes[0];
+  const [isAudiobookModalOpen, setIsAudiobookModalOpen] = useState(false);
+  const selectedView = viewTypeTextMapping.find(v => v.id === viewType) || viewTypeTextMapping[0];
 
   // Sync local margins with global state
   useEffect(() => {
@@ -79,61 +74,41 @@ export function DocumentSettings({ isOpen, setIsOpen, epub, html }: {
     }
   };
 
-  const handleStartGeneration = useCallback(async () => {
-    setIsGenerating(true);
-    setProgress(0);
-    abortControllerRef.current = new AbortController();
-
-    try {
-      const audioBuffer = epub ? await createFullAudioBook(
-        (progress) => setProgress(progress),
-        abortControllerRef.current.signal,
-        audioFormat
-      ) : await createPDFAudioBook(
-        (progress) => setProgress(progress),
-        abortControllerRef.current.signal,
-        audioFormat
-      );
-
-      // Create and trigger download
-      const mimeType = audioFormat === 'mp3' ? 'audio/mp3' : 'audio/mp4';
-      const blob = new Blob([audioBuffer], { type: mimeType });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `audiobook.${audioFormat}`;
-      document.body.appendChild(a);
-      a.click();
-
-      // Clean up
-      setTimeout(() => {
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      }, 100);
-    } catch (error) {
-      console.error('Error generating audiobook:', error);
-    } finally {
-      setIsGenerating(false);
-      setProgress(0);
-      abortControllerRef.current = null;
+  const handleGenerateAudiobook = useCallback(async (
+    onProgress: (progress: number) => void,
+    signal: AbortSignal,
+    onChapterComplete: (chapter: { index: number; title: string; duration?: number; status: 'pending' | 'generating' | 'completed' | 'error'; bookId?: string; format?: 'mp3' | 'm4b' }) => void,
+    format: 'mp3' | 'm4b'
+  ) => {
+    if (epub) {
+      return createEPUBAudioBook(onProgress, signal, onChapterComplete, id as string, format);
+    } else {
+      return createPDFAudioBook(onProgress, signal, onChapterComplete, id as string, format);
     }
-  }, [createFullAudioBook, createPDFAudioBook, epub, audioFormat, setProgress]);
+  }, [epub, createEPUBAudioBook, createPDFAudioBook, id]);
 
-  const handleCancel = () => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
+  const handleRegenerateChapter = useCallback(async (
+    chapterIndex: number,
+    bookId: string,
+    format: 'mp3' | 'm4b',
+    signal: AbortSignal
+  ) => {
+    if (epub) {
+      return regenerateEPUBChapter(chapterIndex, bookId, format, signal);
+    } else {
+      return regeneratePDFChapter(chapterIndex, bookId, format, signal);
     }
-  };
+  }, [epub, regenerateEPUBChapter, regeneratePDFChapter]);
 
   return (
     <>
-      <ProgressPopup 
-        isOpen={isGenerating}
-        progress={progress}
-        estimatedTimeRemaining={estimatedTimeRemaining || undefined}
-        onCancel={handleCancel}
-        isProcessing={epub ? isAudioCombining : isPDFAudioCombining}
-        cancelText="Cancel and download"
+      <AudiobookExportModal
+        isOpen={isAudiobookModalOpen}
+        setIsOpen={setIsAudiobookModalOpen}
+        documentType={epub ? 'epub' : 'pdf'}
+        documentId={id as string}
+        onGenerateAudiobook={handleGenerateAudiobook}
+        onRegenerateChapter={handleRegenerateChapter}
       />
       
       <Transition appear show={isOpen} as={Fragment}>
@@ -147,7 +122,7 @@ export function DocumentSettings({ isOpen, setIsOpen, epub, html }: {
             leaveFrom="opacity-100"
             leaveTo="opacity-0"
           >
-            <div className="fixed inset-0 bg-black/25 backdrop-blur-sm" />
+            <div className="fixed inset-0 overlay-dim backdrop-blur-sm" />
           </TransitionChild>
 
           <div className="fixed inset-0 overflow-y-auto">
@@ -162,44 +137,17 @@ export function DocumentSettings({ isOpen, setIsOpen, epub, html }: {
                 leaveTo="opacity-0 scale-95"
               >
                 <DialogPanel className="w-full max-w-md transform rounded-2xl bg-base p-6 text-left align-middle shadow-xl transition-all">
-                  {isDev && <div className="space-y-2">
-                    <div className="flex flex-col space-y-2">
-                      <Button
-                        type="button"
-                        disabled={isGenerating}
-                        className="w-full inline-flex justify-center rounded-lg bg-accent px-4 py-2 text-sm
-                                      disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100
-                                      font-medium text-background hover:opacity-95 focus:outline-none 
-                                      focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2
-                                      transform transition-transform duration-200 ease-in-out hover:scale-[1.04]"
-                        onClick={handleStartGeneration}
-                      >
-                        Export to {audioFormat.toUpperCase()} (experimental)
-                      </Button>
-                      <Listbox value={audioFormat} onChange={(format) => setAudioFormat(format as 'mp3' | 'm4b')}>
-                        <div className="relative flex self-end">
-                          <ListboxButton
-                            disabled={isGenerating}
-                            className="flex self-end justify-center items-center space-x-0.5 sm:space-x-1 bg-transparent text-foreground text-xs sm:text-sm focus:outline-none cursor-pointer hover:bg-offbase rounded pl-1.5 sm:pl-2 pr-0.5 sm:pr-1 py-0.5 sm:py-1 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent">
-                            <span>{audioFormat === 'mp3' ? 'MP3' : 'M4B (Audiobook)'}</span>
-                            <ChevronUpDownIcon className="h-2.5 w-2.5 sm:h-3 sm:w-3" />
-                          </ListboxButton>
-                          <ListboxOptions anchor='bottom end' className="absolute z-50 w-28 sm:w-32 overflow-auto rounded-lg bg-base shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none">
-                            {audioFormats.map((format) => (
-                              <ListboxOption
-                                key={format.id}
-                                value={format.id}
-                                className={({ active, selected }) =>
-                                  `relative cursor-pointer select-none py-0.5 px-1.5 sm:py-2 sm:px-3 ${active ? 'bg-offbase' : ''} ${selected ? 'font-medium' : ''}`
-                                }
-                              >
-                                <span className="text-xs sm:text-sm">{format.name}</span>
-                              </ListboxOption>
-                            ))}
-                          </ListboxOptions>
-                        </div>
-                      </Listbox>
-                    </div>
+                  {isDev && !html && <div className="space-y-2 mb-4">
+                    <Button
+                      type="button"
+                      className="w-full inline-flex justify-center rounded-lg bg-accent px-3 py-1.5 text-sm
+                                    font-medium text-background hover:bg-secondary-accent focus:outline-none 
+                                    focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2
+                                    transform transition-transform duration-200 ease-in-out hover:scale-[1.04] hover:text-background"
+                      onClick={() => setIsAudiobookModalOpen(true)}
+                    >
+                      Export Audiobook
+                    </Button>
                   </div>}
 
                   <div className="space-y-4">
@@ -299,7 +247,7 @@ export function DocumentSettings({ isOpen, setIsOpen, epub, html }: {
                       >
                         <div className="relative z-10 space-y-2">
                           <label className="block text-sm font-medium text-foreground">Mode</label>
-                          <ListboxButton className="relative w-full cursor-pointer rounded-lg bg-background py-2 pl-3 pr-10 text-left text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-accent transform transition-transform duration-200 ease-in-out hover:scale-[1.01] hover:text-accent">
+                          <ListboxButton className="relative w-full cursor-pointer rounded-lg bg-background py-1.5 pl-3 pr-10 text-left text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-accent transform transition-transform duration-200 ease-in-out hover:scale-[1.009] hover:text-accent hover:bg-offbase">
                             <span className="block truncate">{selectedView.name}</span>
                             <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2">
                               <ChevronUpDownIcon className="h-5 w-5 text-muted" />
@@ -312,11 +260,11 @@ export function DocumentSettings({ isOpen, setIsOpen, epub, html }: {
                             leaveTo="opacity-0"
                           >
                             <ListboxOptions className="absolute mt-1 max-h-60 w-full overflow-auto rounded-md bg-background py-1 shadow-lg ring-1 ring-black/5 focus:outline-none">
-                              {viewTypes.map((view) => (
+                              {viewTypeTextMapping.map((view) => (
                                 <ListboxOption
                                   key={view.id}
                                   className={({ active }) =>
-                                    `relative cursor-pointer select-none py-2 pl-10 pr-4 ${active ? 'bg-accent/10 text-accent' : 'text-foreground'
+                                    `relative cursor-pointer select-none py-1.5 pl-10 pr-4 ${active ? 'bg-offbase text-accent' : 'text-foreground'
                                     }`
                                   }
                                   value={view}
@@ -361,6 +309,40 @@ export function DocumentSettings({ isOpen, setIsOpen, epub, html }: {
                         Automatically skip pages with no text content
                       </p>
                     </div>}
+                    {!html && (
+                      <div className="space-y-1">
+                        <label className="flex items-center space-x-2">
+                          <input
+                            type="checkbox"
+                            checked={smartSentenceSplitting}
+                            onChange={(e) => updateConfigKey('smartSentenceSplitting', e.target.checked)}
+                            className="form-checkbox h-4 w-4 text-accent rounded border-muted"
+                          />
+                          <span className="text-sm font-medium text-foreground">
+                            Smart sentence splitting
+                          </span>
+                        </label>
+                        <p className="text-sm text-muted pl-6">
+                          Merge sentences across page or section breaks for smoother TTS.
+                        </p>
+                      </div>
+                    )}
+                    {!epub && !html && (
+                      <div className="space-y-1">
+                        <label className="flex items-center space-x-2">
+                          <input
+                            type="checkbox"
+                            checked={pdfHighlightEnabled}
+                            onChange={(e) => updateConfigKey('pdfHighlightEnabled', e.target.checked)}
+                            className="form-checkbox h-4 w-4 text-accent rounded border-muted"
+                          />
+                          <span className="text-sm font-medium text-foreground">Highlight text during playback</span>
+                        </label>
+                        <p className="text-sm text-muted pl-6">
+                          Show visual highlighting in the PDF viewer while TTS is reading.
+                        </p>
+                      </div>
+                    )}
                     {epub && (
                       <div className="space-y-1">
                         <label className="flex items-center space-x-2">
@@ -382,8 +364,8 @@ export function DocumentSettings({ isOpen, setIsOpen, epub, html }: {
                   <div className="mt-3 flex justify-end">
                     <Button
                       type="button"
-                      className="inline-flex justify-center rounded-lg bg-background px-4 py-2 text-sm 
-                               font-medium text-foreground hover:bg-background/90 focus:outline-none 
+                      className="inline-flex justify-center rounded-lg bg-background px-3 py-1.5 text-sm 
+                               font-medium text-foreground hover:bg-offbase focus:outline-none 
                                focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2
                                transform transition-transform duration-200 ease-in-out hover:scale-[1.04] hover:text-accent z-1"
                       onClick={() => setIsOpen(false)}

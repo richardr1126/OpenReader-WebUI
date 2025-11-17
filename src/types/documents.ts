@@ -30,6 +30,20 @@ export interface DOCXDocument extends BaseDocument {
   data: ArrayBuffer;
 }
 
+export type AnyDocument =
+  | PDFDocument
+  | EPUBDocument
+  | HTMLDocument
+  | DOCXDocument;
+
+export type BinaryDocument = PDFDocument | EPUBDocument | DOCXDocument;
+
+// Representation used when syncing binary documents to/from the server.
+// Data is converted from ArrayBuffer to a numeric array for JSON transport.
+export interface SyncedDocument extends BaseDocument {
+  data: number[];
+}
+
 export interface DocumentListDocument extends BaseDocument {
   type: DocumentType;
 }

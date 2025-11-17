@@ -32,6 +32,7 @@ export const getThemeStyles = (): IReactReaderStyle => {
     readerArea: {
       ...baseStyle.readerArea,
       backgroundColor: colors.base,
+      height: '100%',
     },
     titleArea: {
       ...baseStyle.titleArea,

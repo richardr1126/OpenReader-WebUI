@@ -33,6 +33,7 @@ export function ConfirmDialog({
     <Transition appear show={isOpen} as={Fragment}>
       <Dialog 
         as="div" 
+        role={undefined}
         className="relative z-50" 
         onClose={onClose}
         onKeyDown={handleKeyDown}
@@ -46,7 +47,7 @@ export function ConfirmDialog({
           leaveFrom="opacity-100"
           leaveTo="opacity-0"
         >
-          <div className="fixed inset-0 bg-black/25 backdrop-blur-sm" />
+          <div className="fixed inset-0 overlay-dim backdrop-blur-sm" />
         </TransitionChild>
 
         <div className="fixed inset-0 overflow-y-auto">
@@ -60,7 +61,7 @@ export function ConfirmDialog({
               leaveFrom="opacity-100 scale-100"
               leaveTo="opacity-0 scale-95"
             >
-              <DialogPanel className="w-full max-w-md transform rounded-2xl bg-base p-6 text-left align-middle shadow-xl transition-all">
+              <DialogPanel role='dialog' className="w-full max-w-md transform rounded-2xl bg-base p-6 text-left align-middle shadow-xl transition-all">
                 <DialogTitle
                   as="h3"
                   className="text-lg font-semibold leading-6 text-foreground"
@@ -74,8 +75,8 @@ export function ConfirmDialog({
                 <div className="mt-6 flex justify-end space-x-3">
                   <button
                     type="button"
-                    className="inline-flex justify-center rounded-lg bg-background px-4 py-2 text-sm 
-                             font-medium text-foreground hover:bg-background/90 focus:outline-none 
+                    className="inline-flex justify-center rounded-lg bg-background px-3 py-1.5 text-sm 
+                             font-medium text-foreground hover:bg-offbase focus:outline-none 
                              focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2
                              transform transition-transform duration-200 ease-in-out hover:scale-[1.04] hover:text-accent"
                     onClick={onClose}
@@ -84,12 +85,12 @@ export function ConfirmDialog({
                   </button>
                   <button
                     type="button"
-                    className={`inline-flex justify-center rounded-lg px-4 py-2 text-sm 
+                    className={`inline-flex justify-center rounded-lg px-3 py-1.5 text-sm 
                              font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2
                              transform transition-transform duration-200 ease-in-out hover:scale-[1.04]
                              ${isDangerous 
-                               ? 'bg-red-600 text-white hover:bg-red-700 focus-visible:ring-red-500 hover:text-white' 
-                               : 'bg-accent text-white hover:bg-accent/90 focus-visible:ring-accent hover:text-background'
+                               ? 'bg-accent text-background hover:bg-secondary-accent focus-visible:ring-accent' 
+                               : 'bg-accent text-background hover:bg-secondary-accent focus-visible:ring-accent'
                              }`}
                     onClick={onConfirm}
                   >

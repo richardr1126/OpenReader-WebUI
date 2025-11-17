@@ -10,7 +10,13 @@ html.light {
   --base: #f7fafc;
   --offbase: #e2e8f0;
   --accent: #ef4444;
+  --secondary-accent: #ed6868;
   --muted: #718096;
+  --prism-gradient: linear-gradient(90deg,
+    #fecaca,
+    #f87171,
+    #ef4444
+  );
 }
 
 html.dark {
@@ -19,7 +25,13 @@ html.dark {
   --base: #171717;
   --offbase: #343434;
   --accent: #f87171;
+  --secondary-accent: #eb6262;
   --muted: #a3a3a3;
+  --prism-gradient: linear-gradient(90deg,
+    #fca5a5,
+    #fb7185,
+    #f87171
+  );
 }
 
 html.ocean {
@@ -28,7 +40,13 @@ html.ocean {
   --base: #0f172a;
   --offbase: #1e293b;
   --accent: #38bdf8;
+  --secondary-accent: #22d3ee;
   --muted: #94a3b8;
+  --prism-gradient: linear-gradient(90deg,
+    #7dd3fc,
+    #38bdf8,
+    #0ea5e9
+  );
 }
 
 html.forest {
@@ -37,7 +55,13 @@ html.forest {
   --base: #111a15;
   --offbase: #1a2820;
   --accent: #4ade80;
+  --secondary-accent: #22c55e;
   --muted: #7c8f85;
+  --prism-gradient: linear-gradient(90deg,
+    #86efac,
+    #4ade80,
+    #22c55e
+  );
 }
 
 html.sunset {
@@ -46,7 +70,13 @@ html.sunset {
   --base: #2c1810;
   --offbase: #3d1f14;
   --accent: #ff6b6b;
+  --secondary-accent: #f59e0b;
   --muted: #bc8f8f;
+  --prism-gradient: linear-gradient(90deg,
+    #fca5a5,
+    #fb7185,
+    #ff6b6b
+  );
 }
 
 html.sea {
@@ -55,7 +85,13 @@ html.sea {
   --base: #102c3d;
   --offbase: #1a3c52;
   --accent: #06b6d4;
+  --secondary-accent: #0ea5e9;
   --muted: #7ca7c4;
+  --prism-gradient: linear-gradient(90deg,
+    #67e8f9,
+    #22d3ee,
+    #06b6d4
+  );
 }
 
 html.mint {
@@ -64,7 +100,13 @@ html.mint {
   --base: #132d27;
   --offbase: #1c3d35;
   --accent: #2dd4bf;
+  --secondary-accent: #10b981;
   --muted: #75a99c;
+  --prism-gradient: linear-gradient(90deg,
+    #99f6e4,
+    #5eead4,
+    #2dd4bf
+  );
 }
 
 body {
@@ -75,4 +117,76 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* App shell utility (fullscreen, vertical layout) */
+.app-shell {
+  --header-height: 3.25rem;
+}
+
+/* Themed overlay using foreground color without relying on /opacity classes */
+.overlay-dim {
+  background-color: color-mix(in srgb, var(--foreground), transparent 75%);
+}
+
+/* Scrollbar styling for better fullscreen experience */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: var(--base);
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--offbase);
+  border-radius: 6px;
+  border: 2px solid var(--base);
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+}
+
+/* Subtle prism animated outline around list items (very light), matches the row's rounded-lg curve exactly */
+.prism-outline {
+  position: relative;
+  border: 1px solid transparent;
+  /* do not set border-radius here; let the element's rounded-lg from Tailwind define the curve */
+  background:
+    linear-gradient(var(--card-fill, var(--offbase)), var(--card-fill, var(--offbase))) padding-box,
+    var(--prism-gradient) border-box;
+  background-clip: padding-box, border-box;
+  background-size: 300% 300%;
+  animation: prism-shift 8s linear infinite, prism-fade 3s ease-in-out infinite;
+}
+
+@keyframes prism-shift {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 300% 50%; }
+}
+
+/* Gentle opacity pulse to simulate a "breath" without shadows spilling outside */
+@keyframes prism-fade {
+  0% { opacity: 0.8; }
+  50% { opacity: 1.0; }
+  100% { opacity: 0.8; }
+}
+
+/* Static prism gradient divider (no animation) */
+.prism-divider {
+  width: 100%;
+  height: 0.7px; /* use 2px then feather for a crisper center */
+  position: relative;
+  border: 0;
+  background: none;
+  opacity: 0.95;
+}
+.prism-divider::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--prism-gradient);
+  /* Feather edges so they appear thinner */
+  mask: linear-gradient(90deg, transparent 0%, black 8%, black 92%, transparent 100%);
+  -webkit-mask: linear-gradient(90deg, transparent 0%, black 8%, black 92%, transparent 100%);
+  border-radius: 999px; /* subtle rounding to reinforce taper */
 }

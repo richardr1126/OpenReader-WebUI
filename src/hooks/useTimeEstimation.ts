@@ -88,11 +88,11 @@ export function useTimeEstimation(): TimeEstimation {
       }
     }
     
-    lastProgressUpdateRef.current = currentTime;
-    
     if (shouldSkipUpdate) {
       return;
     }
+    
+    lastProgressUpdateRef.current = currentTime;
     
     const history = progressHistoryRef.current;
     

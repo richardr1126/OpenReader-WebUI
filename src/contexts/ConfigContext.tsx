@@ -1,35 +1,12 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { getItem, indexedDBService, setItem, removeItem } from '@/utils/indexedDB';
-
-const isDev = process.env.NEXT_PUBLIC_NODE_ENV !== 'production' || process.env.NODE_ENV == null;
-
-/** Represents the possible view types for document display */
-export type ViewType = 'single' | 'dual' | 'scroll';
-
-/** Saved voice configurations per provider-model */
-type SavedVoices = Record<string, string>;
+import { createContext, useContext, useEffect, useMemo, useState, ReactNode } from 'react';
+import { useLiveQuery } from 'dexie-react-hooks';
+import { db, initDB, updateAppConfig } from '@/lib/dexie';
+import { APP_CONFIG_DEFAULTS, type ViewType, type SavedVoices, type AppConfigValues, type AppConfigRow } from '@/types/config';
+export type { ViewType } from '@/types/config';
 
 /** Configuration values for the application */
-type ConfigValues = {
-  apiKey: string;
-  baseUrl: string;
-  viewType: ViewType;
-  voiceSpeed: number;
-  audioPlayerSpeed: number;
-  voice: string;
-  skipBlank: boolean;
-  epubTheme: boolean;
-  headerMargin: number;
-  footerMargin: number;
-  leftMargin: number;
-  rightMargin: number;
-  ttsProvider: string;
-  ttsModel: string;
-  ttsInstructions: string;
-  savedVoices: SavedVoices;
-};
 
 /** Interface defining the configuration context shape and functionality */
 interface ConfigContextType {
@@ -41,6 +18,7 @@ interface ConfigContextType {
   voice: string;
   skipBlank: boolean;
   epubTheme: boolean;
+  smartSentenceSplitting: boolean;
   headerMargin: number;
   footerMargin: number;
   leftMargin: number;
@@ -50,9 +28,10 @@ interface ConfigContextType {
   ttsInstructions: string;
   savedVoices: SavedVoices;
   updateConfig: (newConfig: Partial<{ apiKey: string; baseUrl: string; viewType: ViewType }>) => Promise<void>;
-  updateConfigKey: <K extends keyof ConfigValues>(key: K, value: ConfigValues[K]) => Promise<void>;
+  updateConfigKey: <K extends keyof AppConfigValues>(key: K, value: AppConfigValues[K]) => Promise<void>;
   isLoading: boolean;
   isDBReady: boolean;
+  pdfHighlightEnabled: boolean;
 }
 
 const ConfigContext = createContext<ConfigContextType | undefined>(undefined);
@@ -64,24 +43,6 @@ const ConfigContext = createContext<ConfigContextType | undefined>(undefined);
  * @param {ReactNode} props.children - Child components to be wrapped by the provider
  */
 export function ConfigProvider({ children }: { children: ReactNode }) {
-  // Config state
-  const [apiKey, setApiKey] = useState<string>('');
-  const [baseUrl, setBaseUrl] = useState<string>('');
-  const [viewType, setViewType] = useState<ViewType>('single');
-  const [voiceSpeed, setVoiceSpeed] = useState<number>(1);
-  const [audioPlayerSpeed, setAudioPlayerSpeed] = useState<number>(1);
-  const [voice, setVoice] = useState<string>('af_sarah');
-  const [skipBlank, setSkipBlank] = useState<boolean>(true);
-  const [epubTheme, setEpubTheme] = useState<boolean>(false);
-  const [headerMargin, setHeaderMargin] = useState<number>(0.07);
-  const [footerMargin, setFooterMargin] = useState<number>(0.07);
-  const [leftMargin, setLeftMargin] = useState<number>(0.07);
-  const [rightMargin, setRightMargin] = useState<number>(0.07);
-  const [ttsProvider, setTTSProvider] = useState<string>('custom-openai');
-  const [ttsModel, setTTSModel] = useState<string>('kokoro');
-  const [ttsInstructions, setTTSInstructions] = useState<string>('');
-  const [savedVoices, setSavedVoices] = useState<SavedVoices>({});
-
   const [isLoading, setIsLoading] = useState(true);
   const [isDBReady, setIsDBReady] = useState(false);
 
@@ -92,155 +53,10 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     const initializeDB = async () => {
       try {
         setIsLoading(true);
-        await indexedDBService.init();
+        await initDB();
         setIsDBReady(true);
-        
-        // Load config from IndexedDB
-        const cachedApiKey = await getItem('apiKey');
-        const cachedBaseUrl = await getItem('baseUrl');
-        const cachedViewType = await getItem('viewType');
-        const cachedVoiceSpeed = await getItem('voiceSpeed');
-        const cachedAudioPlayerSpeed = await getItem('audioPlayerSpeed');
-        const cachedSkipBlank = await getItem('skipBlank');
-        const cachedEpubTheme = await getItem('epubTheme');
-        const cachedHeaderMargin = await getItem('headerMargin');
-        const cachedFooterMargin = await getItem('footerMargin');
-        const cachedLeftMargin = await getItem('leftMargin');
-        const cachedRightMargin = await getItem('rightMargin');
-        const cachedTTSProvider = await getItem('ttsProvider');
-        const cachedTTSModel = await getItem('ttsModel');
-        const cachedTTSInstructions = await getItem('ttsInstructions');
-        const cachedSavedVoices = await getItem('savedVoices');
-
-        // Migration logic: infer provider and baseUrl for returning users
-        let inferredProvider = cachedTTSProvider || '';
-        let inferredBaseUrl = cachedBaseUrl || '';
-
-        // In production mode, force deepinfra provider if not already set
-        if (!isDev && !cachedTTSProvider) {
-          inferredProvider = 'deepinfra';
-        } else if (!inferredProvider) {
-          if (cachedBaseUrl) {
-            const baseUrlLower = cachedBaseUrl.toLowerCase();
-            if (baseUrlLower.includes('deepinfra.com')) {
-              inferredProvider = 'deepinfra';
-            } else if (baseUrlLower.includes('openai.com')) {
-              inferredProvider = 'openai';
-            } else if (
-              baseUrlLower.includes('localhost') ||
-              baseUrlLower.includes('127.0.0.1') ||
-              baseUrlLower.includes('internal')
-            ) {
-              inferredProvider = 'custom-openai';
-            } else {
-              // Unknown host: fall back based on presence of API key
-              inferredProvider = cachedApiKey ? 'openai' : 'custom-openai';
-            }
-          } else {
-            // No provider stored and no baseUrl stored
-            // If there is an API key and no base URL -> assume OpenAI
-            // If empty with no API key -> default to custom
-            inferredProvider = cachedApiKey ? 'openai' : 'custom-openai';
-          }
-        }
-
-        // If baseUrl is missing, set a safe default based on the inferred provider
-        if (!inferredBaseUrl) {
-          if (inferredProvider === 'openai') {
-            inferredBaseUrl = 'https://api.openai.com/v1';
-          } else if (inferredProvider === 'deepinfra') {
-            inferredBaseUrl = 'https://api.deepinfra.com/v1/openai';
-          } else {
-            inferredBaseUrl = '';
-          }
-        }
-
-        // Only set API key and base URL if they were explicitly saved by the user
-        if (cachedApiKey) {
-          console.log('Using cached API key');
-          setApiKey(cachedApiKey);
-        }
-        if (cachedBaseUrl) {
-          console.log('Using cached base URL');
-          setBaseUrl(cachedBaseUrl);
-        } else if (inferredBaseUrl) {
-          // Migration: no stored baseUrl, pick a safe default from provider inference
-          console.log('Setting default base URL from inferred provider', inferredBaseUrl);
-          setBaseUrl(inferredBaseUrl);
-          await setItem('baseUrl', inferredBaseUrl);
-        }
-
-        // Parse savedVoices
-        let parsedSavedVoices: SavedVoices = {};
-        if (cachedSavedVoices) {
-          try {
-            parsedSavedVoices = JSON.parse(cachedSavedVoices);
-          } catch (error) {
-            console.error('Error parsing savedVoices:', error);
-          }
-        }
-        setSavedVoices(parsedSavedVoices);
-
-        // Set the other values with defaults
-        setViewType((cachedViewType || 'single') as ViewType);
-        setVoiceSpeed(parseFloat(cachedVoiceSpeed || '1'));
-        setAudioPlayerSpeed(parseFloat(cachedAudioPlayerSpeed || '1'));
-        setSkipBlank(cachedSkipBlank === 'false' ? false : true);
-        setEpubTheme(cachedEpubTheme === 'true');
-        setHeaderMargin(parseFloat(cachedHeaderMargin || '0.07'));
-        setFooterMargin(parseFloat(cachedFooterMargin || '0.07'));
-        setLeftMargin(parseFloat(cachedLeftMargin || '0.07'));
-        setRightMargin(parseFloat(cachedRightMargin || '0.07'));
-        setTTSProvider(inferredProvider || 'custom-openai');
-        const finalModel = cachedTTSModel || (inferredProvider === 'openai' ? 'tts-1' : inferredProvider === 'deepinfra' ? 'hexgrad/Kokoro-82M' : 'kokoro');
-        setTTSModel(finalModel);
-        setTTSInstructions(cachedTTSInstructions || '');
-
-        // Restore voice for current provider-model if available in savedVoices
-        const voiceKey = getVoiceKey(inferredProvider || 'custom-openai', finalModel);
-        const restoredVoice = parsedSavedVoices[voiceKey] || '';
-        setVoice(restoredVoice);
-
-        // Only save non-sensitive settings by default
-        if (!cachedViewType) {
-          await setItem('viewType', 'single');
-        }
-        if (cachedSkipBlank === null) {
-          await setItem('skipBlank', 'true');
-        }
-        if (cachedEpubTheme === null) {
-          await setItem('epubTheme', 'false');
-        }
-        if (cachedHeaderMargin === null) await setItem('headerMargin', '0.07');
-        if (cachedFooterMargin === null) await setItem('footerMargin', '0.07');
-        if (cachedLeftMargin === null) await setItem('leftMargin', '0.0');
-        if (cachedRightMargin === null) await setItem('rightMargin', '0.0');
-        if (cachedTTSProvider === null && inferredProvider) {
-          await setItem('ttsProvider', inferredProvider);
-        } else if (cachedTTSProvider === null) {
-          await setItem('ttsProvider', 'custom-openai');
-        }
-        if (cachedTTSModel === null) {
-          const defaultModel = inferredProvider === 'openai' ? 'tts-1' : inferredProvider === 'deepinfra' ? 'hexgrad/Kokoro-82M' : 'kokoro';
-          await setItem('ttsModel', defaultModel);
-        }
-        if (cachedTTSInstructions === null) {
-          await setItem('ttsInstructions', '');
-        }
-        if (!cachedVoiceSpeed) {
-          await setItem('voiceSpeed', '1');
-        }
-        if (!cachedAudioPlayerSpeed) {
-          await setItem('audioPlayerSpeed', '1');
-        }
-        if (!cachedSavedVoices) {
-          await setItem('savedVoices', JSON.stringify({}));
-        }
-        // Always ensure voice is not stored standalone - only in savedVoices
-        await removeItem('voice');
-        
       } catch (error) {
-        console.error('Error initializing:', error);
+        console.error('Error initializing Dexie:', error);
       } finally {
         setIsLoading(false);
       }
@@ -249,6 +65,45 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     initializeDB();
   }, []);
 
+  const appConfig = useLiveQuery(
+    async () => {
+      if (!isDBReady) return null;
+      const row = await db['app-config'].get('singleton');
+      return row ?? null;
+    },
+    [isDBReady],
+    null,
+  );
+
+  const config: AppConfigValues | null = useMemo(() => {
+    if (!appConfig) return null;
+    const { id, ...rest } = appConfig;
+    void id;
+    return rest;
+  }, [appConfig]);
+
+  // Destructure for convenience and to match context shape
+  const {
+    apiKey,
+    baseUrl,
+    viewType,
+    voiceSpeed,
+    audioPlayerSpeed,
+    voice,
+    skipBlank,
+    epubTheme,
+    headerMargin,
+    footerMargin,
+    leftMargin,
+    rightMargin,
+    ttsProvider,
+    ttsModel,
+    ttsInstructions,
+    savedVoices,
+    smartSentenceSplitting,
+  pdfHighlightEnabled,
+  } = config || APP_CONFIG_DEFAULTS;
+
   /**
    * Updates multiple configuration values simultaneously
    * Only saves API credentials if they are explicitly set
@@ -256,27 +111,14 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   const updateConfig = async (newConfig: Partial<{ apiKey: string; baseUrl: string; viewType: ViewType }>) => {
     try {
       setIsLoading(true);
-      if (newConfig.apiKey !== undefined && newConfig.apiKey !== '') {
-        // Only save API key to IndexedDB if it's different from env default
-        await setItem('apiKey', newConfig.apiKey!);
-        setApiKey(newConfig.apiKey!);
+      const updates: Partial<AppConfigRow> = {};
+      if (newConfig.apiKey !== undefined) {
+        updates.apiKey = newConfig.apiKey;
       }
-      if (newConfig.baseUrl !== undefined && newConfig.baseUrl !== '') {
-        // Only save base URL to IndexedDB if it's different from env default
-        await setItem('baseUrl', newConfig.baseUrl!);
-        setBaseUrl(newConfig.baseUrl!);
+      if (newConfig.baseUrl !== undefined) {
+        updates.baseUrl = newConfig.baseUrl;
       }
-
-      // Delete completely if '' is passed
-      if (newConfig.apiKey === '') {
-        await removeItem('apiKey');
-        setApiKey('');
-      }
-      if (newConfig.baseUrl === '') {
-        await removeItem('baseUrl');
-        setBaseUrl('');
-      }
-      
+      await updateAppConfig(updates);
     } catch (error) {
       console.error('Error updating config:', error);
       throw error;
@@ -288,9 +130,9 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   /**
    * Updates a single configuration value by key
    * @param {K} key - The configuration key to update
-   * @param {ConfigValues[K]} value - The new value for the configuration
+   * @param {AppConfigValues[K]} value - The new value for the configuration
    */
-  const updateConfigKey = async <K extends keyof ConfigValues>(key: K, value: ConfigValues[K]) => {
+  const updateConfigKey = async <K extends keyof AppConfigValues>(key: K, value: AppConfigValues[K]) => {
     try {
       setIsLoading(true);
       
@@ -298,80 +140,35 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
       if (key === 'voice') {
         const voiceKey = getVoiceKey(ttsProvider, ttsModel);
         const updatedSavedVoices = { ...savedVoices, [voiceKey]: value as string };
-        setSavedVoices(updatedSavedVoices);
-        await setItem('savedVoices', JSON.stringify(updatedSavedVoices));
-        setVoice(value as string);
+        await updateAppConfig({
+          savedVoices: updatedSavedVoices,
+          voice: value as string,
+        });
       }
       // Special handling for provider/model changes - restore saved voice if available
       else if (key === 'ttsProvider' || key === 'ttsModel') {
         const newProvider = key === 'ttsProvider' ? (value as string) : ttsProvider;
         const newModel = key === 'ttsModel' ? (value as string) : ttsModel;
         const voiceKey = getVoiceKey(newProvider, newModel);
-        
-        // Update provider or model
-        await setItem(key, value.toString());
-        if (key === 'ttsProvider') {
-          setTTSProvider(value as string);
-        } else {
-          setTTSModel(value as string);
-        }
-        
-        // Restore voice for this provider-model combination if it exists
-        const restoredVoice = savedVoices[voiceKey];
-        if (restoredVoice) {
-          setVoice(restoredVoice);
-        } else {
-          // Clear voice so TTSContext will use first available
-          setVoice('');
-        }
+        const restoredVoice = savedVoices[voiceKey] || '';
+        await updateAppConfig({
+          [key]: value as AppConfigValues[keyof AppConfigValues],
+          voice: restoredVoice,
+        } as Partial<AppConfigRow>);
       }
       else if (key === 'savedVoices') {
-        setSavedVoices(value as SavedVoices);
-        await setItem('savedVoices', JSON.stringify(value));
+        const newSavedVoices = value as SavedVoices;
+        await updateAppConfig({
+          savedVoices: newSavedVoices,
+        });
       }
       else {
-        await setItem(key, value.toString());
-        switch (key) {
-          case 'apiKey':
-            setApiKey(value as string);
-            break;
-          case 'baseUrl':
-            setBaseUrl(value as string);
-            break;
-          case 'viewType':
-            setViewType(value as ViewType);
-            break;
-          case 'voiceSpeed':
-            setVoiceSpeed(value as number);
-            break;
-          case 'audioPlayerSpeed':
-            setAudioPlayerSpeed(value as number);
-            break;
-          case 'skipBlank':
-            setSkipBlank(value as boolean);
-            break;
-          case 'epubTheme':
-            setEpubTheme(value as boolean);
-            break;
-          case 'headerMargin':
-            setHeaderMargin(value as number);
-            break;
-          case 'footerMargin':
-            setFooterMargin(value as number);
-            break;
-          case 'leftMargin':
-            setLeftMargin(value as number);
-            break;
-          case 'rightMargin':
-            setRightMargin(value as number);
-            break;
-          case 'ttsInstructions':
-            setTTSInstructions(value as string);
-            break;
-        }
+        await updateAppConfig({
+          [key]: value as AppConfigValues[keyof AppConfigValues],
+        } as Partial<AppConfigRow>);
       }
     } catch (error) {
-      console.error(`Error updating config key ${key}:`, error);
+      console.error(`Error updating config key ${String(key)}:`, error);
       throw error;
     } finally {
       setIsLoading(false);
@@ -388,6 +185,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
       voice,
       skipBlank,
       epubTheme,
+      smartSentenceSplitting,
       headerMargin,
       footerMargin,
       leftMargin,
@@ -399,7 +197,8 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
       updateConfig,
       updateConfigKey,
       isLoading,
-      isDBReady
+      isDBReady,
+      pdfHighlightEnabled
     }}>
       {children}
     </ConfigContext.Provider>

@@ -2,12 +2,12 @@
 
 import { RefObject, useCallback, useState, useEffect, useRef } from 'react';
 import { Document, Page } from 'react-pdf';
+import type { Dest } from 'react-pdf/src/shared/types.js';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 import { DocumentSkeleton } from '@/components/DocumentSkeleton';
 import { useTTS } from '@/contexts/TTSContext';
 import { usePDF } from '@/contexts/PDFContext';
-import TTSPlayer from '@/components/player/TTSPlayer';
 import { useConfig } from '@/contexts/ConfigContext';
 import { usePDFResize } from '@/hooks/pdf/usePDFResize';
 
@@ -15,9 +15,9 @@ interface PDFViewerProps {
   zoomLevel: number;
 }
 
-interface OnItemClickArgs {
+interface PDFOnLinkClickArgs {
   pageNumber?: number;
-  dest?: unknown;
+  dest?: Dest;
 }
 
 export function PDFViewer({ zoomLevel }: PDFViewerProps) {
@@ -26,13 +26,11 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
   const { containerWidth } = usePDFResize(containerRef);
 
   // Config context
-  const { viewType } = useConfig();
+  const { viewType, pdfHighlightEnabled } = useConfig();
 
   // TTS context
   const {
     currentSentence,
-    stopAndPlayFromIndex,
-    isProcessing,
     skipToLocation,
   } = useTTS();
 
@@ -40,60 +38,12 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
   const {
     highlightPattern,
     clearHighlights,
-    handleTextClick,
     onDocumentLoadSuccess,
     currDocData,
     currDocPages,
     currDocText,
     currDocPage,
   } = usePDF();
-
-  // Add static styles once during component initialization
-  const styleElement = document.createElement('style');
-  styleElement.textContent = `
-    .react-pdf__Page__textContent span {
-      cursor: pointer;
-      transition: background-color 0.2s ease;
-    }
-    .react-pdf__Page__textContent span:hover {
-      background-color: rgba(255, 255, 0, 0.2) !important;
-    }
-  `;
-  document.head.appendChild(styleElement);
-
-  // Cleanup styles when component unmounts
-  useEffect(() => {
-    return () => {
-      styleElement.remove();
-    };
-  }, [styleElement]);
-
-  useEffect(() => {
-    /*
-     * Sets up click event listeners for text selection in the PDF.
-     * Cleans up by removing the event listener when component unmounts.
-     * 
-     * Dependencies:
-     * - pdfText: Re-run when the extracted text content changes
-     * - handleTextClick: Function from context that could change
-     * - stopAndPlayFromIndex: Function from context that could change
-     */
-    const container = containerRef.current;
-    if (!container) return;
-    if (!currDocText) return;
-
-    const handleClick = (event: MouseEvent) => handleTextClick(
-      event,
-      currDocText,
-      containerRef as RefObject<HTMLDivElement>,
-      stopAndPlayFromIndex,
-      isProcessing
-    );
-    container.addEventListener('click', handleClick);
-    return () => {
-      container.removeEventListener('click', handleClick);
-    };
-  }, [currDocText, handleTextClick, stopAndPlayFromIndex, isProcessing]);
 
   useEffect(() => {
     /*
@@ -106,7 +56,11 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
      * - highlightPattern: Function from context that could change
      * - clearHighlights: Function from context that could change
      */
-    if (!currDocText) return;
+
+    if (!currDocText || !pdfHighlightEnabled) {
+      clearHighlights();
+      return;
+    }
 
     const highlightTimeout = setTimeout(() => {
       if (containerRef.current) {
@@ -118,7 +72,7 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
       clearTimeout(highlightTimeout);
       clearHighlights();
     };
-  }, [currDocText, currentSentence, highlightPattern, clearHighlights]);
+  }, [currDocText, currentSentence, highlightPattern, clearHighlights, pdfHighlightEnabled]);
 
   // Add page dimensions state
   const [pageWidth, setPageWidth] = useState<number>(595); // default A4 width
@@ -135,7 +89,7 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
   // Modify scale calculation to be more efficient
   const calculateScale = useCallback((width = pageWidth, height = pageHeight): number => {
     const margin = viewType === 'dual' ? 48 : 24; // adjust margin based on view type
-    const containerHeight = window.innerHeight - 100;
+    const containerHeight = (containerRef.current?.clientHeight ?? window.innerHeight);
     const targetWidth = viewType === 'dual'
       ? (containerWidth - margin) / 2 // divide by 2 for dual pages
       : containerWidth - margin;
@@ -165,7 +119,7 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
   }, [calculateScale]);
 
   return (
-    <div ref={containerRef} className="flex flex-col items-center overflow-auto max-h-[calc(100vh-100px)] w-full px-6">
+    <div ref={containerRef} className="flex flex-col items-center overflow-auto w-full px-6 h-full">
       <Document
         loading={<DocumentSkeleton />}
         noData={<DocumentSkeleton />}
@@ -173,12 +127,12 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
         onLoadSuccess={(pdf) => {
           onDocumentLoadSuccess(pdf);
         }}
-        onItemClick={(args: OnItemClickArgs) => {
+        onItemClick={(args: PDFOnLinkClickArgs) => {
           if (args?.pageNumber) {
             skipToLocation(args.pageNumber, true);
           } else if (args?.dest) {
-            const destArray = Array.isArray(args.dest) ? args.dest : [];
-            const pageNum = typeof destArray[0] === 'number' ? destArray[0] + 1 : undefined;
+            const destArray = args.dest as Array<number> || [];
+            const pageNum = destArray[0] + 1 || null;
             if (pageNum) {
               skipToLocation(pageNum, true);
             }
@@ -240,10 +194,6 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
           )}
         </div>
       </Document>
-      <TTSPlayer 
-        currentPage={currDocPage}
-        numPages={currDocPages}
-      />
     </div>
   );
 }

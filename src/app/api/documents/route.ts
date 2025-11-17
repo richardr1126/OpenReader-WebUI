@@ -1,6 +1,7 @@
 import { writeFile, readFile, readdir, mkdir, unlink } from 'fs/promises';
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
+import type { BaseDocument, SyncedDocument } from '@/types/documents';
 
 const DOCS_DIR = path.join(process.cwd(), 'docstore');
 
@@ -17,9 +18,10 @@ export async function POST(req: NextRequest) {
   try {
     await ensureDocsDir();
     const data = await req.json();
+    const documents = data.documents as SyncedDocument[];
     
     // Save document metadata and content
-    for (const doc of data.documents) {
+    for (const doc of documents) {
       const docPath = path.join(DOCS_DIR, `${doc.id}.json`);
       const contentPath = path.join(DOCS_DIR, `${doc.id}.${doc.type}`);
       
@@ -49,7 +51,7 @@ export async function POST(req: NextRequest) {
 export async function GET() {
   try {
     await ensureDocsDir();
-    const documents = [];
+    const documents: SyncedDocument[] = [];
     
     const files = await readdir(DOCS_DIR);
     const jsonFiles = files.filter(file => file.endsWith('.json'));
@@ -58,7 +60,7 @@ export async function GET() {
       const docPath = path.join(DOCS_DIR, file);
       
       try {
-        const metadata = JSON.parse(await readFile(docPath, 'utf8'));
+        const metadata = JSON.parse(await readFile(docPath, 'utf8')) as BaseDocument;
         const contentPath = path.join(DOCS_DIR, `${metadata.id}.${metadata.type}`);
         const content = await readFile(contentPath);
         

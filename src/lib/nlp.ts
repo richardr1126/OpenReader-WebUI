@@ -7,7 +7,7 @@
 
 import nlp from 'compromise';
 
-const MAX_BLOCK_LENGTH = 300;
+const MAX_BLOCK_LENGTH = 450;
 
 /**
  * Preprocesses text for audio generation by cleaning up various text artifacts
@@ -42,11 +42,14 @@ export const splitIntoSentences = (text: string): string[] => {
     const doc = nlp(cleanedText);
     const rawSentences = doc.sentences().out('array') as string[];
     
+    // Merge multi-sentence dialogue enclosed in quotes into single items
+    const mergedSentences = mergeQuotedDialogue(rawSentences);
+
     let currentBlock = '';
 
-    for (const sentence of rawSentences) {
+    for (const sentence of mergedSentences) {
       const trimmedSentence = sentence.trim();
-      
+
       if (currentBlock && (currentBlock.length + trimmedSentence.length + 1) > MAX_BLOCK_LENGTH) {
         blocks.push(currentBlock.trim());
         currentBlock = trimmedSentence;
@@ -76,13 +79,8 @@ export const processTextToSentences = (text: string): string[] => {
     return [];
   }
 
-  if (text.length <= MAX_BLOCK_LENGTH) {
-    // Single sentence preprocessing
-    const cleanedText = preprocessSentenceForAudio(text);
-    return [cleanedText];
-  }
-
-  // Full text splitting into sentences
+  // Always use the full splitting logic so we consistently respect
+  // sentence boundaries and quoted dialogue, even for shorter texts.
   return splitIntoSentences(text);
 };
 
@@ -151,3 +149,71 @@ export const processTextWithMapping = (text: string): {
     sentenceMapping
   };
 }; 
+// Helper functions to merge quoted dialogue across sentences
+const countDoubleQuotes = (s: string): number => {
+  const matches = s.match(/["“”]/g);
+  return matches ? matches.length : 0;
+};
+
+// Replace the old curly single-quote counter and standalone-straight counter with a unified, context-aware counter
+const countNonApostropheSingleQuotes = (s: string): number => {
+  let count = 0;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === "'" || ch === '‘' || ch === '’') {
+      const prev = i > 0 ? s[i - 1] : '';
+      const next = i + 1 < s.length ? s[i + 1] : '';
+      const isPrevAlphaNum = /[A-Za-z0-9]/.test(prev);
+      const isNextAlphaNum = /[A-Za-z0-9]/.test(next);
+      // Treat as a real quote mark only when it's not clearly an apostrophe
+      // between two alphanumeric characters (e.g., don't, WizardLM’s).
+      if (!(isPrevAlphaNum && isNextAlphaNum)) {
+        count++;
+      }
+    }
+  }
+  return count;
+};
+
+const mergeQuotedDialogue = (rawSentences: string[]): string[] => {
+  const result: string[] = [];
+  let buffer = '';
+  let insideDouble = false;
+  let insideSingle = false;
+
+  for (const s of rawSentences) {
+    const t = s.trim();
+    const dblCount = countDoubleQuotes(t);
+    // Use the new context-aware single-quote counter so curly apostrophes
+    // inside words don't incorrectly toggle quote state and merge large
+    // regions of plain prose into one block.
+    const singleCount = countNonApostropheSingleQuotes(t);
+
+    if (insideDouble || insideSingle) {
+      buffer = buffer ? `${buffer} ${t}` : t;
+    } else {
+      // Start buffering if this sentence opens an unclosed quote
+      if ((dblCount % 2 === 1) || (singleCount % 2 === 1)) {
+        buffer = t;
+      } else {
+        result.push(t);
+      }
+    }
+
+    // Toggle quote states after processing this sentence
+    if (dblCount % 2 === 1) insideDouble = !insideDouble;
+    if (singleCount % 2 === 1) insideSingle = !insideSingle;
+
+    // If all open quotes are closed, flush buffer
+    if (!(insideDouble || insideSingle) && buffer) {
+      result.push(buffer);
+      buffer = '';
+    }
+  }
+
+  if (buffer) {
+    result.push(buffer);
+  }
+
+  return result;
+};

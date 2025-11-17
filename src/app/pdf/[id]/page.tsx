@@ -7,9 +7,12 @@ import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { DocumentSkeleton } from '@/components/DocumentSkeleton';
 import { useTTS } from '@/contexts/TTSContext';
-import { Button } from '@headlessui/react';
 import { DocumentSettings } from '@/components/DocumentSettings';
-import { SettingsIcon } from '@/components/icons/Icons';
+import { SettingsIcon, DownloadIcon } from '@/components/icons/Icons';
+import { Header } from '@/components/Header';
+import { ZoomControl } from '@/components/ZoomControl';
+import { AudiobookExportModal } from '@/components/AudiobookExportModal';
+import TTSPlayer from '@/components/player/TTSPlayer';
 
 // Dynamic import for client-side rendering only
 const PDFViewer = dynamic(
@@ -22,12 +25,14 @@ const PDFViewer = dynamic(
 
 export default function PDFViewerPage() {
   const { id } = useParams();
-  const { setCurrentDocument, currDocName, clearCurrDoc } = usePDF();
+  const { setCurrentDocument, currDocName, clearCurrDoc, currDocPage, currDocPages, createFullAudioBook: createPDFAudioBook, regenerateChapter: regeneratePDFChapter } = usePDF();
   const { stop } = useTTS();
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [zoomLevel, setZoomLevel] = useState<number>(100);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isAudiobookModalOpen, setIsAudiobookModalOpen] = useState(false);
+  const [containerHeight, setContainerHeight] = useState<string>('auto');
 
   const loadDocument = useCallback(async () => {
     if (!isLoading) return; // Prevent calls when not loading new doc
@@ -51,8 +56,42 @@ export default function PDFViewerPage() {
     loadDocument();
   }, [loadDocument]);
 
+  // Compute available height = viewport - (header height + tts bar height)
+  useEffect(() => {
+    const compute = () => {
+      const header = document.querySelector('[data-app-header]') as HTMLElement | null;
+      const ttsbar = document.querySelector('[data-app-ttsbar]') as HTMLElement | null;
+      const headerH = header ? header.getBoundingClientRect().height : 0;
+      const ttsH = ttsbar ? ttsbar.getBoundingClientRect().height : 0;
+      const vh = window.innerHeight;
+      const h = Math.max(0, vh - headerH - ttsH);
+      setContainerHeight(`${h}px`);
+    };
+    compute();
+    window.addEventListener('resize', compute);
+    return () => window.removeEventListener('resize', compute);
+  }, []);
+
   const handleZoomIn = () => setZoomLevel(prev => Math.min(prev + 10, 300));
   const handleZoomOut = () => setZoomLevel(prev => Math.max(prev - 10, 50));
+
+  const handleGenerateAudiobook = useCallback(async (
+    onProgress: (progress: number) => void,
+    signal: AbortSignal,
+    onChapterComplete: (chapter: { index: number; title: string; duration?: number; status: 'pending' | 'generating' | 'completed' | 'error'; bookId?: string; format?: 'mp3' | 'm4b' }) => void,
+    format: 'mp3' | 'm4b'
+  ) => {
+    return createPDFAudioBook(onProgress, signal, onChapterComplete, id as string, format);
+  }, [createPDFAudioBook, id]);
+
+  const handleRegenerateChapter = useCallback(async (
+    chapterIndex: number,
+    bookId: string,
+    format: 'mp3' | 'm4b',
+    signal: AbortSignal
+  ) => {
+    return regeneratePDFChapter(chapterIndex, bookId, format, signal);
+  }, [regeneratePDFChapter]);
 
   if (error) {
     return (
@@ -61,7 +100,7 @@ export default function PDFViewerPage() {
         <Link
           href="/"
           onClick={() => {clearCurrDoc();}}
-          className="inline-flex items-center px-3 py-1 bg-base text-foreground rounded-lg hover:bg-offbase transition-colors"
+          className="inline-flex items-center px-3 py-1 bg-base text-foreground rounded-lg hover:bg-offbase transition-all duration-200 ease-in-out hover:scale-[1.04] hover:text-accent"
         >
           <svg className="w-4 h-4 mr-2 text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
@@ -74,56 +113,60 @@ export default function PDFViewerPage() {
 
   return (
     <>
-      <div className="p-2 pb-2 border-b border-offbase">
-        <div className="flex flex-wrap items-center justify-between">
+      <Header
+        left={
+          <Link
+            href="/"
+            onClick={() => clearCurrDoc()}
+            className="inline-flex items-center py-1 px-2 rounded-md border border-offbase bg-base text-foreground text-xs hover:bg-offbase transition-all duration-200 ease-in-out hover:scale-[1.04] hover:text-accent"
+            aria-label="Back to documents"
+          >
+            <svg className="w-3 h-3 mr-2" fill="currentColor" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+            </svg>
+            Documents
+          </Link>
+        }
+        title={isLoading ? 'Loading…' : (currDocName || '')}
+        right={
           <div className="flex items-center gap-2">
-            <Link
-              href="/"
-              onClick={() => {clearCurrDoc();}}
-              className="inline-flex items-center px-3 py-1 bg-base text-foreground rounded-lg hover:bg-offbase transform transition-transform duration-200 ease-in-out hover:scale-[1.02]"
+            <ZoomControl value={zoomLevel} onIncrease={handleZoomIn} onDecrease={handleZoomOut} />
+            <button
+              onClick={() => setIsAudiobookModalOpen(true)}
+              className="inline-flex items-center py-1 px-2 rounded-md border border-offbase bg-base text-foreground text-xs hover:bg-offbase transition-all duration-200 ease-in-out hover:scale-[1.09] hover:text-accent"
+              aria-label="Open audiobook export"
+              title="Export Audiobook"
             >
-              <svg className="w-4 h-4 mr-2" fill="currentColor" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-              </svg>
-              Documents
-            </Link>
-            <div className="bg-offbase px-2 py-0.5 rounded-full flex items-center gap-2">
-              <Button
-                onClick={handleZoomOut}
-                className="text-xs transform transition-transform duration-200 ease-in-out hover:scale-[1.45] hover:font-semibold hover:text-accent"
-                aria-label="Zoom out"
-              >
-                －
-              </Button>
-              <span className="text-xs">{zoomLevel}%</span>
-              <Button
-                onClick={handleZoomIn}
-                className="text-xs transform transition-transform duration-200 ease-in-out hover:scale-[1.45] hover:font-semibold hover:text-accent"
-                aria-label="Zoom in"
-              >
-                ＋
-              </Button>
-            </div>
-            <Button
+              <DownloadIcon className="w-4 h-4 transform transition-transform duration-200 ease-in-out hover:scale-[1.09] hover:text-accent" />
+            </button>
+            <button
               onClick={() => setIsSettingsOpen(true)}
-              className="rounded-full p-1 text-foreground hover:bg-offbase transform transition-transform duration-200 ease-in-out hover:scale-[1.1] hover:text-accent"
-              aria-label="View Settings"
+              className="inline-flex items-center py-1 px-2 rounded-md border border-offbase bg-base text-foreground text-xs hover:bg-offbase transition-all duration-200 ease-in-out hover:scale-[1.09] hover:text-accent"
+              aria-label="Open settings"
             >
-              <SettingsIcon className="w-5 h-5 hover:animate-spin-slow" />
-            </Button>
+              <SettingsIcon className="w-4 h-4 transform transition-transform duration-200 ease-in-out hover:scale-[1.09] hover:rotate-45 hover:text-accent" />
+            </button>
           </div>
-          <h1 className="ml-2 mr-2 text-md font-semibold text-foreground truncate">
-            {isLoading ? 'Loading...' : currDocName}
-          </h1>
-        </div>
+        }
+      />
+      <div className="overflow-hidden" style={{ height: containerHeight }}>
+        {isLoading ? (
+          <div className="p-4">
+            <DocumentSkeleton />
+          </div>
+        ) : (
+          <PDFViewer zoomLevel={zoomLevel} />
+        )}
       </div>
-      {isLoading ? (
-        <div className="p-4">
-          <DocumentSkeleton />
-        </div>
-      ) : (
-        <PDFViewer zoomLevel={zoomLevel} />
-      )}
+      <AudiobookExportModal
+        isOpen={isAudiobookModalOpen}
+        setIsOpen={setIsAudiobookModalOpen}
+        documentType="pdf"
+        documentId={id as string}
+        onGenerateAudiobook={handleGenerateAudiobook}
+        onRegenerateChapter={handleRegenerateChapter}
+      />
+      <TTSPlayer currentPage={currDocPage} numPages={currDocPages} />
       <DocumentSettings isOpen={isSettingsOpen} setIsOpen={setIsSettingsOpen} />
     </>
   );

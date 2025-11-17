@@ -31,8 +31,8 @@ export default function TTSPlayer({ currentPage, numPages }: {
   } = useTTS();
 
   return (
-    <div className={`fixed bottom-4 left-1/2 transform -translate-x-1/2 z-49 transition-opacity duration-300`}>
-      <div className="bg-base dark:bg-base rounded-full shadow-lg px-3 sm:px-4 py-0.5 sm:py-1 flex items-center space-x-0.5 sm:space-x-1 relative scale-90 sm:scale-100 border border-offbase">
+    <div className="sticky bottom-0 z-30 w-full border-t border-offbase bg-base" data-app-ttsbar>
+      <div className="px-2 md:px-3 pt-1 pb-1.5 flex items-center justify-center gap-1 min-h-10">
         {/* Speed control */}
         <SpeedControl 
           setSpeedAndRestart={setSpeedAndRestart} 
@@ -51,29 +51,29 @@ export default function TTSPlayer({ currentPage, numPages }: {
         {/* Playback Controls */}
         <Button
           onClick={skipBackward}
-          className="relative p-2 rounded-full text-foreground hover:bg-offbase data-[hover]:bg-offbase data-[active]:bg-offbase/80 transition-colors duration-200 focus:outline-none disabled:opacity-50"
+          className="relative p-1.5 rounded-md text-foreground hover:bg-offbase transition-all duration-200 focus:outline-none disabled:opacity-50 h-8 w-8 flex items-center justify-center transform ease-in-out hover:scale-[1.09] hover:text-accent"
           aria-label="Skip backward"
           disabled={isProcessing}
         >
-          {isProcessing ? <LoadingSpinner /> : <SkipBackwardIcon />}
+          {isProcessing ? <LoadingSpinner /> : <SkipBackwardIcon className="w-5 h-5" />}
         </Button>
 
         <Button
           onClick={togglePlay}
-          className="relative p-2 rounded-full text-foreground hover:bg-offbase data-[hover]:bg-offbase data-[active]:bg-offbase/80 transition-colors duration-200 focus:outline-none"
+          className="relative p-1.5 rounded-md text-foreground hover:bg-offbase transition-all duration-200 focus:outline-none h-8 w-8 flex items-center justify-center transform ease-in-out hover:scale-[1.09] hover:text-accent"
           aria-label={isPlaying ? 'Pause' : 'Play'}
           disabled={isProcessing}
         >
-          {isPlaying ? <PauseIcon /> : <PlayIcon />}
+          {isPlaying ? <PauseIcon className="w-5 h-5" /> : <PlayIcon className="w-5 h-5" />}
         </Button>
 
         <Button
           onClick={skipForward}
-          className="relative p-2 rounded-full text-foreground hover:bg-offbase data-[hover]:bg-offbase data-[active]:bg-offbase/80 transition-colors duration-200 focus:outline-none disabled:opacity-50"
+          className="relative p-1.5 rounded-md text-foreground hover:bg-offbase transition-all duration-200 focus:outline-none disabled:opacity-50 h-8 w-8 flex items-center justify-center transform ease-in-out hover:scale-[1.09] hover:text-accent"
           aria-label="Skip forward"
           disabled={isProcessing}
         >
-          {isProcessing ? <LoadingSpinner /> : <SkipForwardIcon />}
+          {isProcessing ? <LoadingSpinner /> : <SkipForwardIcon className="w-5 h-5" />}
         </Button>
 
         {/* Voice control */}

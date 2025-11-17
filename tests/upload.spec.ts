@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { uploadFile, uploadAndDisplay, setupTest } from './helpers';
+import { uploadFile, uploadAndDisplay, setupTest, expectDocumentListed, uploadFiles, ensureDocumentsListed, clickDocumentLink, expectViewerForFile } from './helpers';
 
 test.describe('Document Upload Tests', () => {
   test.beforeEach(async ({ page }) => {
@@ -8,12 +8,17 @@ test.describe('Document Upload Tests', () => {
 
   test('uploads a PDF document', async ({ page }) => {
     await uploadFile(page, 'sample.pdf');
-    await expect(page.getByText('sample.pdf')).toBeVisible({ timeout: 10000 });
+    await expectDocumentListed(page, 'sample.pdf');
   });
 
   test('uploads an EPUB document', async ({ page }) => {
     await uploadFile(page, 'sample.epub');
-    await expect(page.getByText('sample.epub')).toBeVisible({ timeout: 10000 });
+    await expectDocumentListed(page, 'sample.epub');
+  });
+
+  test('uploads a TXT document', async ({ page }) => {
+    await uploadFile(page, 'sample.txt');
+    await expectDocumentListed(page, 'sample.txt');
   });
 
   test('uploads and converts a DOCX document', async ({ page }) => {
@@ -24,20 +29,101 @@ test.describe('Document Upload Tests', () => {
     // Should see the converting message
     await expect(page.getByText('Converting DOCX to PDF...')).toBeVisible();
     // After conversion, should see the PDF with the same name
-    await expect(page.getByText('sample.pdf')).toBeVisible({ timeout: 15000 });
+    await expectDocumentListed(page, 'sample.pdf');
   });
 
   test('displays a PDF document', async ({ page }) => {
     await uploadAndDisplay(page, 'sample.pdf');
-    await expect(page.locator('.react-pdf__Document')).toBeVisible();
+    await expectViewerForFile(page, 'sample.pdf');
+    // Additional content checks specific to the sample PDF
     await expect(page.locator('.react-pdf__Page')).toBeVisible();
     await expect(page.getByText('Sample PDF')).toBeVisible();
   });
 
   test('displays an EPUB document', async ({ page }) => {
     await uploadAndDisplay(page, 'sample.epub');
-    await expect(page.locator('.epub-container')).toBeVisible({ timeout: 10000 });
+    await expectViewerForFile(page, 'sample.epub');
+    // Keep navigation button assertions
     await expect(page.getByRole('button', { name: '‹' })).toBeVisible();
     await expect(page.getByRole('button', { name: '›' })).toBeVisible();
+  });
+
+  test('displays a DOCX document as PDF after conversion', async ({ page }) => {
+    await uploadAndDisplay(page, 'sample.docx');
+    await expectViewerForFile(page, 'sample.docx'); // DOCX converts to PDF
+    // Keep specific content checks
+    await expect(page.locator('.react-pdf__Page')).toBeVisible();
+    await expect(page.getByText('Demonstration of DOCX')).toBeVisible();
+  });
+
+  test('displays a TXT document', async ({ page }) => {
+    await uploadAndDisplay(page, 'sample.txt');
+    await expectViewerForFile(page, 'sample.txt');
+    await expect(page.getByText('Lorem ipsum dolor sit amet')).toBeVisible();
+  });
+
+  test('uploads PDF/EPUB/TXT and opens correct viewer for each', async ({ page }) => {
+    // Upload multiple files
+    await uploadFiles(page, 'sample.pdf', 'sample.epub', 'sample.txt');
+
+    // Verify all uploaded files appear in the list
+    await ensureDocumentsListed(page, ['sample.pdf', 'sample.epub', 'sample.txt']);
+
+    // PDF navigation and viewer
+    await clickDocumentLink(page, 'sample.pdf');
+    await expectViewerForFile(page, 'sample.pdf');
+    await page.goBack();
+    await expect(page.getByText('Local Documents')).toBeVisible({ timeout: 10000 });
+
+    // EPUB navigation and viewer
+    await clickDocumentLink(page, 'sample.epub');
+    await expectViewerForFile(page, 'sample.epub');
+    await page.goBack();
+    await expect(page.getByText('Local Documents')).toBeVisible({ timeout: 10000 });
+
+    // TXT navigation and viewer (HTML viewer)
+    await clickDocumentLink(page, 'sample.txt');
+    await expectViewerForFile(page, 'sample.txt');
+  });
+
+  test('renders Markdown via ReactMarkdown and keeps TXT preformatted', async ({ page }) => {
+    // Upload MD and TXT
+    await uploadFiles(page, 'sample.md', 'sample.txt');
+    await ensureDocumentsListed(page, ['sample.md', 'sample.txt']);
+
+    // Open MD and verify rendered markdown
+    await clickDocumentLink(page, 'sample.md');
+    await expectViewerForFile(page, 'sample.md');
+    const mdContainer = page.locator('.html-container');
+    await expect(mdContainer).toBeVisible();
+    // Should have prose classes (not monospace)
+    await expect(mdContainer).toHaveClass(/prose/);
+    await expect(mdContainer).not.toHaveClass(/font-mono/);
+    // Heading and link rendered
+    await expect(page.getByRole('heading', { name: 'Sample Markdown' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'OpenAI' })).toBeVisible();
+
+    // Go back and open TXT, verify monospace preformatted
+    await page.goBack();
+    await clickDocumentLink(page, 'sample.txt');
+    await expectViewerForFile(page, 'sample.txt');
+    const txtContainer = page.locator('.html-container');
+    await expect(txtContainer).toHaveClass(/font-mono/);
+  });
+
+  test('unsupported file type is ignored and no new document is created', async ({ page }) => {
+    // Capture initial list of names
+    const before = await page.locator('.document-link').count();
+
+    // Try to upload unsupported file
+    await uploadFile(page, 'unsupported.xyz');
+    // Give the UI a moment just in case
+    await page.waitForTimeout(500);
+
+    // Assert no new document entries created
+    const after = await page.locator('.document-link').count();
+    expect(after).toBe(before);
+    // Also ensure no link with that filename exists
+    await expect(page.getByRole('link', { name: /unsupported\.xyz/i })).toHaveCount(0);
   });
 });
