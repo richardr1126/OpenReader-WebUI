@@ -9,26 +9,25 @@
 
 # 📄🔊 OpenReader WebUI
 
-OpenReader WebUI is an open source text to speech document reader web app built using Next.js, offering a TTS read along experience with narration for EPUB, PDF, TXT, MD, and DOCX documents. It supports multiple TTS providers including OpenAI, Deepinfra, and custom OpenAI-compatible endpoints like [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI) and [Orpheus-FastAPI](https://github.com/Lex-au/Orpheus-FastAPI)
+OpenReader WebUI is an open source text to speech document reader web app built using Next.js, offering a TTS read along experience with narration for **EPUB, PDF, TXT, MD, and DOCX documents**. It supports multiple TTS providers including OpenAI, Deepinfra, and custom OpenAI-compatible endpoints like [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI) and [Orpheus-FastAPI](https://github.com/Lex-au/Orpheus-FastAPI)
 
-- 🧠 **(New) Smart Sentence-Aware Narration**: EPUB and PDF playback use shared NLP (compromise) and smart sentence continuation to merge sentences that span pages/chapters for smoother TTS trying to prevent hard cuts at page breaks
-- 🎧 **(New) Reliable Audiobook Export**: Create and export audiobooks from PDF and EPUB files **(in m4b or mp3 format using ffmpeg)** with resumable, chapter/page-based export and per-chapter regeneration
-- 🎯 **(New) Multi-Provider TTS Support**: 
-  - **Deepinfra**: Kokoro-82M, Orpheus-3B, Sesame-1B models with extensive voice libraries
-  - **OpenAI API ($$)**: tts-1, tts-1-hd, gpt-4o-mini-tts models
-  - **Kokoro-FastAPI**: Self-hosted OpenAI-compatible TTS API server supporting Kokoro-82M and multi-voice combinations (like `af_heart+bf_emma`)
-  - **Orpheus-FastAPI**: Self-hosted OpenAI-compatible TTS API server supporting Orpheus-3B
-  - And other Custom OpenAI-compatible endpoints with a `/v1/audio/voices` endpoint
-- 🚀 **(New) Optimized TTS Pipeline**: Next.js TTS backend with in-memory LRU audio cache, ETag-aware responses, and in-flight request de-duplication for faster repeat playback
-- 💾 **Local-First Architecture**: IndexedDB browser storage for documents and settings (now using Dexie.js)
-- 🛜 **Optional Server-side documents**: Manually upload documents to the Next.js backend (and Docker `docstore`) for all users to download
-- 📖 **Read Along Experience**: Follow along with real-time highlighted text as the TTS narrates PDF files, using an overlay-based highlighter, per-sentence navigation, and skip controls
-- 📄 **Document formats**: EPUB, PDF, TXT, MD, DOCX (with libreoffice installed, plus hardened DOCX→PDF conversion for better reliability)
-- 🎨 **Customizable Experience**: 
-  - 🔑 Select TTS provider (OpenAI, Deepinfra, or Custom OpenAI-compatible)
-  - 🔐 Set TTS API base URL and optional API key
+- 🧠 *(New)* **Smart Sentence-Aware Narration** merges sentences across pages/chapters for smoother TTS
+- 🎧 *(New)* **Reliable Audiobook Export** in **m4b/mp3**, with resumable, chapter-based export and regeneration
+- 🎯 *(New)* **Multi-Provider TTS Support**
+  - [**Kokoro-FastAPI**](https://github.com/remsky/Kokoro-FastAPI): Supporting multi-voice combinations (like `af_heart+af_bella`)
+  - [**Orpheus-FastAPI**](https://github.com/Lex-au/Orpheus-FastAPI)
+  - **Custom OpenAI-compatible**: Any TTS API with `/v1/audio/voices` and `/v1/audio/speech` endpoints
+  - **Cloud TTS Providers (requiring API keys)**
+    - [**Deepinfra**](https://deepinfra.com/models/text-to-speech): Kokoro-82M + models with support for cloned voices and more
+    - [**OpenAI API ($$)**](https://platform.openai.com/docs/pricing#transcription-and-speech): tts-1, tts-1-hd, and gpt-4o-mini-tts w/ instructions
+- 🚀 *(New)* **Optimized Next.js TTS Proxy** with audio caching and optimized repeat playback
+- 💾 *(Updated)* **Local-First Architecture** stores documents and more in-browser with Dexie.js
+- 📖 *(Updated)* **Read Along Experience** providing real-time PDF text highlighting during playback
+- 🛜 **Optional Server-side documents** using backend `/docstore` for all users
+- 🎨 **Customizable Experience**
   - 🎨 Multiple app theme options
-  - And more...
+  - ⚙️ Various TTS and document handling settings
+  - And more ...
 
 <details>
 <summary>
@@ -121,8 +120,6 @@ docker pull ghcr.io/richardr1126/openreader-webui:latest
 
 You can run the Kokoro TTS API server directly with Docker. **We are not responsible for issues with [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI).** For best performance, use an NVIDIA GPU (for GPU version) or Apple Silicon (for CPU version).
 
-> **Note:** When using these, set the `API_BASE` env var to `http://host.docker.internal:8880/v1` or `http://kokoro-tts:8880/v1`.
-> You can also use the example `docker-compose.yml` in `examples/docker-compose.yml` if you prefer Docker Compose.
 
 <details>
 <summary>
@@ -146,6 +143,8 @@ docker run -d \
   ghcr.io/remsky/kokoro-fastapi-cpu:v0.2.4
 ```
 
+> Adjust environment variables as needed for your hardware and use case.
+
 </details>
 
 <details>
@@ -168,12 +167,14 @@ docker run -d \
   ghcr.io/remsky/kokoro-fastapi-gpu:v0.2.4
 ```
 
+> Adjust environment variables as needed for your hardware and use case.
+
 </details>
 
-> **Note:**
-> - These commands are for running the Kokoro TTS API server only. For issues or support, see the [Kokoro-FastAPI repository](https://github.com/remsky/Kokoro-FastAPI).
+> **⚠️ Important Notes:**
+> - For best results, set the `-e API_BASE=` for OpenReader's Docker to `http://kokoro-tts:8880/v1`
+> - For issues or support, see the [Kokoro-FastAPI repository](https://github.com/remsky/Kokoro-FastAPI).
 > - The GPU version requires NVIDIA Docker support and works best with NVIDIA GPUs. The CPU version works best on Apple Silicon or modern x86 CPUs.
-> - Adjust environment variables as needed for your hardware and use case.
 
 ## Local Development Installation
 
