@@ -15,6 +15,8 @@ import { ZoomControl } from '@/components/ZoomControl';
 import { AudiobookExportModal } from '@/components/AudiobookExportModal';
 import { DownloadIcon } from '@/components/icons/Icons';
 
+const isDev = process.env.NEXT_PUBLIC_NODE_ENV !== 'production' || process.env.NODE_ENV == null;
+
 export default function EPUBPage() {
   const { id } = useParams();
   const { setCurrentDocument, currDocName, clearCurrDoc, createFullAudioBook: createEPUBAudioBook, regenerateChapter: regenerateEPUBChapter } = useEPUB();
@@ -143,14 +145,16 @@ export default function EPUBPage() {
               min={0}
               max={100}
             />
-            <button
-              onClick={() => setIsAudiobookModalOpen(true)}
-              className="inline-flex items-center py-1 px-2 rounded-md border border-offbase bg-base text-foreground text-xs hover:bg-offbase transition-all duration-200 ease-in-out hover:scale-[1.09] hover:text-accent"
-              aria-label="Open audiobook export"
-              title="Export Audiobook"
-            >
-              <DownloadIcon className="w-4 h-4 transform transition-transform duration-200 ease-in-out hover:scale-[1.09] hover:text-accent" />
-            </button>
+            {isDev && (
+              <button
+                onClick={() => setIsAudiobookModalOpen(true)}
+                className="inline-flex items-center py-1 px-2 rounded-md border border-offbase bg-base text-foreground text-xs hover:bg-offbase transition-all duration-200 ease-in-out hover:scale-[1.09] hover:text-accent"
+                aria-label="Open audiobook export"
+                title="Export Audiobook"
+              >
+                <DownloadIcon className="w-4 h-4 transform transition-transform duration-200 ease-in-out hover:scale-[1.09] hover:text-accent" />
+              </button>
+            )}
             <button
               onClick={() => setIsSettingsOpen(true)}
               className="inline-flex items-center py-1 px-2 rounded-md border border-offbase bg-base text-foreground text-xs hover:bg-offbase transition-all duration-200 ease-in-out hover:scale-[1.09] hover:text-accent"
@@ -172,14 +176,16 @@ export default function EPUBPage() {
           </div>
         )}
       </div>
-      <AudiobookExportModal
-        isOpen={isAudiobookModalOpen}
-        setIsOpen={setIsAudiobookModalOpen}
-        documentType="epub"
-        documentId={id as string}
-        onGenerateAudiobook={handleGenerateAudiobook}
-        onRegenerateChapter={handleRegenerateChapter}
-      />
+      {isDev && (
+        <AudiobookExportModal
+          isOpen={isAudiobookModalOpen}
+          setIsOpen={setIsAudiobookModalOpen}
+          documentType="epub"
+          documentId={id as string}
+          onGenerateAudiobook={handleGenerateAudiobook}
+          onRegenerateChapter={handleRegenerateChapter}
+        />
+      )}
       <TTSPlayer />
       <DocumentSettings epub isOpen={isSettingsOpen} setIsOpen={setIsSettingsOpen} />
     </>
