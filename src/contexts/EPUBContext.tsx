@@ -8,7 +8,8 @@ import {
   useCallback,
   useMemo,
   useRef,
-  RefObject
+  RefObject,
+  useEffect
 } from 'react';
 
 import type { NavItem } from 'epubjs';
@@ -41,6 +42,8 @@ interface EPUBContextType {
   handleLocationChanged: (location: string | number) => void;
   setRendition: (rendition: Rendition) => void;
   isAudioCombining: boolean;
+  highlightPattern: (text: string) => void;
+  clearHighlights: () => void;
 }
 
 const EPUBContext = createContext<EPUBContextType | undefined>(undefined);
@@ -139,6 +142,7 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
     ttsModel,
     ttsInstructions,
     smartSentenceSplitting,
+    epubHighlightEnabled,
   } = useConfig();
   // Current document state
   const [currDocData, setCurrDocData] = useState<ArrayBuffer>();
@@ -154,6 +158,8 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
   const isEPUBSetOnce = useRef(false);
   // Should pause ref
   const shouldPauseRef = useRef(true);
+  // Track current highlight CFI for removal
+  const currentHighlightCfi = useRef<string | null>(null);
 
   /**
    * Clears all current document state and stops any active TTS
@@ -307,7 +313,7 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
 
       // Get TOC for chapter titles
       const chapters = tocRef.current || [];
-      
+
       // If we have a bookId, check for existing chapters to determine which indices already exist
       const existingIndices = new Set<number>();
       if (bookId) {
@@ -329,21 +335,21 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
           console.error('Error checking existing chapters:', error);
         }
       }
-      
+
       // Create a map of section hrefs to their chapter titles
       const sectionTitleMap = new Map<string, string>();
-      
+
       // First, loop through all chapters to create the mapping
       for (const chapter of chapters) {
         if (!chapter.href) continue;
         const chapterBaseHref = chapter.href.split('#')[0];
         const chapterTitle = chapter.label.trim();
-        
+
         // For each chapter, find all matching sections
         for (const section of sections) {
           const sectionHref = section.href;
           const sectionBaseHref = sectionHref.split('#')[0];
-          
+
           // If this section matches this chapter, map it
           if (sectionHref === chapter.href || sectionBaseHref === chapterBaseHref) {
             sectionTitleMap.set(sectionHref, chapterTitle);
@@ -426,7 +432,7 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
 
           // Get the chapter title from our pre-computed map
           let chapterTitle = sectionTitleMap.get(section.href);
-          
+
           // If no chapter title found, use index-based naming
           if (!chapterTitle) {
             chapterTitle = `Chapter ${i + 1}`;
@@ -466,7 +472,7 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
           }
 
           const { bookId: returnedBookId, chapterIndex, duration } = await convertResponse.json();
-          
+
           if (!bookId) {
             bookId = returnedBookId;
           }
@@ -495,7 +501,7 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
             throw new Error('Audiobook generation cancelled');
           }
           console.error('Error processing section:', error);
-          
+
           // Notify about error
           if (onChapterComplete) {
             onChapterComplete({
@@ -537,7 +543,7 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
 
       const section = sections[chapterIndex];
       const trimmedText = section.text.trim();
-      
+
       if (!trimmedText) {
         throw new Error('No text content found in chapter');
       }
@@ -545,16 +551,16 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
       // Get TOC for chapter title
       const chapters = tocRef.current || [];
       const sectionTitleMap = new Map<string, string>();
-      
+
       for (const chapter of chapters) {
         if (!chapter.href) continue;
         const chapterBaseHref = chapter.href.split('#')[0];
         const chapterTitle = chapter.label.trim();
-        
+
         for (const sect of sections) {
           const sectionHref = sect.href;
           const sectionBaseHref = sectionHref.split('#')[0];
-          
+
           if (sectionHref === chapter.href || sectionBaseHref === chapterBaseHref) {
             sectionTitleMap.set(sectionHref, chapterTitle);
           }
@@ -705,6 +711,69 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
     }
   }, [id, skipToLocation, extractPageText, setIsEPUB]);
 
+  const clearHighlights = useCallback(() => {
+    if (renditionRef.current) {
+      if (currentHighlightCfi.current) {
+        renditionRef.current.annotations.remove(currentHighlightCfi.current, 'highlight');
+        currentHighlightCfi.current = null;
+      }
+    }
+  }, []);
+
+  const highlightPattern = useCallback(async (text: string) => {
+    if (!renditionRef.current) return;
+
+    // Clear existing highlights first
+    clearHighlights();
+
+    if (!epubHighlightEnabled) return;
+
+    if (!text || !text.trim()) return;
+
+    try {
+      const contents = renditionRef.current.getContents();
+      const contentsArray = Array.isArray(contents) ? contents : [contents];
+      for (const content of contentsArray) {
+        const win = content.window;
+        if (win && win.find) {
+          // Reset selection to start of document to ensure full search
+          const sel = win.getSelection();
+          sel?.removeAllRanges();
+
+          // Attempt to find the text
+          // window.find(aString, aCaseSensitive, aBackwards, aWrapAround, aWholeWord, aSearchInFrames, aShowDialog);
+          // Note: We search for the trimmed text.
+          if (win.find(text.trim(), false, false, true, false, false, false)) {
+            const range = sel?.getRangeAt(0);
+            if (range) {
+              const cfi = content.cfiFromRange(range);
+              // Store CFI for removal
+              currentHighlightCfi.current = cfi;
+              renditionRef.current.annotations.add('highlight', cfi, {}, (e: MouseEvent) => {
+                console.log('Highlight clicked', e);
+              }, '', { fill: 'grey', 'fill-opacity': '0.4', 'mix-blend-mode': 'multiply' });
+
+              // Clear the browser selection so it doesn't look like user selected text
+              sel?.removeAllRanges();
+              return; // Stop after first match
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error highlighting text:', error);
+    }
+  }, [clearHighlights, epubHighlightEnabled]);
+
+  // Effect to clear highlights when disabled
+  useEffect(() => {
+    if (!epubHighlightEnabled) {
+      clearHighlights();
+    }
+  }, [epubHighlightEnabled, clearHighlights]);
+
+
+
   // Context value memoization
   const contextValue = useMemo(
     () => ({
@@ -725,6 +794,8 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
       handleLocationChanged,
       setRendition,
       isAudioCombining,
+      highlightPattern,
+      clearHighlights,
     }),
     [
       setCurrentDocument,
@@ -740,6 +811,8 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
       handleLocationChanged,
       setRendition,
       isAudioCombining,
+      highlightPattern,
+      clearHighlights,
     ]
   );
 

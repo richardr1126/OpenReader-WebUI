@@ -34,6 +34,7 @@ export function DocumentSettings({ isOpen, setIsOpen, epub, html }: {
     rightMargin,
     updateConfigKey,
     pdfHighlightEnabled,
+    epubHighlightEnabled,
   } = useConfig();
   const { createFullAudioBook: createEPUBAudioBook, regenerateChapter: regenerateEPUBChapter } = useEPUB();
   const { createFullAudioBook: createPDFAudioBook, regenerateChapter: regeneratePDFChapter } = usePDF();
@@ -110,7 +111,7 @@ export function DocumentSettings({ isOpen, setIsOpen, epub, html }: {
         onGenerateAudiobook={handleGenerateAudiobook}
         onRegenerateChapter={handleRegenerateChapter}
       />
-      
+
       <Transition appear show={isOpen} as={Fragment}>
         <Dialog as="div" className="relative z-50" onClose={() => setIsOpen(false)}>
           <TransitionChild
@@ -340,6 +341,22 @@ export function DocumentSettings({ isOpen, setIsOpen, epub, html }: {
                         </label>
                         <p className="text-sm text-muted pl-6">
                           Show visual highlighting in the PDF viewer while TTS is reading.
+                        </p>
+                      </div>
+                    )}
+                    {epub && (
+                      <div className="space-y-1">
+                        <label className="flex items-center space-x-2">
+                          <input
+                            type="checkbox"
+                            checked={epubHighlightEnabled}
+                            onChange={(e) => updateConfigKey('epubHighlightEnabled', e.target.checked)}
+                            className="form-checkbox h-4 w-4 text-accent rounded border-muted"
+                          />
+                          <span className="text-sm font-medium text-foreground">Highlight text during playback</span>
+                        </label>
+                        <p className="text-sm text-muted pl-6">
+                          Show visual highlighting in the EPUB viewer while TTS is reading.
                         </p>
                       </div>
                     )}
