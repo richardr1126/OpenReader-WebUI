@@ -688,7 +688,7 @@ export function AudiobookExportModal({
                         {chapters.length === 0 && !isGenerating && !isLoadingExisting && (
                           <div className="text-center py-8">
                             <p className="text-sm text-muted">
-                              Click &quot;Start Generation&quot; to begin creating your audiobook.
+                              Generation will use current TTS playback options.
                               <br />
                               Individual chapters will appear here as they are generated.
                             </p>

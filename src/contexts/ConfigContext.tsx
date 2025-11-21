@@ -32,6 +32,7 @@ interface ConfigContextType {
   isLoading: boolean;
   isDBReady: boolean;
   pdfHighlightEnabled: boolean;
+  epubHighlightEnabled: boolean;
 }
 
 const ConfigContext = createContext<ConfigContextType | undefined>(undefined);
@@ -79,7 +80,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     if (!appConfig) return null;
     const { id, ...rest } = appConfig;
     void id;
-    return rest;
+    return { ...APP_CONFIG_DEFAULTS, ...rest };
   }, [appConfig]);
 
   // Destructure for convenience and to match context shape
@@ -101,7 +102,8 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     ttsInstructions,
     savedVoices,
     smartSentenceSplitting,
-  pdfHighlightEnabled,
+    pdfHighlightEnabled,
+    epubHighlightEnabled,
   } = config || APP_CONFIG_DEFAULTS;
 
   /**
@@ -135,7 +137,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   const updateConfigKey = async <K extends keyof AppConfigValues>(key: K, value: AppConfigValues[K]) => {
     try {
       setIsLoading(true);
-      
+
       // Special handling for voice - only update savedVoices
       if (key === 'voice') {
         const voiceKey = getVoiceKey(ttsProvider, ttsModel);
@@ -198,7 +200,8 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
       updateConfigKey,
       isLoading,
       isDBReady,
-      pdfHighlightEnabled
+      pdfHighlightEnabled,
+      epubHighlightEnabled
     }}>
       {children}
     </ConfigContext.Provider>

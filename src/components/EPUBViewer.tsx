@@ -19,18 +19,20 @@ interface EPUBViewerProps {
 }
 
 export function EPUBViewer({ className = '' }: EPUBViewerProps) {
-  const { 
-    currDocData, 
-    currDocName, 
-    locationRef, 
-    handleLocationChanged, 
-    bookRef, 
-    renditionRef, 
-    tocRef, 
+  const {
+    currDocData,
+    currDocName,
+    locationRef,
+    handleLocationChanged,
+    bookRef,
+    renditionRef,
+    tocRef,
     setRendition,
-    extractPageText 
+    extractPageText,
+    highlightPattern,
+    clearHighlights
   } = useEPUB();
-  const { registerLocationChangeHandler, pause } = useTTS();
+  const { registerLocationChangeHandler, pause, currentSentence } = useTTS();
   const { epubTheme } = useConfig();
   const { updateTheme } = useEPUBTheme(epubTheme, renditionRef.current);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -42,7 +44,7 @@ export function EPUBViewer({ className = '' }: EPUBViewerProps) {
       // Only extract text when we have dimensions, ensuring the resize is complete
       extractPageText(bookRef.current, renditionRef.current, true);
       setIsResizing(false);
-      
+
       return true;
     } else {
       return false;
@@ -58,6 +60,15 @@ export function EPUBViewer({ className = '' }: EPUBViewerProps) {
   useEffect(() => {
     registerLocationChangeHandler(handleLocationChanged);
   }, [registerLocationChangeHandler, handleLocationChanged]);
+
+  // Handle highlighting
+  useEffect(() => {
+    if (currentSentence) {
+      highlightPattern(currentSentence);
+    } else {
+      clearHighlights();
+    }
+  }, [currentSentence, highlightPattern, clearHighlights]);
 
   if (!currDocData) {
     return <DocumentSkeleton />;

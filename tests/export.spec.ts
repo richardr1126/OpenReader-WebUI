@@ -89,7 +89,7 @@ async function resetAudiobookIfPresent(page: Page) {
   await confirmReset.click();
 
   await expect(
-    page.getByText(/Click "Start Generation" to begin creating your audiobook/i)
+    page.getByText(/Generation will use current TTS playback options./i)
   ).toBeVisible({ timeout: 60_000 });
 }
 
@@ -267,7 +267,7 @@ test.describe('Audiobook export', () => {
 
     // After reset, the hint text for starting generation should re-appear
     await expect(
-      page.getByText(/Click "Start Generation" to begin creating your audiobook/i)
+      page.getByText(/Generation will use current TTS playback options./i)
     ).toBeVisible({ timeout: 60_000 });
 
     // Backend should report no existing chapters for this bookId
