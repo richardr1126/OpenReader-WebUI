@@ -22,6 +22,7 @@ export function EPUBViewer({ className = '' }: EPUBViewerProps) {
   const { 
     currDocData, 
     currDocName, 
+    currDocText,     // added for Fork1
     locationRef, 
     handleLocationChanged, 
     bookRef, 
@@ -59,7 +60,7 @@ export function EPUBViewer({ className = '' }: EPUBViewerProps) {
     registerLocationChangeHandler(handleLocationChanged);
   }, [registerLocationChangeHandler, handleLocationChanged]);
 
-  if (!currDocData) {
+    if (!currDocData) {
     return <DocumentSkeleton />;
   }
 
@@ -82,6 +83,23 @@ export function EPUBViewer({ className = '' }: EPUBViewerProps) {
           }}
         />
       </div>
+
+      {/* Plain-text mirror of the current EPUB page for tools like Migaku */}
+      {currDocText && (
+        <div
+          id="migaku-epub-plain-text"
+          aria-hidden="true"
+          style={{
+            position: 'absolute',
+            left: '-99999px',
+            top: '0',
+            whiteSpace: 'pre-wrap',
+            pointerEvents: 'none',
+          }}
+        >
+          {currDocText}
+        </div>
+      )}
     </div>
   );
 }
