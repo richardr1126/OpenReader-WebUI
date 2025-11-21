@@ -22,7 +22,7 @@ OpenReader WebUI is an open source text to speech document reader web app built 
     - [**OpenAI API ($$)**](https://platform.openai.com/docs/pricing#transcription-and-speech): tts-1, tts-1-hd, and gpt-4o-mini-tts w/ instructions
 - 🚀 *(New)* **Optimized Next.js TTS Proxy** with audio caching and optimized repeat playback
 - 💾 *(Updated)* **Local-First Architecture** stores documents and more in-browser with Dexie.js
-- 📖 *(Updated)* **Read Along Experience** providing real-time PDF text highlighting during playback
+- 📖 *(Updated)* **Read Along Experience** providing real-time text highlighting during playback (PDF/EPUB)
 - 🛜 **Optional Server-side documents** using backend `/docstore` for all users
 - 🎨 **Customizable Experience**
   - 🎨 Multiple app theme options
