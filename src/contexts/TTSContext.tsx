@@ -246,6 +246,22 @@ const mergeContinuation = (text: string, nextText: string): TTSSmartMergeResult 
   };
 };
 
+const buildCacheKey = (
+  sentence: string,
+  voice: string,
+  speed: number,
+  provider: string,
+  model: string,
+) => {
+  return [
+    `provider=${provider || ''}`,
+    `model=${model || ''}`,
+    `voice=${voice || ''}`,
+    `speed=${Number.isFinite(speed) ? speed : ''}`,
+    `text=${sentence}`,
+  ].join('|');
+};
+
 // Create the context
 const TTSContext = createContext<TTSContextType | undefined>(undefined);
 
@@ -745,7 +761,14 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     // served from the local cache.
     const ensureAlignment = (arrayBuffer: TTSAudioBuffer) => {
       if (!alignmentEnabledForCurrentDoc) return;
-      if (sentenceAlignmentCacheRef.current.has(sentence)) return;
+      const alignmentKey = buildCacheKey(
+        sentence,
+        voice,
+        speed,
+        configTTSProvider,
+        ttsModel,
+      );
+      if (sentenceAlignmentCacheRef.current.has(alignmentKey)) return;
 
       try {
         const audioBytes = Array.from(new Uint8Array(arrayBuffer));
@@ -760,7 +783,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
               return;
             }
             const alignment = data.alignments[0] as TTSSentenceAlignment;
-            sentenceAlignmentCacheRef.current.set(sentence, alignment);
+            sentenceAlignmentCacheRef.current.set(alignmentKey, alignment);
 
             const currentSentence = sentencesRef.current[currentIndexRef.current];
             if (currentSentence === sentence) {
@@ -776,8 +799,16 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
       }
     };
 
+    const audioCacheKey = buildCacheKey(
+      sentence,
+      voice,
+      speed,
+      configTTSProvider,
+      ttsModel,
+    );
+
     // Check if the audio is already cached
-    const cachedAudio = audioCache.get(sentence);
+    const cachedAudio = audioCache.get(audioCacheKey);
     if (cachedAudio) {
       console.log('Using cached audio for sentence:', sentence.substring(0, 20));
       // If we have audio but no alignment (e.g. after a
@@ -829,7 +860,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
       activeAbortControllers.current.delete(controller);
 
       // Cache the array buffer
-      audioCache.set(sentence, arrayBuffer);
+      audioCache.set(audioCacheKey, arrayBuffer);
 
       // Fire-and-forget alignment request; do not block audio playback
       ensureAlignment(arrayBuffer);
@@ -1084,7 +1115,14 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
 
   const playAudio = useCallback(async () => {
     const sentence = sentences[currentIndex];
-    const cachedAlignment = sentenceAlignmentCacheRef.current.get(sentence);
+    const alignmentKey = buildCacheKey(
+      sentence,
+      voice,
+      speed,
+      configTTSProvider,
+      ttsModel,
+    );
+    const cachedAlignment = sentenceAlignmentCacheRef.current.get(alignmentKey);
     if (cachedAlignment) {
       setCurrentSentenceAlignment(cachedAlignment);
       setCurrentWordIndex(null);
@@ -1097,7 +1135,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     if (howl) {
       howl.play();
     }
-  }, [sentences, currentIndex, playSentenceWithHowl]);
+  }, [sentences, currentIndex, playSentenceWithHowl, voice, speed, configTTSProvider, ttsModel]);
 
   // Place useBackgroundState after playAudio is defined
   const isBackgrounded = useBackgroundState({
@@ -1153,16 +1191,26 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
   const preloadNextAudio = useCallback(async () => {
     try {
       const nextSentence = sentences[currentIndex + 1];
-      if (nextSentence && !audioCache.has(nextSentence) && !preloadRequests.current.has(nextSentence)) {
+      if (nextSentence) {
+        const nextKey = buildCacheKey(
+          nextSentence,
+          voice,
+          speed,
+          configTTSProvider,
+          ttsModel,
+        );
+
+        if (!audioCache.has(nextKey) && !preloadRequests.current.has(nextSentence)) {
         // Start preloading but don't wait for it to complete
-        processSentence(nextSentence, true).catch(error => {
-          console.error('Error preloading next sentence:', error);
-        });
+          processSentence(nextSentence, true).catch(error => {
+            console.error('Error preloading next sentence:', error);
+          });
+        }
       }
     } catch (error) {
       console.error('Error initiating preload:', error);
     }
-  }, [currentIndex, sentences, audioCache, processSentence]);
+  }, [currentIndex, sentences, audioCache, processSentence, voice, speed, configTTSProvider, ttsModel]);
 
   /**
    * Main Playback Driver
@@ -1251,9 +1299,8 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     abortAudio(true); // Clear pending requests since speed changed
     setActiveHowl(null);
 
-    // Update speed, clear cache, and config
+    // Update speed and config
     setSpeed(newSpeed);
-    audioCache.clear();
 
     // Update config after state changes
     updateConfigKey('voiceSpeed', newSpeed).then(() => {
@@ -1263,7 +1310,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
         setIsPlaying(true);
       }
     });
-  }, [abortAudio, updateConfigKey, audioCache, isPlaying]);
+  }, [abortAudio, updateConfigKey, isPlaying]);
 
   /**
    * Sets the voice and restarts the playback
@@ -1284,9 +1331,8 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     abortAudio(true); // Clear pending requests since voice changed
     setActiveHowl(null);
 
-    // Update voice, clear cache, and config
+    // Update voice and config
     setVoice(newVoice);
-    audioCache.clear();
 
     // Update config after state changes
     updateConfigKey('voice', newVoice).then(() => {
@@ -1296,7 +1342,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
         setIsPlaying(true);
       }
     });
-  }, [abortAudio, updateConfigKey, audioCache, isPlaying]);
+  }, [abortAudio, updateConfigKey, isPlaying]);
 
   /**
    * Sets the audio player speed and restarts the playback
