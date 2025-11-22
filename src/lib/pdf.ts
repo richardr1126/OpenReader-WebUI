@@ -2,10 +2,10 @@ import { pdfjs } from 'react-pdf';
 import type { TextItem } from 'pdfjs-dist/types/src/display/api';
 import { type PDFDocumentProxy, TextLayer } from 'pdfjs-dist';
 import "core-js/proposals/promise-with-resolvers";
-import { processTextToSentences } from '@/lib/nlp';
+import type { TTSSentenceAlignment } from '@/types/tts';
 import { CmpStr } from 'cmpstr';
 
-const cmp = CmpStr.create().setMetric( 'dice' ).setFlags( 'itw' );
+const cmp = CmpStr.create().setMetric('dice').setFlags('itw');
 
 // Worker coordination for offloading highlight token matching
 interface HighlightTokenMatchRequest {
@@ -141,12 +141,25 @@ try {
   console.error('Error patching TextLayer.render:', e);
 }
 
-interface TextMatch {
-  elements: HTMLElement[];
-  rating: number;
+type PDFToken = {
+  spanIndex: number;
+  textNode: Text;
   text: string;
-  lengthDiff: number;
-}
+  startOffset: number;
+  endOffset: number;
+};
+
+let lastSpanNodes: HTMLElement[] = [];
+let lastTokens: PDFToken[] = [];
+let lastSentenceTokenWindow: { start: number; end: number } | null = null;
+let lastSentencePattern: string | null = null;
+let lastSentenceWordToTokenMap: number[] | null = null;
+
+const normalizeWordForMatch = (text: string): string =>
+  text
+    .trim()
+    .replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, '')
+    .toLowerCase();
 
 // Text Processing functions
 export async function extractTextFromPDF(
@@ -279,50 +292,23 @@ export function clearHighlights() {
       element.parentElement.removeChild(element);
     }
   });
+  const wordOverlays = document.querySelectorAll('.pdf-word-highlight-overlay');
+  wordOverlays.forEach((node) => {
+    const element = node as HTMLElement;
+    if (element.parentElement) {
+      element.parentElement.removeChild(element);
+    }
+  });
 }
 
-export function findBestTextMatch(
-  elements: Array<{ element: HTMLElement; text: string }>,
-  targetText: string,
-  maxCombinedLength: number
-): TextMatch {
-  let bestMatch = {
-    elements: [] as HTMLElement[],
-    rating: 0,
-    text: '',
-    lengthDiff: Infinity,
-  };
-
-  const SPAN_SEARCH_LIMIT = 10;
-
-  for (let i = 0; i < elements.length; i++) {
-    let combinedText = '';
-    const currentElements = [];
-    for (let j = i; j < Math.min(i + SPAN_SEARCH_LIMIT, elements.length); j++) {
-      const node = elements[j];
-      const newText = combinedText ? `${combinedText} ${node.text}` : node.text;
-      if (newText.length > maxCombinedLength) break;
-
-      combinedText = newText;
-      currentElements.push(node.element);
-
-      const similarity = cmp.compare(combinedText, targetText);
-      const lengthDiff = Math.abs(combinedText.length - targetText.length);
-      const lengthPenalty = lengthDiff / targetText.length;
-      const adjustedRating = similarity * (1 - lengthPenalty * 0.5);
-
-      if (adjustedRating > bestMatch.rating) {
-        bestMatch = {
-          elements: [...currentElements],
-          rating: adjustedRating,
-          text: combinedText,
-          lengthDiff,
-        };
-      }
+export function clearWordHighlights() {
+  const wordOverlays = document.querySelectorAll('.pdf-word-highlight-overlay');
+  wordOverlays.forEach((node) => {
+    const element = node as HTMLElement;
+    if (element.parentElement) {
+      element.parentElement.removeChild(element);
     }
-  }
-
-  return bestMatch;
+  });
 }
 
 export function highlightPattern(
@@ -338,22 +324,18 @@ export function highlightPattern(
 
   const cleanPattern = pattern.trim().replace(/\s+/g, ' ');
   if (!cleanPattern) return;
+  lastSentencePattern = cleanPattern;
+  lastSentenceWordToTokenMap = null;
+  lastSentenceTokenWindow = null;
 
   const spanNodes = Array.from(
     container.querySelectorAll('.react-pdf__Page__textContent span')
   ) as HTMLElement[];
 
   if (!spanNodes.length) return;
+  lastSpanNodes = spanNodes;
 
-  type Token = {
-    spanIndex: number;
-    textNode: Text;
-    text: string;
-    startOffset: number;
-    endOffset: number;
-  };
-
-  const tokens: Token[] = [];
+  const tokens: PDFToken[] = [];
 
   spanNodes.forEach((span, spanIndex) => {
     const node = span.firstChild;
@@ -377,6 +359,7 @@ export function highlightPattern(
   });
 
   if (!tokens.length) return;
+  lastTokens = tokens;
 
   const patternLen = cleanPattern.length;
 
@@ -415,6 +398,11 @@ export function highlightPattern(
       bestLengthDiff < patternLen * 0.3 ? 0.3 : 0.5;
 
     if (hasTokenMatch && bestRating >= similarityThreshold) {
+      lastSentenceTokenWindow = {
+        start: bestStart,
+        end: bestEnd,
+      };
+
       const rangesBySpan = new Map<
         number,
         { startOffset: number; endOffset: number }
@@ -452,65 +440,6 @@ export function highlightPattern(
           span,
         });
       });
-    }
-
-    // Fallback: if token-level matching failed, use span-based fuzzy matching
-    if (!highlightRanges.length) {
-      const spanEntries = spanNodes
-        .map((node) => ({
-          element: node as HTMLElement,
-          text: (node.textContent || '').trim(),
-        }))
-        .filter((entry) => entry.text.length > 0);
-
-      const containerRect = container.getBoundingClientRect();
-      const visibleTop = container.scrollTop;
-      const visibleBottom = visibleTop + containerRect.height;
-      const bufferSize = containerRect.height;
-
-      const visibleNodes = spanEntries.filter(({ element }) => {
-        const rect = element.getBoundingClientRect();
-        const elementTop =
-          rect.top - containerRect.top + container.scrollTop;
-        return (
-          elementTop >= visibleTop - bufferSize &&
-          elementTop <= visibleBottom + bufferSize
-        );
-      });
-
-      let bestMatch = findBestTextMatch(
-        visibleNodes,
-        cleanPattern,
-        cleanPattern.length * 2
-      );
-
-      if (bestMatch.rating < 0.3) {
-        bestMatch = findBestTextMatch(
-          spanEntries,
-          cleanPattern,
-          cleanPattern.length * 2
-        );
-      }
-
-      const spanSimilarityThreshold =
-        bestMatch.lengthDiff < cleanPattern.length * 0.3 ? 0.3 : 0.5;
-
-      if (bestMatch.rating >= spanSimilarityThreshold) {
-        bestMatch.elements.forEach((element) => {
-          const node = element.firstChild;
-          if (!node || node.nodeType !== Node.TEXT_NODE) return;
-          const textNode = node as Text;
-          const content = textNode.textContent || '';
-          if (!content) return;
-
-          highlightRanges.push({
-            textNode,
-            startOffset: 0,
-            endOffset: content.length,
-            span: element,
-          });
-        });
-      }
     }
 
     if (!highlightRanges.length) return;
@@ -577,7 +506,7 @@ export function highlightPattern(
   runHighlightTokenMatch(cleanPattern, tokenTexts)
     .then((result) => {
       if (!result || result.bestStart === -1) {
-        // No worker result or no good match; rely on span-level fallback
+        // No worker result or no good match; nothing to highlight
         applyHighlightFromTokens(null);
       } else {
         applyHighlightFromTokens({
@@ -590,95 +519,199 @@ export function highlightPattern(
     })
     .catch((error) => {
       console.error(
-        'Error in PDF highlight worker, falling back to span-based matching:',
+        'Error in PDF highlight worker; no highlights applied:',
         error
       );
       applyHighlightFromTokens(null);
     });
 }
 
-// Text Click Handler
-export function handleTextClick(
-  event: MouseEvent,
-  pdfText: string,
-  containerRef: React.RefObject<HTMLDivElement>,
-  stopAndPlayFromIndex: (index: number) => void,
-  isProcessing: boolean,
-  enableHighlight = true
+export function highlightWordIndex(
+  alignment: TTSSentenceAlignment | undefined,
+  wordIndex: number | null | undefined,
+  sentence: string | null | undefined,
+  containerRef: React.RefObject<HTMLDivElement>
 ) {
-  if (isProcessing) return;
+  clearWordHighlights();
 
-  const target = event.target as HTMLElement;
-  if (!target.matches('.react-pdf__Page__textContent span')) return;
-
-  const parentElement = target.closest('.react-pdf__Page__textContent');
-  if (!parentElement) return;
-
-  const spans = Array.from(parentElement.querySelectorAll('span'));
-  const clickedIndex = spans.indexOf(target);
-  const contextWindow = 3;
-  const startIndex = Math.max(0, clickedIndex - contextWindow);
-  const endIndex = Math.min(spans.length - 1, clickedIndex + contextWindow);
-  const contextText = spans
-    .slice(startIndex, endIndex + 1)
-    .map((span) => span.textContent)
-    .join(' ')
-    .trim();
-
-  if (!contextText?.trim()) return;
-
-  const cleanContext = contextText.trim().replace(/\s+/g, ' ');
-
-  // Fast path when highlight overlays are disabled:
-  // avoid expensive span-level fuzzy matching and just map
-  // the clicked context to a sentence using cheap string checks.
-  if (!enableHighlight) {
-    const sentences = processTextToSentences(pdfText);
-    const idx = sentences.findIndex((sentence) => {
-      const cleanSentence = sentence.trim().replace(/\s+/g, ' ');
-      return (
-        cleanSentence.includes(cleanContext) ||
-        cleanContext.includes(cleanSentence)
-      );
-    });
-
-    if (idx !== -1) {
-      stopAndPlayFromIndex(idx);
-    }
+  if (!alignment) return;
+  if (wordIndex === null || wordIndex === undefined || wordIndex < 0) {
     return;
   }
 
-  const allText = Array.from(parentElement.querySelectorAll('span')).map((node) => ({
-    element: node as HTMLElement,
-    text: (node.textContent || '').trim(),
-  })).filter((node) => node.text.length > 0);
+  const words = alignment.words || [];
+  if (!words.length || wordIndex >= words.length) return;
 
-  const bestMatch = findBestTextMatch(allText, cleanContext, cleanContext.length * 2);
-  const similarityThreshold = bestMatch.lengthDiff < cleanContext.length * 0.3 ? 0.3 : 0.5;
+  const container = containerRef.current;
+  if (!container) return;
+  if (!lastSentenceTokenWindow) return;
+  if (!lastTokens.length || !lastSpanNodes.length) return;
 
-  if (bestMatch.rating >= similarityThreshold) {
-    const matchText = bestMatch.text;
-    // Use the same sentence processing logic as TTSContext for consistency
-    const sentences = processTextToSentences(pdfText);
-    console.log("sentences inside handleTextClick: %d", sentences.length)
-    let bestSentenceMatch = { sentence: '', rating: 0 };
+  const cleanSentence =
+    sentence && sentence.trim()
+      ? sentence.trim().replace(/\s+/g, ' ')
+      : null;
+  if (!cleanSentence || !lastSentencePattern) return;
+  if (cleanSentence !== lastSentencePattern) return;
 
-    for (const sentence of sentences) {
-      const rating = cmp.compare(matchText, sentence);
-      if (rating > bestSentenceMatch.rating) {
-        bestSentenceMatch = { sentence, rating };
-      }
+  const start = lastSentenceTokenWindow.start;
+  const end = lastSentenceTokenWindow.end;
+  if (end < start) return;
+
+  // Lazily build or refresh the mapping from alignment word
+  // indices to PDF token indices for this sentence window.
+  if (
+    !lastSentenceWordToTokenMap ||
+    lastSentenceWordToTokenMap.length !== words.length
+  ) {
+    const pdfFiltered: { tokenIndex: number; norm: string }[] = [];
+    for (let i = start; i <= end; i++) {
+      const norm = normalizeWordForMatch(lastTokens[i].text);
+      if (!norm) continue;
+      pdfFiltered.push({ tokenIndex: i, norm });
     }
 
-    if (bestSentenceMatch.rating >= 0.5) {
-      const sentenceIndex = sentences.findIndex((sentence) => sentence === bestSentenceMatch.sentence);
-      if (sentenceIndex !== -1) {
-        stopAndPlayFromIndex(sentenceIndex);
-        if (enableHighlight) {
-          highlightPattern(pdfText, bestSentenceMatch.sentence, containerRef);
+    const ttsFiltered: { wordIndex: number; norm: string }[] = [];
+    for (let i = 0; i < words.length; i++) {
+      const norm = normalizeWordForMatch(words[i].text);
+      if (!norm) continue;
+      ttsFiltered.push({ wordIndex: i, norm });
+    }
+
+    const wordToToken = new Array<number>(words.length).fill(-1);
+
+    const m = pdfFiltered.length;
+    const n = ttsFiltered.length;
+
+    if (m && n) {
+      const dp: number[][] = Array.from({ length: m + 1 }, () =>
+        new Array<number>(n + 1).fill(Number.POSITIVE_INFINITY)
+      );
+      const bt: number[][] = Array.from({ length: m + 1 }, () =>
+        new Array<number>(n + 1).fill(0)
+      ); // 0=diag,1=up,2=left
+
+      dp[0][0] = 0;
+      const GAP_COST = 0.7;
+
+      for (let i = 0; i <= m; i++) {
+        for (let j = 0; j <= n; j++) {
+          if (i > 0 && j > 0) {
+            const a = pdfFiltered[i - 1].norm;
+            const b = ttsFiltered[j - 1].norm;
+            const sim = cmp.compare(a, b);
+            const subCost = 1 - sim;
+            const cand = dp[i - 1][j - 1] + subCost;
+            if (cand < dp[i][j]) {
+              dp[i][j] = cand;
+              bt[i][j] = 0;
+            }
+          }
+          if (i > 0) {
+            const cand = dp[i - 1][j] + GAP_COST;
+            if (cand < dp[i][j]) {
+              dp[i][j] = cand;
+              bt[i][j] = 1;
+            }
+          }
+          if (j > 0) {
+            const cand = dp[i][j - 1] + GAP_COST;
+            if (cand < dp[i][j]) {
+              dp[i][j] = cand;
+              bt[i][j] = 2;
+            }
+          }
+        }
+      }
+
+      let i = m;
+      let j = n;
+      while (i > 0 || j > 0) {
+        const move = bt[i][j];
+        if (i > 0 && j > 0 && move === 0) {
+          const pdfIdx = pdfFiltered[i - 1].tokenIndex;
+          const ttsIdx = ttsFiltered[j - 1].wordIndex;
+          if (wordToToken[ttsIdx] === -1) {
+            wordToToken[ttsIdx] = pdfIdx;
+          }
+          i -= 1;
+          j -= 1;
+        } else if (i > 0 && (move === 1 || j === 0)) {
+          i -= 1;
+        } else if (j > 0 && (move === 2 || i === 0)) {
+          j -= 1;
+        } else {
+          break;
+        }
+      }
+
+      // Propagate nearest known mapping to fill gaps
+      let lastSeen = -1;
+      for (let k = 0; k < wordToToken.length; k++) {
+        if (wordToToken[k] !== -1) {
+          lastSeen = wordToToken[k];
+        } else if (lastSeen !== -1) {
+          wordToToken[k] = lastSeen;
+        }
+      }
+      let nextSeen = -1;
+      for (let k = wordToToken.length - 1; k >= 0; k--) {
+        if (wordToToken[k] !== -1) {
+          nextSeen = wordToToken[k];
+        } else if (nextSeen !== -1) {
+          wordToToken[k] = nextSeen;
         }
       }
     }
+
+    lastSentenceWordToTokenMap = wordToToken;
+  }
+
+  const mappedIndex =
+    lastSentenceWordToTokenMap && wordIndex < lastSentenceWordToTokenMap.length
+      ? lastSentenceWordToTokenMap[wordIndex]
+      : -1;
+
+  if (mappedIndex === -1) return;
+
+  const chosenTokenIndex = mappedIndex;
+
+  const token = lastTokens[chosenTokenIndex];
+  const span = lastSpanNodes[token.spanIndex];
+  if (!span) return;
+
+  const node = token.textNode;
+  if (!node || node.nodeType !== Node.TEXT_NODE) return;
+
+  try {
+    const range = document.createRange();
+    range.setStart(node, token.startOffset);
+    range.setEnd(node, token.endOffset);
+
+    const pageLayer = span.closest(
+      '.react-pdf__Page__textContent'
+    ) as HTMLElement | null;
+    if (!pageLayer) return;
+
+    const pageRect = pageLayer.getBoundingClientRect();
+    const rects = Array.from(range.getClientRects());
+
+    rects.forEach((rect) => {
+      const highlight = document.createElement('div');
+      highlight.className = 'pdf-word-highlight-overlay';
+      highlight.style.position = 'absolute';
+      highlight.style.backgroundColor = 'var(--accent)';
+      highlight.style.opacity = '0.4';
+      highlight.style.pointerEvents = 'none';
+      highlight.style.left = `${rect.left - pageRect.left}px`;
+      highlight.style.top = `${rect.top - pageRect.top}px`;
+      highlight.style.width = `${rect.width}px`;
+      highlight.style.height = `${rect.height}px`;
+      highlight.style.zIndex = '2';
+      pageLayer.appendChild(highlight);
+    });
+  } catch {
+    // Ignore range errors
   }
 }
 

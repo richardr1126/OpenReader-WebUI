@@ -1,0 +1,32 @@
+'use client';
+
+import { useState } from 'react';
+import { CopyIcon, CheckIcon } from '@/components/icons/Icons';
+
+export function CodeBlock({ children }: { children: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(children);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="relative group my-2">
+      <pre className="bg-background p-3 rounded-md overflow-x-auto text-xs text-left
+                      font-mono text-foreground border border-offbase">
+        <code>{children}</code>
+      </pre>
+      <button
+        onClick={handleCopy}
+        className="absolute top-2 right-2 p-1.5 rounded-md bg-base hover:bg-offbase hover:text-accent
+                  transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100
+                  hover:scale-[1.05]"
+        title="Copy to clipboard"
+      >
+        {copied ? <CheckIcon className="w-4 h-4" /> : <CopyIcon className="w-4 h-4" />}
+      </button>
+    </div>
+  );
+}

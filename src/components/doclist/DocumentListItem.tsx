@@ -15,6 +15,7 @@ interface DocumentListItemProps {
   onDragLeave?: () => void;
   onDrop?: (e: DragEvent, doc: DocumentListDocument) => void;
   isDropTarget?: boolean;
+  viewMode: 'list' | 'grid';
 }
 
 export function DocumentListItem({
@@ -27,6 +28,7 @@ export function DocumentListItem({
   onDragLeave,
   onDrop,
   isDropTarget = false,
+  viewMode,
 }: DocumentListItemProps) {
   const [loading, setLoading] = useState(false);
   const router = useRouter();
@@ -51,18 +53,18 @@ export function DocumentListItem({
       onDrop={(e) => allowDropTarget && onDrop?.(e, doc)}
       aria-busy={loading}
       className={`
-        w-full group
+        ${viewMode === 'grid' ? 'flex-auto min-w-[200px] max-w-full' : 'w-full'} group
         ${allowDropTarget && isDropTarget ? 'ring-2 ring-accent' : ''}
         ${loading ? 'prism-outline' : 'bg-base hover:bg-offbase'}
         border border-offbase rounded-md p-1
         transition-colors duration-150 relative
       `}
     >
-      <div className="flex items-center">
+      <div className="flex items-center w-full">
         <Link
           href={`/${doc.type}/${encodeURIComponent(doc.id)}`}
           draggable={false}
-          className="document-link flex items-center align-center gap-2 w-full truncate rounded-md py-0.5 px-0.5"
+          className="document-link flex items-center align-center gap-2 flex-1 min-w-0 rounded-md py-0.5 px-0.5"
           onClick={handleDocumentClick}
         >
           <div className="flex-shrink-0">

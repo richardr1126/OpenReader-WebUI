@@ -1,15 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { spawn } from 'child_process';
-import { writeFile, readFile, mkdir, unlink, readdir } from 'fs/promises';
+import { writeFile, readFile, mkdir, unlink, readdir, rm } from 'fs/promises';
 import { existsSync, createReadStream } from 'fs';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
+import type { TTSAudioBytes, TTSAudiobookFormat } from '@/types/tts';
 
 interface ConversionRequest {
   chapterTitle: string;
-  buffer: number[];
+  buffer: TTSAudioBytes;
   bookId?: string;
-  format?: 'mp3' | 'm4b';
+  format?: TTSAudiobookFormat;
   chapterIndex?: number;
 }
 
@@ -206,9 +207,12 @@ export async function POST(request: NextRequest) {
     await unlink(inputPath).catch(console.error);
 
     return NextResponse.json({ 
+      index: chapterIndex,
+      title: data.chapterTitle,
+      duration,
+      status: 'completed' as const,
       bookId,
-      chapterIndex,
-      duration
+      format
     });
 
   } catch (error) {
@@ -229,7 +233,7 @@ export async function POST(request: NextRequest) {
 export async function GET(request: NextRequest) {
   try {
     const bookId = request.nextUrl.searchParams.get('bookId');
-    const requestedFormat = request.nextUrl.searchParams.get('format') as 'mp3' | 'm4b' | null;
+    const requestedFormat = request.nextUrl.searchParams.get('format') as TTSAudiobookFormat | null;
     if (!bookId) {
       return NextResponse.json({ error: 'Missing bookId parameter' }, { status: 400 });
     }
@@ -378,4 +382,31 @@ function streamFile(filePath: string, format: string) {
       'Cache-Control': 'no-cache',
     },
   });
+}
+export async function DELETE(request: NextRequest) {
+  try {
+    const bookId = request.nextUrl.searchParams.get('bookId');
+    if (!bookId) {
+      return NextResponse.json({ error: 'Missing bookId parameter' }, { status: 400 });
+    }
+
+    const docstoreDir = join(process.cwd(), 'docstore');
+    const intermediateDir = join(docstoreDir, `${bookId}-audiobook`);
+
+    // If directory doesn't exist, consider it already reset
+    if (!existsSync(intermediateDir)) {
+      return NextResponse.json({ success: true, existed: false });
+    }
+
+    // Recursively delete the entire audiobook directory
+    await rm(intermediateDir, { recursive: true, force: true });
+
+    return NextResponse.json({ success: true, existed: true });
+  } catch (error) {
+    console.error('Error resetting audiobook:', error);
+    return NextResponse.json(
+      { error: 'Failed to reset audiobook' },
+      { status: 500 }
+    );
+  }
 }

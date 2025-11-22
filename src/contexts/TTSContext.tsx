@@ -36,7 +36,7 @@ import { useMediaSession } from '@/hooks/audio/useMediaSession';
 import { useAudioContext } from '@/hooks/audio/useAudioContext';
 import { getLastDocumentLocation, setLastDocumentLocation } from '@/lib/dexie';
 import { useBackgroundState } from '@/hooks/audio/useBackgroundState';
-import { withRetry } from '@/utils/audio';
+import { withRetry, generateTTS, alignAudio } from '@/lib/client';
 import { preprocessSentenceForAudio, processTextToSentences } from '@/lib/nlp';
 import { isKokoroModel } from '@/utils/voice';
 import type {
@@ -44,10 +44,14 @@ import type {
   TTSSmartMergeResult,
   TTSPageTurnEstimate,
   TTSPlaybackState,
+  TTSSentenceAlignment,
+  TTSAudioBuffer,
+} from '@/types/tts';
+import type {
   TTSRequestPayload,
   TTSRequestHeaders,
   TTSRetryOptions,
-} from '@/types/tts';
+} from '@/types/client';
 
 // Media globals
 declare global {
@@ -62,6 +66,10 @@ declare global {
 interface TTSContextType extends TTSPlaybackState {
   // Voice settings
   availableVoices: string[];
+
+  // Alignment metadata for the current sentence
+  currentSentenceAlignment?: TTSSentenceAlignment;
+  currentWordIndex?: number | null;
 
   // Control functions
   togglePlay: () => void;
@@ -238,6 +246,22 @@ const mergeContinuation = (text: string, nextText: string): TTSSmartMergeResult 
   };
 };
 
+const buildCacheKey = (
+  sentence: string,
+  voice: string,
+  speed: number,
+  provider: string,
+  model: string,
+) => {
+  return [
+    `provider=${provider || ''}`,
+    `model=${model || ''}`,
+    `voice=${voice || ''}`,
+    `speed=${Number.isFinite(speed) ? speed : ''}`,
+    `text=${sentence}`,
+  ].join('|');
+};
+
 // Create the context
 const TTSContext = createContext<TTSContextType | undefined>(undefined);
 
@@ -264,6 +288,10 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     updateConfigKey,
     skipBlank,
     smartSentenceSplitting,
+    pdfHighlightEnabled,
+    pdfWordHighlightEnabled,
+    epubHighlightEnabled,
+    epubWordHighlightEnabled,
   } = useConfig();
 
   // Audio and voice management hooks
@@ -331,6 +359,19 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
   const epubContinuationRef = useRef<string | null>(null);
   const pageTurnEstimateRef = useRef<TTSPageTurnEstimate | null>(null);
   const pageTurnTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sentenceAlignmentCacheRef = useRef<Map<string, TTSSentenceAlignment>>(new Map());
+  const [currentSentenceAlignment, setCurrentSentenceAlignment] = useState<TTSSentenceAlignment | undefined>();
+  const [currentWordIndex, setCurrentWordIndex] = useState<number | null>(null);
+  const sentencesRef = useRef<string[]>([]);
+  const currentIndexRef = useRef(0);
+
+  useEffect(() => {
+    sentencesRef.current = sentences;
+  }, [sentences]);
+
+  useEffect(() => {
+    currentIndexRef.current = currentIndex;
+  }, [currentIndex]);
 
   /**
    * Processes text into sentences using the shared NLP utility
@@ -370,6 +411,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
       clearTimeout(pageTurnTimeoutRef.current);
       pageTurnTimeoutRef.current = null;
     }
+    setCurrentWordIndex(null);
   }, [activeHowl]);
 
   /**
@@ -558,6 +600,11 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
           setCurrentIndex(0);
         }
 
+        // Reset alignment state whenever the text block changes
+        sentenceAlignmentCacheRef.current.clear();
+        setCurrentSentenceAlignment(undefined);
+        setCurrentWordIndex(null);
+
         // Compute auto page-turn estimate for PDFs when we have a continuation
         if (smartSentenceSplitting && !isEPUB && continuationCarried && normalizedOptions.nextLocation !== undefined) {
           const continuationNormalized = preprocessSentenceForAudio(continuationCarried);
@@ -703,13 +750,71 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
    * Generates and plays audio for the current sentence
    * 
    * @param {string} sentence - The sentence to generate audio for
-   * @returns {Promise<ArrayBuffer | undefined>} The generated audio buffer
+   * @returns {Promise<TTSAudioBuffer | undefined>} The generated audio buffer
    */
-  const getAudio = useCallback(async (sentence: string): Promise<ArrayBuffer | undefined> => {
+  const getAudio = useCallback(async (sentence: string): Promise<TTSAudioBuffer | undefined> => {
+    const alignmentEnabledForCurrentDoc =
+      (!isEPUB && pdfHighlightEnabled && pdfWordHighlightEnabled) ||
+      (isEPUB && epubHighlightEnabled && epubWordHighlightEnabled);
+    // Helper to ensure we have an alignment for a given
+    // sentence/audio pair, even when the audio itself is
+    // served from the local cache.
+    const ensureAlignment = (arrayBuffer: TTSAudioBuffer) => {
+      if (!alignmentEnabledForCurrentDoc) return;
+      const alignmentKey = buildCacheKey(
+        sentence,
+        voice,
+        speed,
+        configTTSProvider,
+        ttsModel,
+      );
+      if (sentenceAlignmentCacheRef.current.has(alignmentKey)) return;
+
+      try {
+        const audioBytes = Array.from(new Uint8Array(arrayBuffer));
+        const alignmentBody = {
+          text: sentence,
+          audio: audioBytes,
+        };
+
+        void alignAudio(alignmentBody)
+          .then(async (data) => {
+            if (!data || !Array.isArray(data.alignments) || !data.alignments[0]) {
+              return;
+            }
+            const alignment = data.alignments[0] as TTSSentenceAlignment;
+            sentenceAlignmentCacheRef.current.set(alignmentKey, alignment);
+
+            const currentSentence = sentencesRef.current[currentIndexRef.current];
+            if (currentSentence === sentence) {
+              setCurrentSentenceAlignment(alignment);
+              setCurrentWordIndex(null);
+            }
+          })
+          .catch((err) => {
+            console.warn('Alignment request failed:', err);
+          });
+      } catch (err) {
+        console.warn('Failed to start alignment request:', err);
+      }
+    };
+
+    const audioCacheKey = buildCacheKey(
+      sentence,
+      voice,
+      speed,
+      configTTSProvider,
+      ttsModel,
+    );
+
     // Check if the audio is already cached
-    const cachedAudio = audioCache.get(sentence);
+    const cachedAudio = audioCache.get(audioCacheKey);
     if (cachedAudio) {
       console.log('Using cached audio for sentence:', sentence.substring(0, 20));
+      // If we have audio but no alignment (e.g. after a
+      // navigation or TTS reset), kick off a fresh alignment
+      // request using the cached audio buffer.
+      ensureAlignment(cachedAudio);
       return cachedAudio;
     }
 
@@ -746,19 +851,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
 
       const arrayBuffer = await withRetry(
         async () => {
-          
-          const response = await fetch('/api/tts', {
-            method: 'POST',
-            headers: reqHeaders,
-            body: JSON.stringify(reqBody),
-            signal: controller.signal,
-          });
-
-          if (!response.ok) {
-            throw new Error('Failed to generate audio');
-          }
-
-          return response.arrayBuffer();
+          return await generateTTS(reqBody, reqHeaders, controller.signal);
         },
         retryOptions
       );
@@ -767,7 +860,10 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
       activeAbortControllers.current.delete(controller);
 
       // Cache the array buffer
-      audioCache.set(sentence, arrayBuffer);
+      audioCache.set(audioCacheKey, arrayBuffer);
+
+      // Fire-and-forget alignment request; do not block audio playback
+      ensureAlignment(arrayBuffer);
 
       return arrayBuffer;
     } catch (error) {
@@ -788,7 +884,21 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
       });
       throw error;
     }
-  }, [voice, speed, ttsModel, ttsInstructions, audioCache, openApiKey, openApiBaseUrl, configTTSProvider]);
+  }, [
+    voice,
+    speed,
+    ttsModel,
+    ttsInstructions,
+    audioCache,
+    openApiKey,
+    openApiBaseUrl,
+    configTTSProvider,
+    isEPUB,
+    pdfHighlightEnabled,
+    pdfWordHighlightEnabled,
+    epubHighlightEnabled,
+    epubWordHighlightEnabled
+  ]);
 
   /**
    * Processes and plays the current sentence
@@ -1004,11 +1114,28 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
   }, [isPlaying, advance, activeHowl, processSentence, audioSpeed]);
 
   const playAudio = useCallback(async () => {
-    const howl = await playSentenceWithHowl(sentences[currentIndex], currentIndex);
+    const sentence = sentences[currentIndex];
+    const alignmentKey = buildCacheKey(
+      sentence,
+      voice,
+      speed,
+      configTTSProvider,
+      ttsModel,
+    );
+    const cachedAlignment = sentenceAlignmentCacheRef.current.get(alignmentKey);
+    if (cachedAlignment) {
+      setCurrentSentenceAlignment(cachedAlignment);
+      setCurrentWordIndex(null);
+    } else {
+      setCurrentSentenceAlignment(undefined);
+      setCurrentWordIndex(null);
+    }
+
+    const howl = await playSentenceWithHowl(sentence, currentIndex);
     if (howl) {
       howl.play();
     }
-  }, [sentences, currentIndex, playSentenceWithHowl]);
+  }, [sentences, currentIndex, playSentenceWithHowl, voice, speed, configTTSProvider, ttsModel]);
 
   // Place useBackgroundState after playAudio is defined
   const isBackgrounded = useBackgroundState({
@@ -1017,22 +1144,73 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     playAudio,
   });
 
+  // Track the current word index during playback using Howler's seek position
+  useEffect(() => {
+    if (!activeHowl || !isPlaying || !currentSentenceAlignment || !currentSentenceAlignment.words.length) {
+      setCurrentWordIndex(null);
+      return;
+    }
+
+    let frameId: number;
+
+    const tick = () => {
+      try {
+        const pos = activeHowl.seek() as number;
+        if (typeof pos === 'number' && Number.isFinite(pos)) {
+          const words = currentSentenceAlignment.words;
+          let idx = -1;
+          for (let i = 0; i < words.length; i++) {
+            const w = words[i];
+            if (pos >= w.startSec && pos < w.endSec) {
+              idx = i;
+              break;
+            }
+          }
+          if (idx !== -1) {
+            setCurrentWordIndex((prev) => (prev === idx ? prev : idx));
+          }
+        }
+      } catch {
+        // ignore seek errors
+      }
+      frameId = requestAnimationFrame(tick);
+    };
+
+    frameId = requestAnimationFrame(tick);
+
+    return () => {
+      if (frameId) {
+        cancelAnimationFrame(frameId);
+      }
+    };
+  }, [activeHowl, isPlaying, currentSentenceAlignment]);
+
   /**
    * Preloads the next sentence's audio
    */
   const preloadNextAudio = useCallback(async () => {
     try {
       const nextSentence = sentences[currentIndex + 1];
-      if (nextSentence && !audioCache.has(nextSentence) && !preloadRequests.current.has(nextSentence)) {
+      if (nextSentence) {
+        const nextKey = buildCacheKey(
+          nextSentence,
+          voice,
+          speed,
+          configTTSProvider,
+          ttsModel,
+        );
+
+        if (!audioCache.has(nextKey) && !preloadRequests.current.has(nextSentence)) {
         // Start preloading but don't wait for it to complete
-        processSentence(nextSentence, true).catch(error => {
-          console.error('Error preloading next sentence:', error);
-        });
+          processSentence(nextSentence, true).catch(error => {
+            console.error('Error preloading next sentence:', error);
+          });
+        }
       }
     } catch (error) {
       console.error('Error initiating preload:', error);
     }
-  }, [currentIndex, sentences, audioCache, processSentence]);
+  }, [currentIndex, sentences, audioCache, processSentence, voice, speed, configTTSProvider, ttsModel]);
 
   /**
    * Main Playback Driver
@@ -1085,6 +1263,9 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     setCurrDocPages(undefined);
     setIsProcessing(false);
     setIsEPUB(false);
+    sentenceAlignmentCacheRef.current.clear();
+    setCurrentSentenceAlignment(undefined);
+    setCurrentWordIndex(null);
   }, [abortAudio]);
 
   /**
@@ -1118,9 +1299,8 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     abortAudio(true); // Clear pending requests since speed changed
     setActiveHowl(null);
 
-    // Update speed, clear cache, and config
+    // Update speed and config
     setSpeed(newSpeed);
-    audioCache.clear();
 
     // Update config after state changes
     updateConfigKey('voiceSpeed', newSpeed).then(() => {
@@ -1130,7 +1310,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
         setIsPlaying(true);
       }
     });
-  }, [abortAudio, updateConfigKey, audioCache, isPlaying]);
+  }, [abortAudio, updateConfigKey, isPlaying]);
 
   /**
    * Sets the voice and restarts the playback
@@ -1151,9 +1331,8 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     abortAudio(true); // Clear pending requests since voice changed
     setActiveHowl(null);
 
-    // Update voice, clear cache, and config
+    // Update voice and config
     setVoice(newVoice);
-    audioCache.clear();
 
     // Update config after state changes
     updateConfigKey('voice', newVoice).then(() => {
@@ -1163,7 +1342,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
         setIsPlaying(true);
       }
     });
-  }, [abortAudio, updateConfigKey, audioCache, isPlaying]);
+  }, [abortAudio, updateConfigKey, isPlaying]);
 
   /**
    * Sets the audio player speed and restarts the playback
@@ -1205,6 +1384,8 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     isProcessing,
     isBackgrounded,
     currentSentence: sentences[currentIndex] || '',
+    currentSentenceAlignment,
+    currentWordIndex,
     currDocPage,
     currDocPageNumber,
     currDocPages,
@@ -1248,7 +1429,9 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     skipToLocation,
     registerLocationChangeHandler,
     registerVisualPageChangeHandler,
-    setIsEPUB
+    setIsEPUB,
+    currentSentenceAlignment,
+    currentWordIndex
   ]);
 
   // Use media session hook

@@ -31,15 +31,26 @@ import { getPdfDocument } from '@/lib/dexie';
 import { useTTS } from '@/contexts/TTSContext';
 import { useConfig } from '@/contexts/ConfigContext';
 import { processTextToSentences } from '@/lib/nlp';
-import { withRetry } from '@/utils/audio';
+import { withRetry, getAudiobookStatus, generateTTS, createAudiobookChapter } from '@/lib/client';
 import {
   extractTextFromPDF,
   highlightPattern,
   clearHighlights,
-  handleTextClick,
+  clearWordHighlights,
+  highlightWordIndex,
 } from '@/lib/pdf';
 
-import type { TTSRequestHeaders, TTSRequestPayload, TTSRetryOptions } from '@/types/tts';
+import type {
+  TTSSentenceAlignment,
+  TTSAudioBuffer,
+  TTSAudiobookFormat,
+  TTSAudiobookChapter,
+} from '@/types/tts';
+import type {
+  TTSRequestHeaders,
+  TTSRequestPayload,
+  TTSRetryOptions,
+} from '@/types/client';
 
 /**
  * Interface defining all available methods and properties in the PDF context
@@ -59,16 +70,15 @@ interface PDFContextType {
   onDocumentLoadSuccess: (pdf: PDFDocumentProxy) => void;
   highlightPattern: (text: string, pattern: string, containerRef: RefObject<HTMLDivElement>) => void;
   clearHighlights: () => void;
-  handleTextClick: (
-    event: MouseEvent,
-    pdfText: string,
-    containerRef: RefObject<HTMLDivElement>,
-    stopAndPlayFromIndex: (index: number) => void,
-    isProcessing: boolean,
-    enableHighlight?: boolean
+  clearWordHighlights: () => void;
+  highlightWordIndex: (
+    alignment: TTSSentenceAlignment | undefined,
+    wordIndex: number | null | undefined,
+    sentence: string | null | undefined,
+    containerRef: RefObject<HTMLDivElement>
   ) => void;
-  createFullAudioBook: (onProgress: (progress: number) => void, signal?: AbortSignal, onChapterComplete?: (chapter: { index: number; title: string; duration?: number; status: 'pending' | 'generating' | 'completed' | 'error'; bookId?: string; format?: 'mp3' | 'm4b' }) => void, bookId?: string, format?: 'mp3' | 'm4b') => Promise<string>;
-  regenerateChapter: (chapterIndex: number, bookId: string, format: 'mp3' | 'm4b', signal: AbortSignal) => Promise<{ index: number; title: string; duration?: number; status: 'pending' | 'generating' | 'completed' | 'error'; bookId?: string; format?: 'mp3' | 'm4b' }>;
+  createFullAudioBook: (onProgress: (progress: number) => void, signal?: AbortSignal, onChapterComplete?: (chapter: TTSAudiobookChapter) => void, bookId?: string, format?: TTSAudiobookFormat) => Promise<string>;
+  regenerateChapter: (chapterIndex: number, bookId: string, format: TTSAudiobookFormat, signal: AbortSignal) => Promise<TTSAudiobookChapter>;
   isAudioCombining: boolean;
 }
 
@@ -252,9 +262,9 @@ export function PDFProvider({ children }: { children: ReactNode }) {
   const createFullAudioBook = useCallback(async (
     onProgress: (progress: number) => void,
     signal?: AbortSignal,
-    onChapterComplete?: (chapter: { index: number; title: string; duration?: number; status: 'pending' | 'generating' | 'completed' | 'error'; bookId?: string; format?: 'mp3' | 'm4b' }) => void,
+    onChapterComplete?: (chapter: TTSAudiobookChapter) => void,
     providedBookId?: string,
-    format: 'mp3' | 'm4b' = 'mp3'
+    format: TTSAudiobookFormat = 'mp3'
   ): Promise<string> => {
     try {
       if (!pdfDocument) {
@@ -294,17 +304,14 @@ export function PDFProvider({ children }: { children: ReactNode }) {
       const existingIndices = new Set<number>();
       if (bookId) {
         try {
-          const existingResponse = await fetch(`/api/audio/convert/chapters?bookId=${bookId}`);
-          if (existingResponse.ok) {
-            const existingData = await existingResponse.json();
-            if (existingData.chapters && existingData.chapters.length > 0) {
-              for (const ch of existingData.chapters) {
-                existingIndices.add(ch.index);
-              }
-              let nextMissing = 0;
-              while (existingIndices.has(nextMissing)) nextMissing++;
-              console.log(`Resuming; next missing page index is ${nextMissing} (page ${nextMissing + 1})`);
+          const existingData = await getAudiobookStatus(bookId);
+          if (existingData.chapters && existingData.chapters.length > 0) {
+            for (const ch of existingData.chapters) {
+              existingIndices.add(ch.index);
             }
+            let nextMissing = 0;
+            while (existingIndices.has(nextMissing)) nextMissing++;
+            console.log(`Resuming; next missing page index is ${nextMissing} (page ${nextMissing + 1})`);
           }
         } catch (error) {
           console.error('Error checking existing chapters:', error);
@@ -362,22 +369,7 @@ export function PDFProvider({ children }: { children: ReactNode }) {
                 throw new DOMException('Aborted', 'AbortError');
               }
 
-              const ttsResponse = await fetch('/api/tts', {
-                method: 'POST',
-                headers: reqHeaders,
-                body: JSON.stringify(reqBody),
-                signal
-              });
-
-              if (!ttsResponse.ok) {
-                throw new Error(`TTS processing failed with status ${ttsResponse.status}`);
-              }
-
-              const buffer = await ttsResponse.arrayBuffer();
-              if (buffer.byteLength === 0) {
-                throw new Error('Received empty audio buffer from TTS');
-              }
-              return buffer;
+              return await generateTTS(reqBody, reqHeaders, signal);
             },
             retryOptions
           );
@@ -394,45 +386,21 @@ export function PDFProvider({ children }: { children: ReactNode }) {
           }
 
           // Send to server for conversion and storage
-          const convertResponse = await fetch('/api/audio/convert', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              chapterTitle,
-              buffer: Array.from(new Uint8Array(audioBuffer)),
-              bookId,
-              format,
-              chapterIndex: i
-            }),
-            signal
-          });
-
-          if (convertResponse.status === 499) {
-            throw new Error('cancelled');
-          }
-
-          if (!convertResponse.ok) {
-            throw new Error('Failed to convert audio chapter');
-          }
-
-          const { bookId: returnedBookId, chapterIndex, duration } = await convertResponse.json();
+          const chapter = await createAudiobookChapter({
+            chapterTitle,
+            buffer: Array.from(new Uint8Array(audioBuffer)),
+            bookId,
+            format,
+            chapterIndex: i
+          }, signal);
           
           if (!bookId) {
-            bookId = returnedBookId;
+            bookId = chapter.bookId!;
           }
 
           // Notify about completed chapter
           if (onChapterComplete) {
-            onChapterComplete({
-              index: chapterIndex,
-              title: chapterTitle,
-              duration,
-              status: 'completed',
-              bookId,
-              format
-            });
+            onChapterComplete(chapter);
           }
 
           processedLength += text.length;
@@ -478,9 +446,9 @@ export function PDFProvider({ children }: { children: ReactNode }) {
   const regenerateChapter = useCallback(async (
     chapterIndex: number,
     bookId: string,
-    format: 'mp3' | 'm4b',
+    format: TTSAudiobookFormat,
     signal: AbortSignal
-  ): Promise<{ index: number; title: string; duration?: number; status: 'pending' | 'generating' | 'completed' | 'error'; bookId?: string; format?: 'mp3' | 'm4b' }> => {
+  ): Promise<TTSAudiobookChapter> => {
     try {
       if (!pdfDocument) {
         throw new Error('No PDF document loaded');
@@ -551,28 +519,13 @@ export function PDFProvider({ children }: { children: ReactNode }) {
         backoffFactor: 2
       };
 
-      const audioBuffer = await withRetry(
+      const audioBuffer: TTSAudioBuffer = await withRetry(
         async () => {
           if (signal?.aborted) {
             throw new DOMException('Aborted', 'AbortError');
           }
 
-          const ttsResponse = await fetch('/api/tts', {
-            method: 'POST',
-            headers: reqHeaders,
-            body: JSON.stringify(reqBody),
-            signal
-          });
-
-          if (!ttsResponse.ok) {
-            throw new Error(`TTS processing failed with status ${ttsResponse.status}`);
-          }
-
-          const buffer = await ttsResponse.arrayBuffer();
-          if (buffer.byteLength === 0) {
-            throw new Error('Received empty audio buffer from TTS');
-          }
-          return buffer;
+          return await generateTTS(reqBody, reqHeaders, signal);
         },
         retryOptions
       );
@@ -582,39 +535,15 @@ export function PDFProvider({ children }: { children: ReactNode }) {
       }
 
       // Send to server for conversion and storage
-      const convertResponse = await fetch('/api/audio/convert', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          chapterTitle,
-          buffer: Array.from(new Uint8Array(audioBuffer)),
-          bookId,
-          format,
-          chapterIndex
-        }),
-        signal
-      });
-
-      if (convertResponse.status === 499) {
-        throw new Error('cancelled');
-      }
-
-      if (!convertResponse.ok) {
-        throw new Error('Failed to convert audio chapter');
-      }
-
-      const { chapterIndex: returnedIndex, duration } = await convertResponse.json();
-
-      return {
-        index: returnedIndex,
-        title: chapterTitle,
-        duration,
-        status: 'completed',
+      const chapter = await createAudiobookChapter({
+        chapterTitle,
+        buffer: Array.from(new Uint8Array(audioBuffer)),
         bookId,
-        format
-      };
+        format,
+        chapterIndex
+      }, signal);
+
+      return chapter;
 
     } catch (error) {
       if (error instanceof Error && (error.name === 'AbortError' || error.message.includes('cancelled'))) {
@@ -655,7 +584,8 @@ export function PDFProvider({ children }: { children: ReactNode }) {
       clearCurrDoc,
       highlightPattern,
       clearHighlights,
-      handleTextClick,
+      clearWordHighlights,
+      highlightWordIndex,
       pdfDocument,
       createFullAudioBook,
       regenerateChapter,

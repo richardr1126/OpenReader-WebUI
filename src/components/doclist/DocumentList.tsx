@@ -55,6 +55,7 @@ export function DocumentList() {
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
   const [isInitialized, setIsInitialized] = useState(false);
   const [showHint, setShowHint] = useState(true);
+  const [viewMode, setViewMode] = useState<'list' | 'grid'>('grid');
 
   const {
     pdfDocs,
@@ -78,6 +79,7 @@ export function DocumentList() {
         setFolders(savedState.folders);
         setCollapsedFolders(new Set(savedState.collapsedFolders));
         setShowHint(savedState.showHint ?? true); // Use saved hint state or default to true
+        setViewMode(savedState.viewMode ?? 'grid');
       }
       setIsInitialized(true);
     };
@@ -92,7 +94,8 @@ export function DocumentList() {
         sortDirection,
         folders,
         collapsedFolders: Array.from(collapsedFolders),
-        showHint
+        showHint,
+        viewMode
       };
       await saveDocumentListState(state);
     };
@@ -100,7 +103,7 @@ export function DocumentList() {
     if (isInitialized) { // Prevents saving empty state on first render or back navigation
       saveState();
     }
-  }, [sortBy, sortDirection, folders, collapsedFolders, showHint, isInitialized]);
+  }, [sortBy, sortDirection, folders, collapsedFolders, showHint, viewMode, isInitialized]);
 
   const allDocuments: DocumentListDocument[] = [
     ...pdfDocs.map(doc => ({
@@ -315,6 +318,8 @@ export function DocumentList() {
             sortDirection={sortDirection}
             onSortByChange={setSortBy}
             onSortDirectionChange={() => setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc')}
+            viewMode={viewMode}
+            onViewModeChange={setViewMode}
           />
         </div>
         
@@ -325,21 +330,22 @@ export function DocumentList() {
           <DocumentUploader variant="compact" />
         </div>
 
-        <div className="space-y-2">
-          {showHint && allDocuments.length > 1 && (
-            <div className="flex items-center justify-between bg-offbase border border-offbase rounded-md px-3 py-1 text-sm">
-              <p className="text-sm text-foreground">Drag files on top of each other to make folders</p>
-              <Button
-                onClick={() => setShowHint(false)}
-                className="p-1 rounded-md hover:bg-base hover:text-accent transition-colors"
-                aria-label="Dismiss hint"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </Button>
-            </div>
-          )}
+        {showHint && allDocuments.length > 1 && (
+          <div className="flex items-center justify-between bg-offbase border border-offbase rounded-md px-3 py-1 text-sm mb-2">
+            <p className="text-sm text-foreground">Drag files on top of each other to make folders</p>
+            <Button
+              onClick={() => setShowHint(false)}
+              className="p-1 rounded-md hover:bg-base hover:text-accent transition-colors"
+              aria-label="Dismiss hint"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </Button>
+          </div>
+        )}
+
+        <div className={viewMode === 'grid' ? "flex flex-wrap gap-1 w-full" : "space-y-1 w-full"}>
 
           {folders.map(folder => (
             <DocumentFolder
@@ -354,6 +360,7 @@ export function DocumentList() {
               onDragStart={handleDragStart}
               onDragEnd={handleDragEnd}
               onDrop={handleFolderDrop}
+              viewMode={viewMode}
             />
           ))}
 
@@ -368,6 +375,7 @@ export function DocumentList() {
               onDragLeave={handleDragLeave}
               onDrop={handleDrop}
               isDropTarget={dropTargetDoc?.id === doc.id}
+              viewMode={viewMode}
             />
           ))}
         </div>

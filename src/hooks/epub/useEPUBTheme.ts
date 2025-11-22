@@ -2,14 +2,41 @@ import { useCallback, useEffect } from 'react';
 import { Rendition } from 'epubjs';
 import { ReactReaderStyle, IReactReaderStyle } from 'react-reader';
 
-export const getThemeStyles = (): IReactReaderStyle => {
-  const baseStyle = {
-    ...ReactReaderStyle,
-    readerArea: {
-      ...ReactReaderStyle.readerArea,
-      transition: undefined,
-    }
-  };
+// Returns ReactReader styles, with:
+// - default look when epubTheme === false (except hiding built-in arrows)
+// - themed colors + layout tweaks when epubTheme === true
+export const getThemeStyles = (epubTheme: boolean): IReactReaderStyle => {
+  const baseStyle = ReactReaderStyle;
+
+  // Always hide the built-in prev/next arrow buttons so we can
+  // provide our own navigation controls outside the reader.
+  if (!epubTheme) {
+    return {
+      ...baseStyle,
+      reader: {
+        ...baseStyle.reader,
+        // Always tighten the inset a bit for better use of space
+        top: 8,
+        left: 8,
+        right: 8,
+        bottom: 8,
+      },
+      prev: {
+        ...baseStyle.prev,
+        display: 'none',
+        pointerEvents: 'none',
+      },
+      next: {
+        ...baseStyle.next,
+        display: 'none',
+        pointerEvents: 'none',
+      },
+      titleArea: {
+        ...baseStyle.titleArea,
+        display: 'none',
+      },
+    };
+  }
 
   const colors = {
     background: getComputedStyle(document.documentElement).getPropertyValue('--background'),
@@ -21,6 +48,25 @@ export const getThemeStyles = (): IReactReaderStyle => {
 
   return {
     ...baseStyle,
+    reader: {
+      ...baseStyle.reader,
+      // Reduce the large default inset (50px 50px 20px)
+      // so the EPUB content can use more of the available area.
+      top: 8,
+      left: 8,
+      right: 8,
+      bottom: 8,
+    },
+    prev: {
+      ...baseStyle.prev,
+      display: 'none',
+      pointerEvents: 'none',
+    },
+    next: {
+      ...baseStyle.next,
+      display: 'none',
+      pointerEvents: 'none',
+    },
     arrow: {
       ...baseStyle.arrow,
       color: colors.foreground,
@@ -54,6 +100,9 @@ export const getThemeStyles = (): IReactReaderStyle => {
     tocButton: {
       ...baseStyle.tocButton,
       color: colors.muted,
+      // Ensure the TOC toggle sits above the swipe wrapper
+      // and text iframe, avoiding z-index conflicts.
+      zIndex: 300,
     },
     tocAreaButton: {
       ...baseStyle.tocAreaButton,

@@ -1,7 +1,7 @@
 import { HomeContent } from '@/components/HomeContent';
 import { SettingsModal } from '@/components/SettingsModal';
 
-// Home page redesigned for fullscreen layout: hero + document area.
+const isDev = process.env.NEXT_PUBLIC_NODE_ENV !== 'production' || process.env.NODE_ENV == null;
 
 export default function Home() {
   return (
@@ -10,9 +10,9 @@ export default function Home() {
       <section className="px-4 pt-6 pb-4 md:pt-10 md:pb-6">
         <div className="max-w-5xl mx-auto">
           <h1 className="text-2xl md:text-3xl font-bold tracking-tight mb-2 text-foreground">OpenReader WebUI</h1>
-          <p className="text-sm leading-relaxed max-w-prose text-foreground">
-            Bring your own text-to-speech API.
-            <span className="block font-medium">Read & listen to PDF, EPUB & HTML documents with high quality voices.</span>
+          <p className="text-sm leading-relaxed max-w-[77ch] text-foreground">
+            Open source document reader {isDev ? 'self-hosted server' : 'demo app'}.
+            <span className="block font-medium">Read & listen to PDF, EPUB, MD, and TXT documents with high quality text to speech voices.</span>
           </p>
         </div>
       </section>

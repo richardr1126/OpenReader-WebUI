@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback } from 'react';
+import { getVoices } from '@/lib/client';
 
 const DEFAULT_VOICES = ['alloy', 'ash', 'coral', 'echo', 'fable', 'onyx', 'nova', 'sage', 'shimmer'];
 
@@ -23,18 +24,14 @@ export function useVoiceManagement(
   const fetchVoices = useCallback(async () => {
     try {
       console.log('Fetching voices...');
-      const response = await fetch('/api/tts/voices', {
-        headers: {
-          'x-openai-key': apiKey || '',
-          'x-openai-base-url': baseUrl || '',
-          'x-tts-provider': ttsProvider || 'openai',
-          'x-tts-model': ttsModel || 'tts-1',
-          'Content-Type': 'application/json',
-        },
+      const data = await getVoices({
+        'x-openai-key': apiKey || '',
+        'x-openai-base-url': baseUrl || '',
+        'x-tts-provider': ttsProvider || 'openai',
+        'x-tts-model': ttsModel || 'tts-1',
+        'Content-Type': 'application/json',
       });
       
-      if (!response.ok) throw new Error('Failed to fetch voices');
-      const data = await response.json();
       setAvailableVoices(data.voices || DEFAULT_VOICES);
     } catch (error) {
       console.error('Error fetching voices:', error);

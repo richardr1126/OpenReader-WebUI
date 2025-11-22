@@ -28,6 +28,7 @@ import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { ProgressPopup } from '@/components/ProgressPopup';
 import { useTimeEstimation } from '@/hooks/useTimeEstimation';
 import { THEMES } from '@/contexts/ThemeContext';
+import { deleteServerDocuments } from '@/lib/client';
 
 const isDev = process.env.NEXT_PUBLIC_NODE_ENV !== 'production' || process.env.NODE_ENV == null;
 
@@ -222,12 +223,7 @@ export function SettingsModal() {
 
   const handleClearServer = async () => {
     try {
-      const response = await fetch('/api/documents', {
-        method: 'DELETE',
-      });
-      if (!response.ok) {
-        throw new Error('Failed to delete server documents');
-      }
+      await deleteServerDocuments();
     } catch (error) {
       console.error('Delete failed:', error);
     }
@@ -404,7 +400,7 @@ export function SettingsModal() {
                               type="password"
                               value={localApiKey}
                               onChange={(e) => handleInputChange('apiKey', e.target.value)}
-                              placeholder={!isDev && localTTSProvider === 'deepinfra' ? "Deepinfra free or override apikey" : "Using environment variable"}
+                              placeholder={!isDev && localTTSProvider === 'deepinfra' ? "Deepinfra free or use your API key" : "Using environment variable"}
                               className="w-full rounded-lg bg-background py-1.5 px-3 text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-accent"
                             />
                           </div>
@@ -603,7 +599,7 @@ export function SettingsModal() {
 
                       <TabPanel className="space-y-4">
                         {isDev && <div className="space-y-1">
-                          <label className="block text-sm font-medium text-foreground">Document Sync</label>
+                          <label className="block text-sm font-medium text-foreground">Server Document Sync</label>
                           <div className="flex gap-2">
                             <Button
                               onClick={handleLoad}
@@ -614,7 +610,7 @@ export function SettingsModal() {
                                        transform transition-transform duration-200 ease-in-out hover:scale-[1.04] hover:text-accent
                                        disabled:opacity-50"
                             >
-                              {isLoading ? `Loading... ${Math.round(progress)}%` : 'Load docs from Server'}
+                              {isLoading ? `Loading... ${Math.round(progress)}%` : 'Load'}
                             </Button>
                             <Button
                               onClick={handleSync}
@@ -625,13 +621,13 @@ export function SettingsModal() {
                                        transform transition-transform duration-200 ease-in-out hover:scale-[1.04] hover:text-accent
                                        disabled:opacity-50"
                             >
-                              {isSyncing ? `Saving... ${Math.round(progress)}%` : 'Save local to Server'}
+                              {isSyncing ? `Saving... ${Math.round(progress)}%` : 'Save to server'}
                             </Button>
                           </div>
                         </div>}
 
                         <div className="space-y-1 pb-3">
-                          <label className="block text-sm font-medium text-foreground">Bulk Delete</label>
+                          <label className="block text-sm font-medium text-foreground">Delete All</label>
                           <div className="flex gap-2">
                             <Button
                               onClick={() => setShowClearLocalConfirm(true)}
@@ -640,7 +636,7 @@ export function SettingsModal() {
                                          focus-visible:ring-2 focus-visible:bg-red-500 focus-visible:ring-offset-2
                                        transform transition-transform duration-200 ease-in-out hover:scale-[1.04]"
                             >
-                              Delete local docs
+                              Delete local
                             </Button>
                             {isDev && <Button
                               onClick={() => setShowClearServerConfirm(true)}
@@ -649,7 +645,7 @@ export function SettingsModal() {
                                          focus-visible:ring-2 focus-visible:bg-red-500 focus-visible:ring-offset-2
                                        transform transition-transform duration-200 ease-in-out hover:scale-[1.04]"
                             >
-                              Delete server docs
+                              Delete server
                             </Button>}
                           </div>
                         </div>

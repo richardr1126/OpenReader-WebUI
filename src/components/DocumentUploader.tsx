@@ -4,6 +4,7 @@ import { useState, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { UploadIcon } from '@/components/icons/Icons';
 import { useDocuments } from '@/contexts/DocumentContext';
+import { convertDocxToPdf as convertDocxToPdfClient } from '@/lib/client';
 
 const isDev = process.env.NEXT_PUBLIC_NODE_ENV !== 'production' || process.env.NODE_ENV == null;
 
@@ -23,19 +24,7 @@ export function DocumentUploader({ className = '', variant = 'default' }: Docume
   const [error, setError] = useState<string | null>(null);
 
   const convertDocxToPdf = async (file: File): Promise<File> => {
-    const formData = new FormData();
-    formData.append('file', file);
-
-    const response = await fetch('/api/documents/docx-to-pdf', {
-      method: 'POST',
-      body: formData,
-    });
-
-    if (!response.ok) {
-      throw new Error('Failed to convert DOCX to PDF');
-    }
-
-    const pdfBlob = await response.blob();
+    const pdfBlob = await convertDocxToPdfClient(file);
     return new File([pdfBlob], file.name.replace(/\.docx$/, '.pdf'), {
       type: 'application/pdf',
     });

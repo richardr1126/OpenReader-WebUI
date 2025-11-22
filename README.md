@@ -11,8 +11,6 @@
 
 OpenReader WebUI is an open source text to speech document reader web app built using Next.js, offering a TTS read along experience with narration for **EPUB, PDF, TXT, MD, and DOCX documents**. It supports multiple TTS providers including OpenAI, Deepinfra, and custom OpenAI-compatible endpoints like [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI) and [Orpheus-FastAPI](https://github.com/Lex-au/Orpheus-FastAPI)
 
-- 🧠 *(New)* **Smart Sentence-Aware Narration** merges sentences across pages/chapters for smoother TTS
-- 🎧 *(New)* **Reliable Audiobook Export** in **m4b/mp3**, with resumable, chapter-based export and regeneration
 - 🎯 *(New)* **Multi-Provider TTS Support**
   - [**Kokoro-FastAPI**](https://github.com/remsky/Kokoro-FastAPI): Supporting multi-voice combinations (like `af_heart+af_bella`)
   - [**Orpheus-FastAPI**](https://github.com/Lex-au/Orpheus-FastAPI)
@@ -20,55 +18,17 @@ OpenReader WebUI is an open source text to speech document reader web app built 
   - **Cloud TTS Providers (requiring API keys)**
     - [**Deepinfra**](https://deepinfra.com/models/text-to-speech): Kokoro-82M + models with support for cloned voices and more
     - [**OpenAI API ($$)**](https://platform.openai.com/docs/pricing#transcription-and-speech): tts-1, tts-1-hd, and gpt-4o-mini-tts w/ instructions
-- 🚀 *(New)* **Optimized Next.js TTS Proxy** with audio caching and optimized repeat playback
-- 💾 *(Updated)* **Local-First Architecture** stores documents and more in-browser with Dexie.js
 - 📖 *(Updated)* **Read Along Experience** providing real-time text highlighting during playback (PDF/EPUB)
+  - *(New)* **Word-by-word** highlighting uses word-by-word timestamps generated server-side with [*whisper.cpp*](https://github.com/ggml-org/whisper.cpp) (optional)
+- 🧠 *(New)* **Smart Sentence-Aware Narration** merges sentences across pages/chapters for smoother TTS
+- 🎧 *(New)* **Reliable Audiobook Export** in **m4b/mp3**, with resumable, chapter-based export and regeneration
+- 🚀 *(New)* **Optimized Next.js TTS Proxy** with audio caching and optimized repeat playback
+- 💾 **Local-First Architecture** stores documents and more in-browser with Dexie.js
 - 🛜 **Optional Server-side documents** using backend `/docstore` for all users
 - 🎨 **Customizable Experience**
   - 🎨 Multiple app theme options
   - ⚙️ Various TTS and document handling settings
   - And more ...
-
-<details>
-<summary>
-
-### 🆕 What's New in v1.0.0
-
-</summary>
-
-- 🧠 **Smart sentence continuation**  
-  - Improved NLP handling of complex structures and quoted dialogue provides more natural sentence boundaries and a smoother audio-text flow.  
-  - EPUB and PDF playback now use smarter sentence splitting and continuation metadata so sentences that cross page/chapter boundaries are merged before hitting the TTS API.  
-  - This yields more natural narration and fewer awkward pauses when a sentence spans multiple pages or EPUB spine items.
-- 📄 **Modernized PDF text highlighting pipeline**  
-  - Real-time PDF text highlighting is now offloaded to a dedicated Web Worker so scrolling and playback controls remain responsive during narration.  
-  - A new overlay-based highlighting system draws independent highlight layers on top of the PDF, avoiding interference with the underlying text layer.  
-  - Upgraded fuzzy matching with Dice-based similarity improves the accuracy of mapping spoken words to on-screen text.  
-  - A new per-device setting lets you enable or disable real-time PDF highlighting during playback for a more tailored reading experience.  
-- 🎧 **Chapter/page-based audiobook export with resume & regeneration**  
-  - Per-chapter/per-page generation to disk with persistent `bookId`  
-  - Resumable generation (can cancel and continue later)  
-  - Per-chapter regeneration & deletion  
-  - Final combined **M4B** or **MP3** download with embedded chapter metadata.  
-- 💾 **Dexie-backed local storage & sync**  
-  - All document types (PDF, EPUB, TXT/MD-as-HTML) and config are stored via a unified Dexie layer on top of IndexedDB.  
-  - Document lists use live Dexie queries (no manual refresh needed), and server sync now correctly includes text/markdown documents as part of the library backup.  
-- 🗣️ **Kokoro multi-voice selection & utilities**  
-  - Kokoro models now support multi-voice combination, with provider-aware limits and helpers (not supported on OpenAI or Deepinfra)
-- ⚡ **Faster, more efficient TTS backend proxy**  
-  - In-memory **LRU caching** for audio responses with configurable size/TTL  
-  - **ETag** support (`304` on cache hits) + `X-Cache` headers (`HIT` / `MISS` / `INFLIGHT`)  
-- 📄 **More robust DOCX → PDF conversion**  
-  - DOCX conversion now uses isolated per-job LibreOffice profiles and temp directories, polls for a stable output file size, and aggressively cleans up temp files.  
-  - This reduces cross-job interference and flakiness when converting multiple DOCX files in parallel.
-- ♿ **Accessibility & layout improvements**  
-  - Dialogs and folder toggles expose proper roles and ARIA attributes.  
-  - PDF/EPUB/HTML readers use a full-height app shell with a sticky bottom TTS bar, improved scrollbars, and refined focus styles.
-- ✅ **End-to-end Playwright test suite with TTS mocks**  
-  - Deterministic TTS responses in tests via a reusable Playwright route mock.  
-  - Coverage for accessibility, upload, navigation, folder management, deletion flows, audiobook generation/export and playback across all document types.
-
-</details>
 
 ## 🐳 Docker Quick Start
 
@@ -194,6 +154,20 @@ Optionally required for different features:
     ```bash
     brew install libreoffice
     ```
+- [whisper.cpp](https://github.com/ggml-org/whisper.cpp) (optional, required for word-by-word highlighting)
+    ```bash
+    # clone and build whisper.cpp (no model download needed – OpenReader handles that)
+    git clone https://github.com/ggml-org/whisper.cpp.git
+    cd whisper.cpp
+    cmake -B build
+    cmake --build build -j --config Release
+
+    # point OpenReader to the compiled whisper-cli binary
+    echo WHISPER_CPP_BIN=\"$(pwd)/build/bin/whisper-cli\"
+    ```
+
+    > **Note:** The `WHISPER_CPP_BIN` path should be set in your `.env` file for OpenReader to use word-by-word highlighting features.
+    
 ### Steps
 
 1. Clone the repository:

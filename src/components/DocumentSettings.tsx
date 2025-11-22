@@ -8,6 +8,7 @@ import { useEPUB } from '@/contexts/EPUBContext';
 import { usePDF } from '@/contexts/PDFContext';
 import { AudiobookExportModal } from '@/components/AudiobookExportModal';
 import { useParams } from 'next/navigation';
+import type { TTSAudiobookChapter, TTSAudiobookFormat } from '@/types/tts';
 
 const isDev = process.env.NEXT_PUBLIC_NODE_ENV !== 'production' || process.env.NODE_ENV == null;
 
@@ -35,6 +36,8 @@ export function DocumentSettings({ isOpen, setIsOpen, epub, html }: {
     updateConfigKey,
     pdfHighlightEnabled,
     epubHighlightEnabled,
+    pdfWordHighlightEnabled,
+    epubWordHighlightEnabled,
   } = useConfig();
   const { createFullAudioBook: createEPUBAudioBook, regenerateChapter: regenerateEPUBChapter } = useEPUB();
   const { createFullAudioBook: createPDFAudioBook, regenerateChapter: regeneratePDFChapter } = usePDF();
@@ -78,8 +81,8 @@ export function DocumentSettings({ isOpen, setIsOpen, epub, html }: {
   const handleGenerateAudiobook = useCallback(async (
     onProgress: (progress: number) => void,
     signal: AbortSignal,
-    onChapterComplete: (chapter: { index: number; title: string; duration?: number; status: 'pending' | 'generating' | 'completed' | 'error'; bookId?: string; format?: 'mp3' | 'm4b' }) => void,
-    format: 'mp3' | 'm4b'
+    onChapterComplete: (chapter: TTSAudiobookChapter) => void,
+    format: TTSAudiobookFormat
   ) => {
     if (epub) {
       return createEPUBAudioBook(onProgress, signal, onChapterComplete, id as string, format);
@@ -91,7 +94,7 @@ export function DocumentSettings({ isOpen, setIsOpen, epub, html }: {
   const handleRegenerateChapter = useCallback(async (
     chapterIndex: number,
     bookId: string,
-    format: 'mp3' | 'm4b',
+    format: TTSAudiobookFormat,
     signal: AbortSignal
   ) => {
     if (epub) {
@@ -138,16 +141,18 @@ export function DocumentSettings({ isOpen, setIsOpen, epub, html }: {
                 leaveTo="opacity-0 scale-95"
               >
                 <DialogPanel className="w-full max-w-md transform rounded-2xl bg-base p-6 text-left align-middle shadow-xl transition-all">
-                  {isDev && !html && <div className="space-y-2 mb-4">
+                  {!html && <div className="space-y-2 mb-4">
                     <Button
                       type="button"
                       className="w-full inline-flex justify-center rounded-lg bg-accent px-3 py-1.5 text-sm
                                     font-medium text-background hover:bg-secondary-accent focus:outline-none 
                                     focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2
-                                    transform transition-transform duration-200 ease-in-out hover:scale-[1.04] hover:text-background"
+                                    transform transition-transform duration-200 ease-in-out hover:scale-[1.04] hover:text-background
+                                    disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-[1] disabled:hover:bg-accent"
                       onClick={() => setIsAudiobookModalOpen(true)}
+                      disabled={!isDev}
                     >
-                      Export Audiobook
+                      Export Audiobook {!isDev && '(requires self-hosted)'}
                     </Button>
                   </div>}
 
@@ -324,40 +329,82 @@ export function DocumentSettings({ isOpen, setIsOpen, epub, html }: {
                           </span>
                         </label>
                         <p className="text-sm text-muted pl-6">
-                          Merge sentences across page or section breaks for smoother TTS.
+                          Merge sentences across page or section breaks
                         </p>
                       </div>
                     )}
                     {!epub && !html && (
-                      <div className="space-y-1">
-                        <label className="flex items-center space-x-2">
-                          <input
-                            type="checkbox"
-                            checked={pdfHighlightEnabled}
-                            onChange={(e) => updateConfigKey('pdfHighlightEnabled', e.target.checked)}
-                            className="form-checkbox h-4 w-4 text-accent rounded border-muted"
-                          />
-                          <span className="text-sm font-medium text-foreground">Highlight text during playback</span>
-                        </label>
-                        <p className="text-sm text-muted pl-6">
-                          Show visual highlighting in the PDF viewer while TTS is reading.
-                        </p>
+                      <div className="space-y-2">
+                        <div className="space-y-1">
+                          <label className="flex items-center space-x-2">
+                            <input
+                              type="checkbox"
+                              checked={pdfHighlightEnabled}
+                              onChange={(e) => updateConfigKey('pdfHighlightEnabled', e.target.checked)}
+                              className="form-checkbox h-4 w-4 text-accent rounded border-muted"
+                            />
+                            <span className="text-sm font-medium text-foreground">Highlight text during playback</span>
+                          </label>
+                          <p className="text-sm text-muted pl-6">
+                            Visual text playback highlighting in the PDF viewer
+                          </p>
+                        </div>
+                        <div className="space-y-1 pl-6">
+                          <label className="flex items-center space-x-2">
+                            <input
+                              type="checkbox"
+                              checked={pdfWordHighlightEnabled && pdfHighlightEnabled}
+                              disabled={!pdfHighlightEnabled || !isDev}
+                              onChange={(e) =>
+                                updateConfigKey('pdfWordHighlightEnabled', e.target.checked)
+                              }
+                              className="form-checkbox h-4 w-4 text-accent rounded border-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                            />
+                            <span className="text-sm font-medium text-foreground">
+                              Word-by-word
+                            </span>
+                          </label>
+                          <p className="text-sm text-muted pl-6">
+                            Highlight individual words using audio timestamps generated by whisper.cpp {!isDev && '(requires self-hosted)'}
+                          </p>
+                        </div>
                       </div>
                     )}
                     {epub && (
-                      <div className="space-y-1">
-                        <label className="flex items-center space-x-2">
-                          <input
-                            type="checkbox"
-                            checked={epubHighlightEnabled}
-                            onChange={(e) => updateConfigKey('epubHighlightEnabled', e.target.checked)}
-                            className="form-checkbox h-4 w-4 text-accent rounded border-muted"
-                          />
-                          <span className="text-sm font-medium text-foreground">Highlight text during playback</span>
-                        </label>
-                        <p className="text-sm text-muted pl-6">
-                          Show visual highlighting in the EPUB viewer while TTS is reading.
-                        </p>
+                      <div className="space-y-2">
+                        <div className="space-y-1">
+                          <label className="flex items-center space-x-2">
+                            <input
+                              type="checkbox"
+                              checked={epubHighlightEnabled}
+                              onChange={(e) => updateConfigKey('epubHighlightEnabled', e.target.checked)}
+                              className="form-checkbox h-4 w-4 text-accent rounded border-muted"
+                            />
+                            <span className="text-sm font-medium text-foreground">Highlight text during playback</span>
+                          </label>
+                          <p className="text-sm text-muted pl-6">
+                            Visual text playback highlighting in the EPUB viewer
+                          </p>
+                        </div>
+                        <div className="space-y-1 pl-6">
+                          <label className="flex items-center space-x-2">
+                            <input
+                              type="checkbox"
+                              checked={epubWordHighlightEnabled && epubHighlightEnabled}
+                              disabled={!epubHighlightEnabled || !isDev}
+                              onChange={(e) =>
+                                updateConfigKey('epubWordHighlightEnabled', e.target.checked)
+                              }
+                              className="form-checkbox h-4 w-4 text-accent rounded border-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                            />
+                            <span className="text-sm font-medium text-foreground">
+                              Word-by-word
+                            </span>
+                          </label>
+                          <p className="text-sm text-muted pl-6">
+                            Highlight individual words using audio timestamps generated by whisper.cpp {!isDev && '(requires self-hosted)'}
+                          </p>
+                        </div>
                       </div>
                     )}
                     {epub && (
@@ -369,10 +416,10 @@ export function DocumentSettings({ isOpen, setIsOpen, epub, html }: {
                             onChange={(e) => updateConfigKey('epubTheme', e.target.checked)}
                             className="form-checkbox h-4 w-4 text-accent rounded border-muted"
                           />
-                          <span className="text-sm font-medium text-foreground">Use theme (experimental)</span>
+                          <span className="text-sm font-medium text-foreground">Use theme</span>
                         </label>
                         <p className="text-sm text-muted pl-6">
-                          Apply the current app theme to the EPUB viewer
+                          Apply the current app theme to the EPUB viewer background and text colors
                         </p>
                       </div>
                     )}

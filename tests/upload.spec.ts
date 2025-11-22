@@ -43,9 +43,9 @@ test.describe('Document Upload Tests', () => {
   test('displays an EPUB document', async ({ page }) => {
     await uploadAndDisplay(page, 'sample.epub');
     await expectViewerForFile(page, 'sample.epub');
-    // Keep navigation button assertions
-    await expect(page.getByRole('button', { name: '‹' })).toBeVisible();
-    await expect(page.getByRole('button', { name: '›' })).toBeVisible();
+    // Navigation controls should be exposed via accessible labels
+    await expect(page.getByRole('button', { name: 'Previous section' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Next section' })).toBeVisible();
   });
 
   test('displays a DOCX document as PDF after conversion', async ({ page }) => {
