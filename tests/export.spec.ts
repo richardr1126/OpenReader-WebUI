@@ -67,7 +67,7 @@ async function getAudioDurationSeconds(filePath: string) {
 }
 
 async function expectChaptersBackendState(page: Page, bookId: string) {
-  const res = await page.request.get(`/api/audio/convert/chapters?bookId=${bookId}`);
+  const res = await page.request.get(`/api/audiobook/status?bookId=${bookId}`);
   expect(res.ok()).toBeTruthy();
   const json = await res.json();
   return json;
@@ -271,7 +271,7 @@ test.describe('Audiobook export', () => {
     ).toBeVisible({ timeout: 60_000 });
 
     // Backend should report no existing chapters for this bookId
-    const res = await page.request.get(`/api/audio/convert/chapters?bookId=${bookId}`);
+    const res = await page.request.get(`/api/audiobook/status?bookId=${bookId}`);
     expect(res.ok()).toBeTruthy();
     const json = await res.json();
     expect(json.exists).toBe(false);

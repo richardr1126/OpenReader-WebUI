@@ -61,7 +61,7 @@ export function AudiobookExportModal({
       setIsLoadingExisting(true);
     }
     try {
-      const response = await fetch(`/api/audio/convert/chapters?bookId=${documentId}`);
+      const response = await fetch(`/api/audiobook/status?bookId=${documentId}`);
       if (response.ok) {
         const data = await response.json();
         if (data.exists && data.chapters.length > 0) {
@@ -241,7 +241,7 @@ export function AudiobookExportModal({
   const performDeleteChapter = useCallback(async () => {
     if (!bookId || !pendingDeleteChapter) return;
     try {
-      const response = await fetch(`/api/audio/convert/chapter?bookId=${bookId}&chapterIndex=${pendingDeleteChapter.index}`, {
+      const response = await fetch(`/api/audiobook/chapter?bookId=${bookId}&chapterIndex=${pendingDeleteChapter.index}`, {
         method: 'DELETE'
       });
       if (!response.ok) {
@@ -261,7 +261,7 @@ export function AudiobookExportModal({
     const targetBookId = bookId || documentId;
     if (!targetBookId) return;
     try {
-      const resp = await fetch(`/api/audio/convert/chapters?bookId=${targetBookId}`, { method: 'DELETE' });
+      const resp = await fetch(`/api/audiobook?bookId=${targetBookId}`, { method: 'DELETE' });
       if (!resp.ok) {
         throw new Error('Reset failed');
       }
@@ -281,7 +281,7 @@ export function AudiobookExportModal({
     if (!chapter.bookId) return;
 
     try {
-      const response = await fetch(`/api/audio/convert/chapter?bookId=${chapter.bookId}&chapterIndex=${chapter.index}`);
+      const response = await fetch(`/api/audiobook/chapter?bookId=${chapter.bookId}&chapterIndex=${chapter.index}`);
       if (!response.ok) throw new Error('Download failed');
 
       const blob = await response.blob();
@@ -306,7 +306,7 @@ export function AudiobookExportModal({
 
     setIsCombining(true);
     try {
-      const response = await fetch(`/api/audio/convert?bookId=${bookId}&format=${format}`);
+      const response = await fetch(`/api/audiobook?bookId=${bookId}&format=${format}`);
       if (!response.ok) throw new Error('Download failed');
 
       const reader = response.body?.getReader();

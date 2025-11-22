@@ -299,7 +299,7 @@ export function PDFProvider({ children }: { children: ReactNode }) {
       const existingIndices = new Set<number>();
       if (bookId) {
         try {
-          const existingResponse = await fetch(`/api/audio/convert/chapters?bookId=${bookId}`);
+          const existingResponse = await fetch(`/api/audiobook/status?bookId=${bookId}`);
           if (existingResponse.ok) {
             const existingData = await existingResponse.json();
             if (existingData.chapters && existingData.chapters.length > 0) {
@@ -399,7 +399,7 @@ export function PDFProvider({ children }: { children: ReactNode }) {
           }
 
           // Send to server for conversion and storage
-          const convertResponse = await fetch('/api/audio/convert', {
+          const convertResponse = await fetch(`/api/audiobook`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -587,7 +587,7 @@ export function PDFProvider({ children }: { children: ReactNode }) {
       }
 
       // Send to server for conversion and storage
-      const convertResponse = await fetch('/api/audio/convert', {
+      const convertResponse = await fetch('/api/audiobook', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

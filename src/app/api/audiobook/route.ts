@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { spawn } from 'child_process';
-import { writeFile, readFile, mkdir, unlink, readdir } from 'fs/promises';
+import { writeFile, readFile, mkdir, unlink, readdir, rm } from 'fs/promises';
 import { existsSync, createReadStream } from 'fs';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
@@ -378,4 +378,31 @@ function streamFile(filePath: string, format: string) {
       'Cache-Control': 'no-cache',
     },
   });
+}
+export async function DELETE(request: NextRequest) {
+  try {
+    const bookId = request.nextUrl.searchParams.get('bookId');
+    if (!bookId) {
+      return NextResponse.json({ error: 'Missing bookId parameter' }, { status: 400 });
+    }
+
+    const docstoreDir = join(process.cwd(), 'docstore');
+    const intermediateDir = join(docstoreDir, `${bookId}-audiobook`);
+
+    // If directory doesn't exist, consider it already reset
+    if (!existsSync(intermediateDir)) {
+      return NextResponse.json({ success: true, existed: false });
+    }
+
+    // Recursively delete the entire audiobook directory
+    await rm(intermediateDir, { recursive: true, force: true });
+
+    return NextResponse.json({ success: true, existed: true });
+  } catch (error) {
+    console.error('Error resetting audiobook:', error);
+    return NextResponse.json(
+      { error: 'Failed to reset audiobook' },
+      { status: 500 }
+    );
+  }
 }
