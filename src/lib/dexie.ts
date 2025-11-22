@@ -136,6 +136,12 @@ function buildAppConfigFromRaw(raw: RawConfigMap): AppConfigRow {
     savedVoices,
     pdfHighlightEnabled:
       raw.pdfHighlightEnabled === 'false' ? false : APP_CONFIG_DEFAULTS.pdfHighlightEnabled,
+    pdfWordHighlightEnabled:
+      raw.pdfWordHighlightEnabled === 'false' ? false : APP_CONFIG_DEFAULTS.pdfWordHighlightEnabled,
+    epubHighlightEnabled:
+      raw.epubHighlightEnabled === 'false' ? false : APP_CONFIG_DEFAULTS.epubHighlightEnabled,
+    epubWordHighlightEnabled:
+      raw.epubWordHighlightEnabled === 'false' ? false : APP_CONFIG_DEFAULTS.epubWordHighlightEnabled,
     firstVisit: raw.firstVisit === 'true',
     documentListState,
   };

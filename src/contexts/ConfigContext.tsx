@@ -32,7 +32,9 @@ interface ConfigContextType {
   isLoading: boolean;
   isDBReady: boolean;
   pdfHighlightEnabled: boolean;
+  pdfWordHighlightEnabled: boolean;
   epubHighlightEnabled: boolean;
+  epubWordHighlightEnabled: boolean;
 }
 
 const ConfigContext = createContext<ConfigContextType | undefined>(undefined);
@@ -103,7 +105,9 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     savedVoices,
     smartSentenceSplitting,
     pdfHighlightEnabled,
+    pdfWordHighlightEnabled,
     epubHighlightEnabled,
+    epubWordHighlightEnabled,
   } = config || APP_CONFIG_DEFAULTS;
 
   /**
@@ -201,7 +205,9 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
       isLoading,
       isDBReady,
       pdfHighlightEnabled,
-      epubHighlightEnabled
+      pdfWordHighlightEnabled,
+      epubHighlightEnabled,
+      epubWordHighlightEnabled
     }}>
       {children}
     </ConfigContext.Provider>

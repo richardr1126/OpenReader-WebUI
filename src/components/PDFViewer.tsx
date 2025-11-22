@@ -26,11 +26,13 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
   const { containerWidth } = usePDFResize(containerRef);
 
   // Config context
-  const { viewType, pdfHighlightEnabled } = useConfig();
+  const { viewType, pdfHighlightEnabled, pdfWordHighlightEnabled } = useConfig();
 
   // TTS context
   const {
     currentSentence,
+    currentWordIndex,
+    currentSentenceAlignment,
     skipToLocation,
   } = useTTS();
 
@@ -38,6 +40,8 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
   const {
     highlightPattern,
     clearHighlights,
+    clearWordHighlights,
+    highlightWordIndex,
     onDocumentLoadSuccess,
     currDocData,
     currDocPages,
@@ -73,6 +77,46 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
       clearHighlights();
     };
   }, [currDocText, currentSentence, highlightPattern, clearHighlights, pdfHighlightEnabled]);
+
+  // Word-level highlight layered on top of the block highlight
+  useEffect(() => {
+    if (!pdfHighlightEnabled || !pdfWordHighlightEnabled) {
+      clearWordHighlights();
+      return;
+    }
+
+    if (currentWordIndex === null || currentWordIndex === undefined || currentWordIndex < 0) {
+      clearWordHighlights();
+      return;
+    }
+
+    const wordEntry =
+      currentSentenceAlignment &&
+      currentWordIndex < currentSentenceAlignment.words.length
+        ? currentSentenceAlignment.words[currentWordIndex]
+        : undefined;
+    const wordText = wordEntry?.text || null;
+
+    if (!wordText) {
+      clearWordHighlights();
+      return;
+    }
+
+    highlightWordIndex(
+      currentSentenceAlignment,
+      currentWordIndex,
+      currentSentence || '',
+      containerRef as RefObject<HTMLDivElement>
+    );
+  }, [
+    currentWordIndex,
+    currentSentence,
+    currentSentenceAlignment,
+    pdfHighlightEnabled,
+    pdfWordHighlightEnabled,
+    clearWordHighlights,
+    highlightWordIndex
+  ]);
 
   // Add page dimensions state
   const [pageWidth, setPageWidth] = useState<number>(595); // default A4 width

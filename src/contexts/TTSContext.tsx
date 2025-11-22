@@ -47,6 +47,7 @@ import type {
   TTSRequestPayload,
   TTSRequestHeaders,
   TTSRetryOptions,
+  TTSSentenceAlignment,
 } from '@/types/tts';
 
 // Media globals
@@ -62,6 +63,10 @@ declare global {
 interface TTSContextType extends TTSPlaybackState {
   // Voice settings
   availableVoices: string[];
+
+  // Alignment metadata for the current sentence
+  currentSentenceAlignment?: TTSSentenceAlignment;
+  currentWordIndex?: number | null;
 
   // Control functions
   togglePlay: () => void;
@@ -264,6 +269,10 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     updateConfigKey,
     skipBlank,
     smartSentenceSplitting,
+    pdfHighlightEnabled,
+    pdfWordHighlightEnabled,
+    epubHighlightEnabled,
+    epubWordHighlightEnabled,
   } = useConfig();
 
   // Audio and voice management hooks
@@ -331,6 +340,19 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
   const epubContinuationRef = useRef<string | null>(null);
   const pageTurnEstimateRef = useRef<TTSPageTurnEstimate | null>(null);
   const pageTurnTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sentenceAlignmentCacheRef = useRef<Map<string, TTSSentenceAlignment>>(new Map());
+  const [currentSentenceAlignment, setCurrentSentenceAlignment] = useState<TTSSentenceAlignment | undefined>();
+  const [currentWordIndex, setCurrentWordIndex] = useState<number | null>(null);
+  const sentencesRef = useRef<string[]>([]);
+  const currentIndexRef = useRef(0);
+
+  useEffect(() => {
+    sentencesRef.current = sentences;
+  }, [sentences]);
+
+  useEffect(() => {
+    currentIndexRef.current = currentIndex;
+  }, [currentIndex]);
 
   /**
    * Processes text into sentences using the shared NLP utility
@@ -370,6 +392,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
       clearTimeout(pageTurnTimeoutRef.current);
       pageTurnTimeoutRef.current = null;
     }
+    setCurrentWordIndex(null);
   }, [activeHowl]);
 
   /**
@@ -558,6 +581,11 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
           setCurrentIndex(0);
         }
 
+        // Reset alignment state whenever the text block changes
+        sentenceAlignmentCacheRef.current.clear();
+        setCurrentSentenceAlignment(undefined);
+        setCurrentWordIndex(null);
+
         // Compute auto page-turn estimate for PDFs when we have a continuation
         if (smartSentenceSplitting && !isEPUB && continuationCarried && normalizedOptions.nextLocation !== undefined) {
           const continuationNormalized = preprocessSentenceForAudio(continuationCarried);
@@ -706,10 +734,61 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
    * @returns {Promise<ArrayBuffer | undefined>} The generated audio buffer
    */
   const getAudio = useCallback(async (sentence: string): Promise<ArrayBuffer | undefined> => {
+    const alignmentEnabledForCurrentDoc =
+      (!isEPUB && pdfHighlightEnabled && pdfWordHighlightEnabled) ||
+      (isEPUB && epubHighlightEnabled && epubWordHighlightEnabled);
+    // Helper to ensure we have an alignment for a given
+    // sentence/audio pair, even when the audio itself is
+    // served from the local cache.
+    const ensureAlignment = (arrayBuffer: ArrayBuffer) => {
+      if (!alignmentEnabledForCurrentDoc) return;
+      if (sentenceAlignmentCacheRef.current.has(sentence)) return;
+
+      try {
+        const audioBytes = Array.from(new Uint8Array(arrayBuffer));
+        const alignmentBody = {
+          text: sentence,
+          audio: audioBytes,
+        };
+
+        void fetch('/api/whisper', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(alignmentBody),
+        })
+          .then(async (res) => {
+            if (!res.ok) return;
+            const data = await res.json().catch(() => null);
+            if (!data || !Array.isArray(data.alignments) || !data.alignments[0]) {
+              return;
+            }
+            const alignment = data.alignments[0] as TTSSentenceAlignment;
+            sentenceAlignmentCacheRef.current.set(sentence, alignment);
+
+            const currentSentence = sentencesRef.current[currentIndexRef.current];
+            if (currentSentence === sentence) {
+              setCurrentSentenceAlignment(alignment);
+              setCurrentWordIndex(null);
+            }
+          })
+          .catch((err) => {
+            console.warn('Alignment request failed:', err);
+          });
+      } catch (err) {
+        console.warn('Failed to start alignment request:', err);
+      }
+    };
+
     // Check if the audio is already cached
     const cachedAudio = audioCache.get(sentence);
     if (cachedAudio) {
       console.log('Using cached audio for sentence:', sentence.substring(0, 20));
+      // If we have audio but no alignment (e.g. after a
+      // navigation or TTS reset), kick off a fresh alignment
+      // request using the cached audio buffer.
+      ensureAlignment(cachedAudio);
       return cachedAudio;
     }
 
@@ -769,6 +848,9 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
       // Cache the array buffer
       audioCache.set(sentence, arrayBuffer);
 
+      // Fire-and-forget alignment request; do not block audio playback
+      ensureAlignment(arrayBuffer);
+
       return arrayBuffer;
     } catch (error) {
       // Check if this was an abort error
@@ -788,7 +870,21 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
       });
       throw error;
     }
-  }, [voice, speed, ttsModel, ttsInstructions, audioCache, openApiKey, openApiBaseUrl, configTTSProvider]);
+  }, [
+    voice,
+    speed,
+    ttsModel,
+    ttsInstructions,
+    audioCache,
+    openApiKey,
+    openApiBaseUrl,
+    configTTSProvider,
+    isEPUB,
+    pdfHighlightEnabled,
+    pdfWordHighlightEnabled,
+    epubHighlightEnabled,
+    epubWordHighlightEnabled
+  ]);
 
   /**
    * Processes and plays the current sentence
@@ -1004,7 +1100,17 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
   }, [isPlaying, advance, activeHowl, processSentence, audioSpeed]);
 
   const playAudio = useCallback(async () => {
-    const howl = await playSentenceWithHowl(sentences[currentIndex], currentIndex);
+    const sentence = sentences[currentIndex];
+    const cachedAlignment = sentenceAlignmentCacheRef.current.get(sentence);
+    if (cachedAlignment) {
+      setCurrentSentenceAlignment(cachedAlignment);
+      setCurrentWordIndex(null);
+    } else {
+      setCurrentSentenceAlignment(undefined);
+      setCurrentWordIndex(null);
+    }
+
+    const howl = await playSentenceWithHowl(sentence, currentIndex);
     if (howl) {
       howl.play();
     }
@@ -1016,6 +1122,47 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     isPlaying,
     playAudio,
   });
+
+  // Track the current word index during playback using Howler's seek position
+  useEffect(() => {
+    if (!activeHowl || !isPlaying || !currentSentenceAlignment || !currentSentenceAlignment.words.length) {
+      setCurrentWordIndex(null);
+      return;
+    }
+
+    let frameId: number;
+
+    const tick = () => {
+      try {
+        const pos = activeHowl.seek() as number;
+        if (typeof pos === 'number' && Number.isFinite(pos)) {
+          const words = currentSentenceAlignment.words;
+          let idx = -1;
+          for (let i = 0; i < words.length; i++) {
+            const w = words[i];
+            if (pos >= w.startSec && pos < w.endSec) {
+              idx = i;
+              break;
+            }
+          }
+          if (idx !== -1) {
+            setCurrentWordIndex((prev) => (prev === idx ? prev : idx));
+          }
+        }
+      } catch {
+        // ignore seek errors
+      }
+      frameId = requestAnimationFrame(tick);
+    };
+
+    frameId = requestAnimationFrame(tick);
+
+    return () => {
+      if (frameId) {
+        cancelAnimationFrame(frameId);
+      }
+    };
+  }, [activeHowl, isPlaying, currentSentenceAlignment]);
 
   /**
    * Preloads the next sentence's audio
@@ -1085,6 +1232,9 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     setCurrDocPages(undefined);
     setIsProcessing(false);
     setIsEPUB(false);
+    sentenceAlignmentCacheRef.current.clear();
+    setCurrentSentenceAlignment(undefined);
+    setCurrentWordIndex(null);
   }, [abortAudio]);
 
   /**
@@ -1205,6 +1355,8 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     isProcessing,
     isBackgrounded,
     currentSentence: sentences[currentIndex] || '',
+    currentSentenceAlignment,
+    currentWordIndex,
     currDocPage,
     currDocPageNumber,
     currDocPages,
@@ -1248,7 +1400,9 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     skipToLocation,
     registerLocationChangeHandler,
     registerVisualPageChangeHandler,
-    setIsEPUB
+    setIsEPUB,
+    currentSentenceAlignment,
+    currentWordIndex
   ]);
 
   // Use media session hook

@@ -36,10 +36,16 @@ import {
   extractTextFromPDF,
   highlightPattern,
   clearHighlights,
-  handleTextClick,
+  clearWordHighlights,
+  highlightWordIndex,
 } from '@/lib/pdf';
 
-import type { TTSRequestHeaders, TTSRequestPayload, TTSRetryOptions } from '@/types/tts';
+import type {
+  TTSRequestHeaders,
+  TTSRequestPayload,
+  TTSRetryOptions,
+  TTSSentenceAlignment
+} from '@/types/tts';
 
 /**
  * Interface defining all available methods and properties in the PDF context
@@ -59,13 +65,12 @@ interface PDFContextType {
   onDocumentLoadSuccess: (pdf: PDFDocumentProxy) => void;
   highlightPattern: (text: string, pattern: string, containerRef: RefObject<HTMLDivElement>) => void;
   clearHighlights: () => void;
-  handleTextClick: (
-    event: MouseEvent,
-    pdfText: string,
-    containerRef: RefObject<HTMLDivElement>,
-    stopAndPlayFromIndex: (index: number) => void,
-    isProcessing: boolean,
-    enableHighlight?: boolean
+  clearWordHighlights: () => void;
+  highlightWordIndex: (
+    alignment: TTSSentenceAlignment | undefined,
+    wordIndex: number | null | undefined,
+    sentence: string | null | undefined,
+    containerRef: RefObject<HTMLDivElement>
   ) => void;
   createFullAudioBook: (onProgress: (progress: number) => void, signal?: AbortSignal, onChapterComplete?: (chapter: { index: number; title: string; duration?: number; status: 'pending' | 'generating' | 'completed' | 'error'; bookId?: string; format?: 'mp3' | 'm4b' }) => void, bookId?: string, format?: 'mp3' | 'm4b') => Promise<string>;
   regenerateChapter: (chapterIndex: number, bookId: string, format: 'mp3' | 'm4b', signal: AbortSignal) => Promise<{ index: number; title: string; duration?: number; status: 'pending' | 'generating' | 'completed' | 'error'; bookId?: string; format?: 'mp3' | 'm4b' }>;
@@ -655,7 +660,8 @@ export function PDFProvider({ children }: { children: ReactNode }) {
       clearCurrDoc,
       highlightPattern,
       clearHighlights,
-      handleTextClick,
+      clearWordHighlights,
+      highlightWordIndex,
       pdfDocument,
       createFullAudioBook,
       regenerateChapter,

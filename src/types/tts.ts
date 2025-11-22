@@ -63,6 +63,22 @@ export interface TTSPageTurnEstimate {
   fraction: number;
 }
 
+// Word-level alignment within a single spoken sentence/block
+export interface TTSSentenceWord {
+  text: string;
+  startSec: number;
+  endSec: number;
+  charStart: number;
+  charEnd: number;
+}
+
+// Alignment metadata for a single TTS sentence/block
+export interface TTSSentenceAlignment {
+  sentence: string;
+  sentenceIndex: number;
+  words: TTSSentenceWord[];
+}
+
 // Metadata for an audiobook chapter
 export interface TTSAudiobookChapter {
   index: number;

@@ -23,7 +23,9 @@ export interface AppConfigValues {
   savedVoices: SavedVoices;
   smartSentenceSplitting: boolean;
   pdfHighlightEnabled: boolean;
+  pdfWordHighlightEnabled: boolean;
   epubHighlightEnabled: boolean;
+  epubWordHighlightEnabled: boolean;
   firstVisit: boolean;
   documentListState: DocumentListState;
 }
@@ -47,7 +49,9 @@ export const APP_CONFIG_DEFAULTS: AppConfigValues = {
   savedVoices: {},
   smartSentenceSplitting: true,
   pdfHighlightEnabled: true,
+  pdfWordHighlightEnabled: true,
   epubHighlightEnabled: true,
+  epubWordHighlightEnabled: true,
   firstVisit: false,
   documentListState: {
     sortBy: 'name',

@@ -30,10 +30,18 @@ export function EPUBViewer({ className = '' }: EPUBViewerProps) {
     setRendition,
     extractPageText,
     highlightPattern,
-    clearHighlights
+    clearHighlights,
+    highlightWordIndex,
+    clearWordHighlights
   } = useEPUB();
-  const { registerLocationChangeHandler, pause, currentSentence } = useTTS();
-  const { epubTheme } = useConfig();
+  const {
+    registerLocationChangeHandler,
+    pause,
+    currentSentence,
+    currentSentenceAlignment,
+    currentWordIndex
+  } = useTTS();
+  const { epubTheme, epubHighlightEnabled, epubWordHighlightEnabled } = useConfig();
   const { updateTheme } = useEPUBTheme(epubTheme, renditionRef.current);
   const containerRef = useRef<HTMLDivElement>(null);
   const { isResizing, setIsResizing, dimensions } = useEPUBResize(containerRef);
@@ -69,6 +77,38 @@ export function EPUBViewer({ className = '' }: EPUBViewerProps) {
       clearHighlights();
     }
   }, [currentSentence, highlightPattern, clearHighlights]);
+
+  // Word-level highlight layered on top of the block highlight
+  useEffect(() => {
+    if (!epubHighlightEnabled || !epubWordHighlightEnabled) {
+      clearWordHighlights();
+      return;
+    }
+
+    if (currentWordIndex === null || currentWordIndex === undefined || currentWordIndex < 0) {
+      clearWordHighlights();
+      return;
+    }
+
+    if (!currentSentenceAlignment) {
+      clearWordHighlights();
+      return;
+    }
+
+    highlightWordIndex(
+      currentSentenceAlignment,
+      currentWordIndex,
+      currentSentence || ''
+    );
+  }, [
+    currentWordIndex,
+    currentSentence,
+    currentSentenceAlignment,
+    epubHighlightEnabled,
+    epubWordHighlightEnabled,
+    clearWordHighlights,
+    highlightWordIndex
+  ]);
 
   if (!currDocData) {
     return <DocumentSkeleton />;

@@ -22,7 +22,13 @@ import { createRangeCfi } from '@/lib/epub';
 import { useParams } from 'next/navigation';
 import { useConfig } from './ConfigContext';
 import { withRetry } from '@/utils/audio';
-import type { TTSRequestHeaders, TTSRequestPayload, TTSRetryOptions } from '@/types/tts';
+import { CmpStr } from 'cmpstr';
+import type {
+  TTSRequestHeaders,
+  TTSRequestPayload,
+  TTSRetryOptions,
+  TTSSentenceAlignment
+} from '@/types/tts';
 
 interface EPUBContextType {
   currDocData: ArrayBuffer | undefined;
@@ -44,11 +50,25 @@ interface EPUBContextType {
   isAudioCombining: boolean;
   highlightPattern: (text: string) => void;
   clearHighlights: () => void;
+  highlightWordIndex: (
+    alignment: TTSSentenceAlignment | undefined,
+    wordIndex: number | null | undefined,
+    sentence: string | null | undefined
+  ) => void;
+  clearWordHighlights: () => void;
 }
 
 const EPUBContext = createContext<EPUBContextType | undefined>(undefined);
 
 const EPUB_CONTINUATION_CHARS = 600;
+
+const cmp = CmpStr.create().setMetric('dice').setFlags('itw');
+
+const normalizeWordForMatch = (text: string): string =>
+  text
+    .trim()
+    .replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, '')
+    .toLowerCase();
 
 const stepToNextNode = (node: Node | null, root: Node): Node | null => {
   if (!node) return null;
@@ -160,6 +180,7 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
   const shouldPauseRef = useRef(true);
   // Track current highlight CFI for removal
   const currentHighlightCfi = useRef<string | null>(null);
+  const currentWordHighlightCfi = useRef<string | null>(null);
 
   /**
    * Clears all current document state and stops any active TTS
@@ -711,14 +732,21 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
     }
   }, [id, skipToLocation, extractPageText, setIsEPUB]);
 
-  const clearHighlights = useCallback(() => {
-    if (renditionRef.current) {
-      if (currentHighlightCfi.current) {
-        renditionRef.current.annotations.remove(currentHighlightCfi.current, 'highlight');
-        currentHighlightCfi.current = null;
-      }
+  const clearWordHighlights = useCallback(() => {
+    if (!renditionRef.current) return;
+    if (currentWordHighlightCfi.current) {
+      renditionRef.current.annotations.remove(currentWordHighlightCfi.current, 'highlight');
+      currentWordHighlightCfi.current = null;
     }
   }, []);
+
+  const clearHighlights = useCallback(() => {
+    if (renditionRef.current && currentHighlightCfi.current) {
+      renditionRef.current.annotations.remove(currentHighlightCfi.current, 'highlight');
+      currentHighlightCfi.current = null;
+    }
+    clearWordHighlights();
+  }, [clearWordHighlights]);
 
   const highlightPattern = useCallback(async (text: string) => {
     if (!renditionRef.current) return;
@@ -772,6 +800,262 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
     }
   }, [epubHighlightEnabled, clearHighlights]);
 
+  const highlightWordIndex = useCallback((
+    alignment: TTSSentenceAlignment | undefined,
+    wordIndex: number | null | undefined,
+    sentence: string | null | undefined
+  ) => {
+    clearWordHighlights();
+
+    if (!epubHighlightEnabled) return;
+    if (!alignment) return;
+    if (wordIndex === null || wordIndex === undefined || wordIndex < 0) return;
+
+    const words = alignment.words || [];
+    if (!words.length || wordIndex >= words.length) return;
+
+    if (!renditionRef.current) return;
+    if (!currentHighlightCfi.current) return;
+
+    const cleanSentence =
+      sentence && sentence.trim()
+        ? sentence.trim().replace(/\s+/g, ' ')
+        : null;
+    if (!cleanSentence) return;
+
+    const alignmentSentenceClean = alignment.sentence
+      ? alignment.sentence.trim().replace(/\s+/g, ' ')
+      : null;
+    if (!alignmentSentenceClean || alignmentSentenceClean !== cleanSentence) {
+      return;
+    }
+
+    const contents = renditionRef.current.getContents();
+    const contentsArray = Array.isArray(contents) ? contents : [contents];
+
+    for (const content of contentsArray) {
+      let range: Range | null = null;
+      try {
+        range = content.range(currentHighlightCfi.current as string);
+      } catch {
+        range = null;
+      }
+      if (!range) continue;
+
+      const root = range.commonAncestorContainer;
+      if (!root) continue;
+
+      const domTokens: Array<{
+        node: Text;
+        startOffset: number;
+        endOffset: number;
+        norm: string;
+      }> = [];
+
+      const addTokensFromNode = (textNode: Text, start: number, end: number) => {
+        const full = textNode.textContent || '';
+        const safeStart = Math.max(0, Math.min(start, full.length));
+        const safeEnd = Math.max(safeStart, Math.min(end, full.length));
+        if (safeEnd <= safeStart) return;
+
+        const slice = full.slice(safeStart, safeEnd);
+        const wordRegex = /\S+/g;
+        let match: RegExpExecArray | null;
+        while ((match = wordRegex.exec(slice)) !== null) {
+          const raw = match[0];
+          const norm = normalizeWordForMatch(raw);
+          if (!norm) continue;
+          const tokenStart = safeStart + match.index;
+          const tokenEnd = tokenStart + raw.length;
+          domTokens.push({
+            node: textNode,
+            startOffset: tokenStart,
+            endOffset: tokenEnd,
+            norm,
+          });
+        }
+      };
+
+      const nextTextNode = (node: Node | null): Text | null => {
+        let next = getNextTextNode(node, root);
+        while (next) {
+          if (next.nodeType === Node.TEXT_NODE) {
+            return next as Text;
+          }
+          next = getNextTextNode(next, root);
+        }
+        return null;
+      };
+
+      // Collect tokens within the sentence range
+      if (range.startContainer === range.endContainer && range.startContainer.nodeType === Node.TEXT_NODE) {
+        addTokensFromNode(range.startContainer as Text, range.startOffset, range.endOffset);
+      } else {
+        let current: Text | null = null;
+
+        if (range.startContainer.nodeType === Node.TEXT_NODE) {
+          const startText = range.startContainer as Text;
+          const isEnd = range.endContainer === startText && range.endContainer.nodeType === Node.TEXT_NODE;
+          const endOffset = isEnd ? range.endOffset : (startText.textContent || '').length;
+          addTokensFromNode(startText, range.startOffset, endOffset);
+          if (isEnd) {
+            current = null;
+          } else {
+            current = nextTextNode(startText);
+          }
+        } else {
+          current = nextTextNode(range.startContainer);
+        }
+
+        while (current) {
+          if (range.endContainer.nodeType === Node.TEXT_NODE && current === range.endContainer) {
+            addTokensFromNode(current, 0, range.endOffset);
+            break;
+          } else {
+            addTokensFromNode(current, 0, (current.textContent || '').length);
+          }
+          current = nextTextNode(current);
+        }
+      }
+
+      if (!domTokens.length) {
+        return;
+      }
+
+      const domFiltered: Array<{ tokenIndex: number; norm: string }> = [];
+      for (let i = 0; i < domTokens.length; i++) {
+        const norm = domTokens[i].norm;
+        if (!norm) continue;
+        domFiltered.push({ tokenIndex: i, norm });
+      }
+
+      const ttsFiltered: Array<{ wordIndex: number; norm: string }> = [];
+      for (let i = 0; i < words.length; i++) {
+        const norm = normalizeWordForMatch(words[i].text);
+        if (!norm) continue;
+        ttsFiltered.push({ wordIndex: i, norm });
+      }
+
+      const wordToToken = new Array<number>(words.length).fill(-1);
+      const m = domFiltered.length;
+      const n = ttsFiltered.length;
+
+      if (m && n) {
+        const dp: number[][] = Array.from({ length: m + 1 }, () =>
+          new Array<number>(n + 1).fill(Number.POSITIVE_INFINITY)
+        );
+        const bt: number[][] = Array.from({ length: m + 1 }, () =>
+          new Array<number>(n + 1).fill(0)
+        ); // 0=diag,1=up,2=left
+
+        dp[0][0] = 0;
+        const GAP_COST = 0.7;
+
+        for (let i = 0; i <= m; i++) {
+          for (let j = 0; j <= n; j++) {
+            if (i > 0 && j > 0) {
+              const a = domFiltered[i - 1].norm;
+              const b = ttsFiltered[j - 1].norm;
+              const sim = cmp.compare(a, b);
+              const subCost = 1 - sim;
+              const cand = dp[i - 1][j - 1] + subCost;
+              if (cand < dp[i][j]) {
+                dp[i][j] = cand;
+                bt[i][j] = 0;
+              }
+            }
+            if (i > 0) {
+              const cand = dp[i - 1][j] + GAP_COST;
+              if (cand < dp[i][j]) {
+                dp[i][j] = cand;
+                bt[i][j] = 1;
+              }
+            }
+            if (j > 0) {
+              const cand = dp[i][j - 1] + GAP_COST;
+              if (cand < dp[i][j]) {
+                dp[i][j] = cand;
+                bt[i][j] = 2;
+              }
+            }
+          }
+        }
+
+        let i = m;
+        let j = n;
+        while (i > 0 || j > 0) {
+          const move = bt[i][j];
+          if (i > 0 && j > 0 && move === 0) {
+            const domIdx = domFiltered[i - 1].tokenIndex;
+            const ttsIdx = ttsFiltered[j - 1].wordIndex;
+            if (wordToToken[ttsIdx] === -1) {
+              wordToToken[ttsIdx] = domIdx;
+            }
+            i -= 1;
+            j -= 1;
+          } else if (i > 0 && (move === 1 || j === 0)) {
+            i -= 1;
+          } else if (j > 0 && (move === 2 || i === 0)) {
+            j -= 1;
+          } else {
+            break;
+          }
+        }
+
+        // Propagate nearest known mapping to fill gaps
+        let lastSeen = -1;
+        for (let k = 0; k < wordToToken.length; k++) {
+          if (wordToToken[k] !== -1) {
+            lastSeen = wordToToken[k];
+          } else if (lastSeen !== -1) {
+            wordToToken[k] = lastSeen;
+          }
+        }
+        let nextSeen = -1;
+        for (let k = wordToToken.length - 1; k >= 0; k--) {
+          if (wordToToken[k] !== -1) {
+            nextSeen = wordToToken[k];
+          } else if (nextSeen !== -1) {
+            wordToToken[k] = nextSeen;
+          }
+        }
+      }
+
+      const mappedIndex =
+        wordIndex < wordToToken.length ? wordToToken[wordIndex] : -1;
+      if (mappedIndex === -1) {
+        return;
+      }
+
+      const token = domTokens[mappedIndex];
+      const doc = token.node.ownerDocument || (range.commonAncestorContainer as Document);
+      const wordRange = doc.createRange();
+      wordRange.setStart(token.node, token.startOffset);
+      wordRange.setEnd(token.node, token.endOffset);
+
+      try {
+        const wordCfi = content.cfiFromRange(wordRange);
+        currentWordHighlightCfi.current = wordCfi;
+        renditionRef.current.annotations.add(
+          'highlight',
+          wordCfi,
+          {},
+          () => {},
+          '',
+          {
+            fill: 'var(--accent)',
+            'fill-opacity': '0.4',
+            'mix-blend-mode': 'multiply',
+          }
+        );
+      } catch (error) {
+        console.error('Error highlighting EPUB word:', error);
+      }
+
+      break;
+    }
+  }, [epubHighlightEnabled, clearWordHighlights]);
+
 
 
   // Context value memoization
@@ -796,6 +1080,8 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
       isAudioCombining,
       highlightPattern,
       clearHighlights,
+      highlightWordIndex,
+      clearWordHighlights,
     }),
     [
       setCurrentDocument,
@@ -813,6 +1099,8 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
       isAudioCombining,
       highlightPattern,
       clearHighlights,
+      highlightWordIndex,
+      clearWordHighlights,
     ]
   );
 
