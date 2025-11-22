@@ -199,7 +199,7 @@ export async function openSettingsDocumentsTab(page: Page) {
 // Delete all local documents through Settings and close dialogs
 export async function deleteAllLocalDocuments(page: Page) {
   await openSettingsDocumentsTab(page);
-  await page.getByRole('button', { name: 'Delete local docs' }).click();
+  await page.getByRole('button', { name: 'Delete local' }).click();
 
   const heading = page.getByRole('heading', { name: 'Delete Local Documents' });
   await expect(heading).toBeVisible({ timeout: 10000 });

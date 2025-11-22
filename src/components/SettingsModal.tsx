@@ -599,7 +599,7 @@ export function SettingsModal() {
 
                       <TabPanel className="space-y-4">
                         {isDev && <div className="space-y-1">
-                          <label className="block text-sm font-medium text-foreground">Document Sync</label>
+                          <label className="block text-sm font-medium text-foreground">Server Document Sync</label>
                           <div className="flex gap-2">
                             <Button
                               onClick={handleLoad}
@@ -610,7 +610,7 @@ export function SettingsModal() {
                                        transform transition-transform duration-200 ease-in-out hover:scale-[1.04] hover:text-accent
                                        disabled:opacity-50"
                             >
-                              {isLoading ? `Loading... ${Math.round(progress)}%` : 'Load docs from Server'}
+                              {isLoading ? `Loading... ${Math.round(progress)}%` : 'Load'}
                             </Button>
                             <Button
                               onClick={handleSync}
@@ -621,13 +621,13 @@ export function SettingsModal() {
                                        transform transition-transform duration-200 ease-in-out hover:scale-[1.04] hover:text-accent
                                        disabled:opacity-50"
                             >
-                              {isSyncing ? `Saving... ${Math.round(progress)}%` : 'Save local to Server'}
+                              {isSyncing ? `Saving... ${Math.round(progress)}%` : 'Save to server'}
                             </Button>
                           </div>
                         </div>}
 
                         <div className="space-y-1 pb-3">
-                          <label className="block text-sm font-medium text-foreground">Bulk Delete</label>
+                          <label className="block text-sm font-medium text-foreground">Delete All</label>
                           <div className="flex gap-2">
                             <Button
                               onClick={() => setShowClearLocalConfirm(true)}
@@ -636,7 +636,7 @@ export function SettingsModal() {
                                          focus-visible:ring-2 focus-visible:bg-red-500 focus-visible:ring-offset-2
                                        transform transition-transform duration-200 ease-in-out hover:scale-[1.04]"
                             >
-                              Delete local docs
+                              Delete local
                             </Button>
                             {isDev && <Button
                               onClick={() => setShowClearServerConfirm(true)}
@@ -645,7 +645,7 @@ export function SettingsModal() {
                                          focus-visible:ring-2 focus-visible:bg-red-500 focus-visible:ring-offset-2
                                        transform transition-transform duration-200 ease-in-out hover:scale-[1.04]"
                             >
-                              Delete server docs
+                              Delete server
                             </Button>}
                           </div>
                         </div>
