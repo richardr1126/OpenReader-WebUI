@@ -66,9 +66,9 @@ export default {
           },
         },
       },
-    },
-    screens: {
-      xs: '410px', // custom xs breakpoint
+      screens: {
+        xs: '410px', // custom xs breakpoint
+      },
     },
   },
   plugins: [typography],

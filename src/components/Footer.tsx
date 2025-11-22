@@ -2,9 +2,6 @@ import { Popover, PopoverButton, PopoverPanel } from '@headlessui/react'
 import { GithubIcon } from '@/components/icons/Icons'
 import { CodeBlock } from '@/components/CodeBlock'
 
-const isDev = process.env.NEXT_PUBLIC_NODE_ENV !== 'production' || process.env.NODE_ENV == null;
-
-
 export function Footer() {
   return (
     <footer className="m-8 mb-2 text-sm text-muted">
@@ -54,10 +51,10 @@ export function Footer() {
             </a>
           </span>
         </div>
-        <div className='font-medium text-center flex items-center justify-center gap-1'>
+        <div className='font-medium text-center inline-flex truncate items-center justify-center gap-1'>
           <span>This is a demo app (</span>
           <Popover className="relative">
-            <PopoverButton className="font-bold hover:text-foreground transition-colors outline-none">
+            <PopoverButton className="font-bold hover:text-foreground transition-colors outline-none inline">
               self-host
             </PopoverButton>
             <PopoverPanel anchor="top" className="bg-base p-6 rounded-xl shadow-2xl border border-offbase w-[90vw] max-w-3xl z-50 backdrop-blur-md flex flex-col gap-4">
