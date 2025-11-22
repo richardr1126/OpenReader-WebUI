@@ -373,6 +373,50 @@ export function DotsVerticalIcon(props: React.SVGProps<SVGSVGElement>) {
   );
 }
 
+export function ChevronLeftIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      className={props.className}
+      width={props.width || "1.25em"}
+      height={props.height || "1.25em"}
+      {...props}
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="2"
+        d="M11 19l-7-7m0 0l7-7m-7 7h18"
+      />
+    </svg>
+  );
+}
+
+export function ChevronRightIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      className={props.className}
+      width={props.width || "1.25em"}
+      height={props.height || "1.25em"}
+      {...props}
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="2"
+        d="M13 5l7 7-7 7M5 5l7 7-7 7"
+      />
+    </svg>
+  );
+}
+
 export function SpeedometerIcon(props: React.SVGProps<SVGSVGElement>) {
   return (
     <svg

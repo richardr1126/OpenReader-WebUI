@@ -414,10 +414,10 @@ export function DocumentSettings({ isOpen, setIsOpen, epub, html }: {
                             onChange={(e) => updateConfigKey('epubTheme', e.target.checked)}
                             className="form-checkbox h-4 w-4 text-accent rounded border-muted"
                           />
-                          <span className="text-sm font-medium text-foreground">Use theme (experimental)</span>
+                          <span className="text-sm font-medium text-foreground">Use theme</span>
                         </label>
                         <p className="text-sm text-muted pl-6">
-                          Apply the current app theme to the EPUB viewer
+                          Apply the current app theme to the EPUB viewer background and text colors
                         </p>
                       </div>
                     )}
