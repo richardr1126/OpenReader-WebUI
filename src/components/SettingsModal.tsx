@@ -28,6 +28,7 @@ import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { ProgressPopup } from '@/components/ProgressPopup';
 import { useTimeEstimation } from '@/hooks/useTimeEstimation';
 import { THEMES } from '@/contexts/ThemeContext';
+import { deleteServerDocuments } from '@/lib/client';
 
 const isDev = process.env.NEXT_PUBLIC_NODE_ENV !== 'production' || process.env.NODE_ENV == null;
 
@@ -222,12 +223,7 @@ export function SettingsModal() {
 
   const handleClearServer = async () => {
     try {
-      const response = await fetch('/api/documents', {
-        method: 'DELETE',
-      });
-      if (!response.ok) {
-        throw new Error('Failed to delete server documents');
-      }
+      await deleteServerDocuments();
     } catch (error) {
       console.error('Delete failed:', error);
     }

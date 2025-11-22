@@ -8,6 +8,7 @@ import { useEPUB } from '@/contexts/EPUBContext';
 import { usePDF } from '@/contexts/PDFContext';
 import { AudiobookExportModal } from '@/components/AudiobookExportModal';
 import { useParams } from 'next/navigation';
+import type { TTSAudiobookChapter, TTSAudiobookFormat } from '@/types/tts';
 
 const isDev = process.env.NEXT_PUBLIC_NODE_ENV !== 'production' || process.env.NODE_ENV == null;
 
@@ -80,8 +81,8 @@ export function DocumentSettings({ isOpen, setIsOpen, epub, html }: {
   const handleGenerateAudiobook = useCallback(async (
     onProgress: (progress: number) => void,
     signal: AbortSignal,
-    onChapterComplete: (chapter: { index: number; title: string; duration?: number; status: 'pending' | 'generating' | 'completed' | 'error'; bookId?: string; format?: 'mp3' | 'm4b' }) => void,
-    format: 'mp3' | 'm4b'
+    onChapterComplete: (chapter: TTSAudiobookChapter) => void,
+    format: TTSAudiobookFormat
   ) => {
     if (epub) {
       return createEPUBAudioBook(onProgress, signal, onChapterComplete, id as string, format);
@@ -93,7 +94,7 @@ export function DocumentSettings({ isOpen, setIsOpen, epub, html }: {
   const handleRegenerateChapter = useCallback(async (
     chapterIndex: number,
     bookId: string,
-    format: 'mp3' | 'm4b',
+    format: TTSAudiobookFormat,
     signal: AbortSignal
   ) => {
     if (epub) {

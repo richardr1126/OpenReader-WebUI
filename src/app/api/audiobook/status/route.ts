@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { readdir, readFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join } from 'path';
+import type { TTSAudiobookFormat } from '@/types/tts';
 
 export async function GET(request: NextRequest) {
   try {
@@ -26,7 +27,7 @@ export async function GET(request: NextRequest) {
       duration?: number;
       status: 'completed' | 'error';
       bookId: string;
-      format?: 'mp3' | 'm4b';
+      format?: TTSAudiobookFormat;
     }> = [];
     
     for (const metaFile of metaFiles) {
@@ -68,5 +69,3 @@ export async function GET(request: NextRequest) {
     );
   }
 }
-
-

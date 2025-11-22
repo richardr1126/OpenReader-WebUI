@@ -4,7 +4,8 @@ import { SpeechCreateParams } from 'openai/resources/audio/speech.mjs';
 import { isKokoroModel } from '@/utils/voice';
 import { LRUCache } from 'lru-cache';
 import { createHash } from 'crypto';
-import type { TTSRequestPayload, TTSError } from '@/types/tts';
+import type { TTSRequestPayload } from '@/types/client';
+import type { TTSError, TTSAudioBuffer } from '@/types/tts';
 
 export const runtime = 'nodejs';
 
@@ -13,7 +14,7 @@ type ExtendedSpeechParams = Omit<SpeechCreateParams, 'voice'> & {
   voice: SpeechCreateParams['voice'] | CustomVoice;
   instructions?: string;
 };
-type AudioBufferValue = ArrayBuffer;
+type AudioBufferValue = TTSAudioBuffer;
 
 const TTS_CACHE_MAX_SIZE_BYTES = Number(process.env.TTS_CACHE_MAX_SIZE_BYTES || 256 * 1024 * 1024); // 256MB
 const TTS_CACHE_TTL_MS = Number(process.env.TTS_CACHE_TTL_MS || 1000 * 60 * 30); // 30 minutes
@@ -25,7 +26,7 @@ const ttsAudioCache = new LRUCache<string, AudioBufferValue>({
 });
 
 type InflightEntry = {
-  promise: Promise<ArrayBuffer>;
+  promise: Promise<TTSAudioBuffer>;
   controller: AbortController;
   consumers: number;
 };
@@ -40,7 +41,7 @@ async function fetchTTSBufferWithRetry(
   openai: OpenAI,
   createParams: ExtendedSpeechParams,
   signal: AbortSignal
-): Promise<ArrayBuffer> {
+): Promise<TTSAudioBuffer> {
   let attempt = 0;
   const maxRetries = Number(process.env.TTS_MAX_RETRIES ?? 2);
   let delay = Number(process.env.TTS_RETRY_INITIAL_MS ?? 250);
@@ -135,7 +136,7 @@ export async function POST(req: NextRequest) {
       voice: normalizedVoice,
       input: text,
       speed: speed,
-      response_format: format === 'aac' ? 'aac' : 'mp3',
+      response_format: format,
     };
     // Only add instructions if model is gpt-4o-mini-tts and instructions are provided
     if ((model as string) === 'gpt-4o-mini-tts' && instructions) {
@@ -143,7 +144,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Compute cache key and check LRU before making provider call
-    const contentType = format === 'aac' ? 'audio/aac' : 'audio/mpeg';
+    const contentType = 'audio/mpeg';
 
     // Preserve voice string as-is for cache key (no weight stripping)
     const voiceForKey = typeof createParams.voice === 'string'
@@ -245,7 +246,7 @@ export async function POST(req: NextRequest) {
     };
     req.signal.addEventListener('abort', onAbort, { once: true });
 
-    let buffer: ArrayBuffer;
+    let buffer: TTSAudioBuffer;
     try {
       buffer = await entry.promise;
     } finally {

@@ -4,14 +4,14 @@ import { mkdtemp, writeFile, rm, access, mkdir, readFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { spawn } from 'child_process';
-import type { TTSSentenceAlignment } from '@/types/tts';
+import type { TTSSentenceAlignment, TTSAudioBytes, TTSAudioBuffer } from '@/types/tts';
 import { preprocessSentenceForAudio } from '@/lib/nlp';
 
 export const runtime = 'nodejs';
 
 interface WhisperRequestBody {
   text: string;
-  audio: number[]; // raw bytes from Uint8Array
+  audio: TTSAudioBytes; // raw bytes from Uint8Array
   lang?: string;
 }
 
@@ -331,7 +331,7 @@ function mapWordsToSentenceOffsets(
 }
 
 async function alignAudioWithText(
-  audioBuffer: ArrayBuffer,
+  audioBuffer: TTSAudioBuffer,
   text: string,
   cacheKey?: string,
   opts: WhisperAlignmentOptions = {}
@@ -448,4 +448,3 @@ export async function POST(req: NextRequest) {
     );
   }
 }
-

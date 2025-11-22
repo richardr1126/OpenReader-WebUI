@@ -12,6 +12,7 @@ import { SettingsIcon, DownloadIcon } from '@/components/icons/Icons';
 import { Header } from '@/components/Header';
 import { ZoomControl } from '@/components/ZoomControl';
 import { AudiobookExportModal } from '@/components/AudiobookExportModal';
+import type { TTSAudiobookChapter, TTSAudiobookFormat } from '@/types/tts';
 import TTSPlayer from '@/components/player/TTSPlayer';
 
 const isDev = process.env.NEXT_PUBLIC_NODE_ENV !== 'production' || process.env.NODE_ENV == null;
@@ -80,8 +81,8 @@ export default function PDFViewerPage() {
   const handleGenerateAudiobook = useCallback(async (
     onProgress: (progress: number) => void,
     signal: AbortSignal,
-    onChapterComplete: (chapter: { index: number; title: string; duration?: number; status: 'pending' | 'generating' | 'completed' | 'error'; bookId?: string; format?: 'mp3' | 'm4b' }) => void,
-    format: 'mp3' | 'm4b'
+    onChapterComplete: (chapter: TTSAudiobookChapter) => void,
+    format: TTSAudiobookFormat
   ) => {
     return createPDFAudioBook(onProgress, signal, onChapterComplete, id as string, format);
   }, [createPDFAudioBook, id]);
@@ -89,7 +90,7 @@ export default function PDFViewerPage() {
   const handleRegenerateChapter = useCallback(async (
     chapterIndex: number,
     bookId: string,
-    format: 'mp3' | 'm4b',
+    format: TTSAudiobookFormat,
     signal: AbortSignal
   ) => {
     return regeneratePDFChapter(chapterIndex, bookId, format, signal);

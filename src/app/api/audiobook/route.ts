@@ -4,12 +4,13 @@ import { writeFile, readFile, mkdir, unlink, readdir, rm } from 'fs/promises';
 import { existsSync, createReadStream } from 'fs';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
+import type { TTSAudioBytes, TTSAudiobookFormat } from '@/types/tts';
 
 interface ConversionRequest {
   chapterTitle: string;
-  buffer: number[];
+  buffer: TTSAudioBytes;
   bookId?: string;
-  format?: 'mp3' | 'm4b';
+  format?: TTSAudiobookFormat;
   chapterIndex?: number;
 }
 
@@ -206,9 +207,12 @@ export async function POST(request: NextRequest) {
     await unlink(inputPath).catch(console.error);
 
     return NextResponse.json({ 
+      index: chapterIndex,
+      title: data.chapterTitle,
+      duration,
+      status: 'completed' as const,
       bookId,
-      chapterIndex,
-      duration
+      format
     });
 
   } catch (error) {
@@ -229,7 +233,7 @@ export async function POST(request: NextRequest) {
 export async function GET(request: NextRequest) {
   try {
     const bookId = request.nextUrl.searchParams.get('bookId');
-    const requestedFormat = request.nextUrl.searchParams.get('format') as 'mp3' | 'm4b' | null;
+    const requestedFormat = request.nextUrl.searchParams.get('format') as TTSAudiobookFormat | null;
     if (!bookId) {
       return NextResponse.json({ error: 'Missing bookId parameter' }, { status: 400 });
     }

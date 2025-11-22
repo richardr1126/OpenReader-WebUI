@@ -2,7 +2,6 @@ import { pdfjs } from 'react-pdf';
 import type { TextItem } from 'pdfjs-dist/types/src/display/api';
 import { type PDFDocumentProxy, TextLayer } from 'pdfjs-dist';
 import "core-js/proposals/promise-with-resolvers";
-import { processTextToSentences } from '@/lib/nlp';
 import type { TTSSentenceAlignment } from '@/types/tts';
 import { CmpStr } from 'cmpstr';
 

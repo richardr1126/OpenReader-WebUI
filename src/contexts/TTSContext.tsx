@@ -36,7 +36,7 @@ import { useMediaSession } from '@/hooks/audio/useMediaSession';
 import { useAudioContext } from '@/hooks/audio/useAudioContext';
 import { getLastDocumentLocation, setLastDocumentLocation } from '@/lib/dexie';
 import { useBackgroundState } from '@/hooks/audio/useBackgroundState';
-import { withRetry } from '@/utils/audio';
+import { withRetry, generateTTS, alignAudio } from '@/lib/client';
 import { preprocessSentenceForAudio, processTextToSentences } from '@/lib/nlp';
 import { isKokoroModel } from '@/utils/voice';
 import type {
@@ -44,11 +44,14 @@ import type {
   TTSSmartMergeResult,
   TTSPageTurnEstimate,
   TTSPlaybackState,
+  TTSSentenceAlignment,
+  TTSAudioBuffer,
+} from '@/types/tts';
+import type {
   TTSRequestPayload,
   TTSRequestHeaders,
   TTSRetryOptions,
-  TTSSentenceAlignment,
-} from '@/types/tts';
+} from '@/types/client';
 
 // Media globals
 declare global {
@@ -731,16 +734,16 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
    * Generates and plays audio for the current sentence
    * 
    * @param {string} sentence - The sentence to generate audio for
-   * @returns {Promise<ArrayBuffer | undefined>} The generated audio buffer
+   * @returns {Promise<TTSAudioBuffer | undefined>} The generated audio buffer
    */
-  const getAudio = useCallback(async (sentence: string): Promise<ArrayBuffer | undefined> => {
+  const getAudio = useCallback(async (sentence: string): Promise<TTSAudioBuffer | undefined> => {
     const alignmentEnabledForCurrentDoc =
       (!isEPUB && pdfHighlightEnabled && pdfWordHighlightEnabled) ||
       (isEPUB && epubHighlightEnabled && epubWordHighlightEnabled);
     // Helper to ensure we have an alignment for a given
     // sentence/audio pair, even when the audio itself is
     // served from the local cache.
-    const ensureAlignment = (arrayBuffer: ArrayBuffer) => {
+    const ensureAlignment = (arrayBuffer: TTSAudioBuffer) => {
       if (!alignmentEnabledForCurrentDoc) return;
       if (sentenceAlignmentCacheRef.current.has(sentence)) return;
 
@@ -751,16 +754,8 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
           audio: audioBytes,
         };
 
-        void fetch('/api/whisper', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(alignmentBody),
-        })
-          .then(async (res) => {
-            if (!res.ok) return;
-            const data = await res.json().catch(() => null);
+        void alignAudio(alignmentBody)
+          .then(async (data) => {
             if (!data || !Array.isArray(data.alignments) || !data.alignments[0]) {
               return;
             }
@@ -825,19 +820,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
 
       const arrayBuffer = await withRetry(
         async () => {
-          
-          const response = await fetch('/api/tts', {
-            method: 'POST',
-            headers: reqHeaders,
-            body: JSON.stringify(reqBody),
-            signal: controller.signal,
-          });
-
-          if (!response.ok) {
-            throw new Error('Failed to generate audio');
-          }
-
-          return response.arrayBuffer();
+          return await generateTTS(reqBody, reqHeaders, controller.signal);
         },
         retryOptions
       );

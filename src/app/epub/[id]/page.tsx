@@ -14,6 +14,7 @@ import TTSPlayer from '@/components/player/TTSPlayer';
 import { ZoomControl } from '@/components/ZoomControl';
 import { AudiobookExportModal } from '@/components/AudiobookExportModal';
 import { DownloadIcon } from '@/components/icons/Icons';
+import type { TTSAudiobookChapter, TTSAudiobookFormat } from '@/types/tts';
 
 const isDev = process.env.NEXT_PUBLIC_NODE_ENV !== 'production' || process.env.NODE_ENV == null;
 
@@ -86,8 +87,8 @@ export default function EPUBPage() {
   const handleGenerateAudiobook = useCallback(async (
     onProgress: (progress: number) => void,
     signal: AbortSignal,
-    onChapterComplete: (chapter: { index: number; title: string; duration?: number; status: 'pending' | 'generating' | 'completed' | 'error'; bookId?: string; format?: 'mp3' | 'm4b' }) => void,
-    format: 'mp3' | 'm4b'
+    onChapterComplete: (chapter: TTSAudiobookChapter) => void,
+    format: TTSAudiobookFormat
   ) => {
     return createEPUBAudioBook(onProgress, signal, onChapterComplete, id as string, format);
   }, [createEPUBAudioBook, id]);
@@ -95,7 +96,7 @@ export default function EPUBPage() {
   const handleRegenerateChapter = useCallback(async (
     chapterIndex: number,
     bookId: string,
-    format: 'mp3' | 'm4b',
+    format: TTSAudiobookFormat,
     signal: AbortSignal
   ) => {
     return regenerateEPUBChapter(chapterIndex, bookId, format, signal);

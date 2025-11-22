@@ -9,7 +9,14 @@ import { DownloadIcon, CheckCircleIcon, XCircleIcon, ClockIcon, ChevronUpDownIco
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { LoadingSpinner } from '@/components/Spinner';
 import { useConfig } from '@/contexts/ConfigContext';
-import type { TTSAudiobookChapter } from '@/types/tts';
+import type { TTSAudiobookChapter, TTSAudiobookFormat } from '@/types/tts';
+import { 
+  getAudiobookStatus, 
+  deleteAudiobookChapter, 
+  deleteAudiobook, 
+  downloadAudiobookChapter, 
+  downloadAudiobook 
+} from '@/lib/client';
 interface AudiobookExportModalProps {
   isOpen: boolean;
   setIsOpen: (isOpen: boolean) => void;
@@ -19,12 +26,12 @@ interface AudiobookExportModalProps {
     onProgress: (progress: number) => void,
     signal: AbortSignal,
     onChapterComplete: (chapter: TTSAudiobookChapter) => void,
-    format: 'mp3' | 'm4b'
+    format: TTSAudiobookFormat
   ) => Promise<string>; // Returns bookId
   onRegenerateChapter?: (
     chapterIndex: number,
     bookId: string,
-    format: 'mp3' | 'm4b',
+    format: TTSAudiobookFormat,
     signal: AbortSignal
   ) => Promise<TTSAudiobookChapter>;
 }
@@ -46,7 +53,7 @@ export function AudiobookExportModal({
   const [isLoadingExisting, setIsLoadingExisting] = useState(false);
   const [isRefreshingChapters, setIsRefreshingChapters] = useState(false);
   const [currentChapter, setCurrentChapter] = useState<string>('');
-  const [format, setFormat] = useState<'mp3' | 'm4b'>('m4b');
+  const [format, setFormat] = useState<TTSAudiobookFormat>('m4b');
   const [regeneratingChapter, setRegeneratingChapter] = useState<number | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const [pendingDeleteChapter, setPendingDeleteChapter] = useState<TTSAudiobookChapter | null>(null);
@@ -61,26 +68,23 @@ export function AudiobookExportModal({
       setIsLoadingExisting(true);
     }
     try {
-      const response = await fetch(`/api/audiobook/status?bookId=${documentId}`);
-      if (response.ok) {
-        const data = await response.json();
-        if (data.exists && data.chapters.length > 0) {
-          setChapters(data.chapters);
-          setBookId(data.bookId);
-          // Set format from existing chapters - this ensures the format matches what was actually generated
-          if (data.chapters[0]?.format) {
-            const detectedFormat = data.chapters[0].format as 'mp3' | 'm4b';
-            setFormat(detectedFormat);
-          }
-          // If we have a complete audiobook, we're done
-          if (data.hasComplete) {
-            setProgress(100);
-          }
-        } else {
-          // If nothing exists, clear chapters/bookId to reflect current state
-          setChapters([]);
-          setBookId(null);
+      const data = await getAudiobookStatus(documentId);
+      if (data.exists && data.chapters.length > 0) {
+        setChapters(data.chapters);
+        setBookId(data.bookId);
+        // Set format from existing chapters - this ensures the format matches what was actually generated
+        if (data.chapters[0]?.format) {
+          const detectedFormat = data.chapters[0].format as TTSAudiobookFormat;
+          setFormat(detectedFormat);
         }
+        // If we have a complete audiobook, we're done
+        if (data.hasComplete) {
+          setProgress(100);
+        }
+      } else {
+        // If nothing exists, clear chapters/bookId to reflect current state
+        setChapters([]);
+        setBookId(null);
       }
     } catch (error) {
       console.error('Error fetching existing chapters:', error);
@@ -241,12 +245,7 @@ export function AudiobookExportModal({
   const performDeleteChapter = useCallback(async () => {
     if (!bookId || !pendingDeleteChapter) return;
     try {
-      const response = await fetch(`/api/audiobook/chapter?bookId=${bookId}&chapterIndex=${pendingDeleteChapter.index}`, {
-        method: 'DELETE'
-      });
-      if (!response.ok) {
-        throw new Error('Delete failed');
-      }
+      await deleteAudiobookChapter(bookId, pendingDeleteChapter.index);
       setChapters(prev => prev.filter(c => c.index !== pendingDeleteChapter.index));
       await fetchExistingChapters(true);
     } catch (error) {
@@ -261,10 +260,7 @@ export function AudiobookExportModal({
     const targetBookId = bookId || documentId;
     if (!targetBookId) return;
     try {
-      const resp = await fetch(`/api/audiobook?bookId=${targetBookId}`, { method: 'DELETE' });
-      if (!resp.ok) {
-        throw new Error('Reset failed');
-      }
+      await deleteAudiobook(targetBookId);
       setChapters([]);
       setBookId(null);
       setProgress(0);
@@ -281,10 +277,7 @@ export function AudiobookExportModal({
     if (!chapter.bookId) return;
 
     try {
-      const response = await fetch(`/api/audiobook/chapter?bookId=${chapter.bookId}&chapterIndex=${chapter.index}`);
-      if (!response.ok) throw new Error('Download failed');
-
-      const blob = await response.blob();
+      const blob = await downloadAudiobookChapter(chapter.bookId, chapter.index);
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -306,8 +299,7 @@ export function AudiobookExportModal({
 
     setIsCombining(true);
     try {
-      const response = await fetch(`/api/audiobook?bookId=${bookId}&format=${format}`);
-      if (!response.ok) throw new Error('Download failed');
+      const response = await downloadAudiobook(bookId, format);
 
       const reader = response.body?.getReader();
       if (!reader) throw new Error('No response body');
