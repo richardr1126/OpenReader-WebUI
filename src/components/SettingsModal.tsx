@@ -400,7 +400,7 @@ export function SettingsModal() {
                               type="password"
                               value={localApiKey}
                               onChange={(e) => handleInputChange('apiKey', e.target.value)}
-                              placeholder={!isDev && localTTSProvider === 'deepinfra' ? "Deepinfra free or override apikey" : "Using environment variable"}
+                              placeholder={!isDev && localTTSProvider === 'deepinfra' ? "Deepinfra free or use your API key" : "Using environment variable"}
                               className="w-full rounded-lg bg-background py-1.5 px-3 text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-accent"
                             />
                           </div>

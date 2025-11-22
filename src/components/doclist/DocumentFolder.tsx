@@ -1,5 +1,3 @@
-"use client";
-
 import { useState, DragEvent } from 'react';
 import { Button, Transition } from '@headlessui/react';
 import { DocumentListItem } from './DocumentListItem';
@@ -16,6 +14,7 @@ interface DocumentFolderProps {
   onDragStart: (doc: DocumentListDocument) => void;
   onDragEnd: () => void;
   onDrop: (e: DragEvent, folderId: string) => void;
+  viewMode: 'list' | 'grid';
 }
 
 const ChevronIcon = ({ className = "w-4 h-4" }) => (
@@ -39,6 +38,7 @@ export function DocumentFolder({
   onDragStart,
   onDragEnd,
   onDrop,
+  viewMode,
 }: DocumentFolderProps) {
   const [isHovering, setIsHovering] = useState(false);
   const isDropTarget = isHovering && draggedDoc && !draggedDoc.folderId && draggedDoc.id !== folder.id;
@@ -64,7 +64,7 @@ export function DocumentFolder({
         if (!draggedDoc || draggedDoc.folderId) return;
         onDrop(e, folder.id);
       }}
-      className={`overflow-hidden rounded-md border border-offbase ${isDropTarget ? 'ring-2 ring-accent' : ''}`}
+      className={`w-full overflow-hidden rounded-md border border-offbase ${isDropTarget ? 'ring-2 ring-accent' : ''}`}
     >
       <div className='flex flex-row justify-between p-0'>
         <div className="w-full">
@@ -104,7 +104,7 @@ export function DocumentFolder({
               leaveFrom="transform scale-y-100 opacity-100 max-h-[1000px]"
               leaveTo="transform scale-y-0 opacity-0 max-h-0"
             >
-              <div id={`folder-panel-${folder.id}`} className="space-y-1 origin-top">
+              <div id={`folder-panel-${folder.id}`} className={`${viewMode === 'grid' ? "flex flex-wrap gap-1" : "space-y-1"} w-full origin-top`}>
                 {sortedDocuments.map(doc => (
                   <DocumentListItem
                     key={`${doc.type}-${doc.id}`}
@@ -114,6 +114,7 @@ export function DocumentFolder({
                     onDragStart={onDragStart}
                     onDragEnd={onDragEnd}
                     isDropTarget={false}
+                    viewMode={viewMode}
                   />
                 ))}
               </div>

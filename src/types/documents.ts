@@ -63,4 +63,5 @@ export interface DocumentListState {
   folders: Folder[];
   collapsedFolders: string[];
   showHint: boolean;
+  viewMode?: 'list' | 'grid';
 }

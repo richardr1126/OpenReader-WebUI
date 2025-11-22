@@ -156,18 +156,21 @@ export function EPUBViewer({ className = '' }: EPUBViewerProps) {
       {isTocOpen && tocRef.current && tocRef.current.length > 0 && (
         <div className="border-b border-offbase bg-background text-xs overflow-y-auto max-h-64 p-2">
           <div className="font-semibold text-muted pb-1">Skip to chapters</div>
-          <div className="flex flex-wrap gap-1">
+          <div className="flex flex-wrap gap-1 w-full">
             {tocRef.current.map((item, index) => (
               <button
                 key={`${item.href}-${index}`}
                 type="button"
                 onClick={() => {
-                  if (item.href) {
-                    handleLocationChanged(item.href);
-                  }
+                  if (item.href) handleLocationChanged(item.href);
                   setIsTocOpen(false);
                 }}
-                className="w-full px-2 py-1 rounded-md text-foreground text-center bg-base hover:bg-offbase hover:text-accent transition-colors duration-150"
+                className="
+                  px-2 py-1 rounded-md font-medium text-foreground text-center bg-base 
+                  hover:bg-offbase hover:text-accent transition-colors duration-150
+                  whitespace-nowrap 
+                  flex-1 min-w-[140px]
+                "
               >
                 {item.label}
               </button>

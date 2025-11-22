@@ -1,5 +1,7 @@
 import type { DocumentListState } from '@/types/documents';
 
+const isDev = process.env.NEXT_PUBLIC_NODE_ENV !== 'production' || process.env.NODE_ENV == null;
+
 export type ViewType = 'single' | 'dual' | 'scroll';
 
 export type SavedVoices = Record<string, string>;
@@ -43,15 +45,15 @@ export const APP_CONFIG_DEFAULTS: AppConfigValues = {
   footerMargin: 0,
   leftMargin: 0,
   rightMargin: 0,
-  ttsProvider: 'custom-openai',
-  ttsModel: 'kokoro',
+  ttsProvider: isDev ? 'custom-openai' : 'deepinfra',
+  ttsModel: isDev ? 'kokoro' : 'hexgrad/Kokoro-82M',
   ttsInstructions: '',
   savedVoices: {},
   smartSentenceSplitting: true,
   pdfHighlightEnabled: true,
-  pdfWordHighlightEnabled: true,
+  pdfWordHighlightEnabled: isDev,
   epubHighlightEnabled: true,
-  epubWordHighlightEnabled: true,
+  epubWordHighlightEnabled: isDev,
   firstVisit: false,
   documentListState: {
     sortBy: 'name',
@@ -59,6 +61,7 @@ export const APP_CONFIG_DEFAULTS: AppConfigValues = {
     folders: [],
     collapsedFolders: [],
     showHint: true,
+    viewMode: 'grid',
   },
 };
 
