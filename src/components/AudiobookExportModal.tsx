@@ -538,12 +538,15 @@ export function AudiobookExportModal({
 
                         {chapters.length > 0 && (
                           <>
-                            <div className={`space-y-2 max-h-96 ${isRefreshingChapters ? 'opacity-70 transition-opacity' : ''}`} aria-busy={isRefreshingChapters}>
+                            <div
+                              className={`space-y-2 max-h-96 overflow-scroll pr-1 ${isRefreshingChapters ? 'opacity-70 transition-opacity' : ''}`}
+                              aria-busy={isRefreshingChapters}
+                            >
                               <div className="flex items-center gap-2">
                                 <h4 className="text-sm font-medium text-foreground">Chapters</h4>
                                 {isRefreshingChapters && <ClockIcon className="h-4 w-4 text-muted animate-spin" />}
                               </div>
-                              {displayChapters.map((chapter) => (
+                              {displayChapters.map((chapter, index) => (
                                 <div
                                   key={chapter.index}
                                   className={`flex items-center justify-between px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg bg-offbase ${(regeneratingChapter === chapter.index || chapter.status === 'generating') ? 'prism-outline' : ''}`}
@@ -591,7 +594,7 @@ export function AudiobookExportModal({
                                           leaveFrom="transform opacity-100 scale-100"
                                           leaveTo="transform opacity-0 scale-95"
                                         >
-                                          <MenuItems className="absolute right-0 bottom-full mb-2 w-44 origin-bottom-right rounded-md bg-background shadow-lg ring-1 ring-black/5 focus:outline-none z-10 p-1">
+                                          <MenuItems className={`absolute right-0 w-44 rounded-md bg-background shadow-lg ring-1 ring-black/5 focus:outline-none z-10 p-1 ${index < 2 ? 'top-full mt-2 origin-top-right' : 'bottom-full mb-2 origin-bottom-right'}`}>
                                             {chapter.status === 'completed' && (
                                               <>
                                                 <MenuItem>
