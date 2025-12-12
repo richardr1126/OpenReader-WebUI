@@ -64,7 +64,7 @@ export function DocumentFolder({
         if (!draggedDoc || draggedDoc.folderId) return;
         onDrop(e, folder.id);
       }}
-      className={`w-full overflow-hidden rounded-md border border-offbase ${isDropTarget ? 'ring-2 ring-accent' : ''}`}
+      className={`w-full overflow-hidden rounded-md border border-offbase ${viewMode === 'grid' ? 'col-span-full' : ''} ${isDropTarget ? 'ring-2 ring-accent' : ''}`}
     >
       <div className='flex flex-row justify-between p-0'>
         <div className="w-full">
@@ -104,7 +104,14 @@ export function DocumentFolder({
               leaveFrom="transform scale-y-100 opacity-100 max-h-[1000px]"
               leaveTo="transform scale-y-0 opacity-0 max-h-0"
             >
-              <div id={`folder-panel-${folder.id}`} className={`${viewMode === 'grid' ? "flex flex-wrap gap-1" : "space-y-1"} w-full origin-top`}>
+              <div
+                id={`folder-panel-${folder.id}`}
+                className={`${
+                  viewMode === 'grid'
+                    ? 'grid w-full grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3 md:grid-cols-4 lg:grid-cols-5'
+                    : 'w-full space-y-1'
+                } origin-top`}
+              >
                 {sortedDocuments.map(doc => (
                   <DocumentListItem
                     key={`${doc.type}-${doc.id}`}

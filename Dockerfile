@@ -35,7 +35,7 @@ RUN pnpm build
 
 
 # Stage 3: minimal runtime image
-FROM node:current-alpine AS runner
+FROM node:lts-alpine AS runner
 
 # Add runtime OS dependencies:
 # - ffmpeg: required for audiobook export and word-by-word alignment (/api/whisper)

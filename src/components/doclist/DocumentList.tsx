@@ -345,7 +345,13 @@ export function DocumentList() {
           </div>
         )}
 
-        <div className={viewMode === 'grid' ? "flex flex-wrap gap-1 w-full" : "space-y-1 w-full"}>
+        <div
+          className={
+            viewMode === 'grid'
+              ? 'grid w-full grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3 md:grid-cols-4 lg:grid-cols-5'
+              : 'w-full space-y-1'
+          }
+        >
 
           {folders.map(folder => (
             <DocumentFolder

@@ -10,14 +10,14 @@ export function HomeContent() {
 
   if (totalDocs === 0) {
     return (
-      <div className="max-w-5xl mx-auto">
+      <div className="w-full">
         <DocumentUploader className="py-12" />
       </div>
     );
   }
 
   return (
-    <div className="max-w-5xl mx-auto">
+    <div className="w-full">
       <DocumentList />
     </div>
   );
