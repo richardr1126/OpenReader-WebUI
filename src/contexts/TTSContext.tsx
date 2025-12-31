@@ -350,6 +350,8 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
   const preloadRequests = useRef<Map<string, Promise<string>>>(new Map());
   // Track active abort controllers for TTS requests
   const activeAbortControllers = useRef<Set<AbortController>>(new Set());
+  // Track active Blob URLs for cleanup
+  const activeBlobUrls = useRef<Set<string>>(new Set());
   // Track if we're restoring from a saved position
   const [pendingRestoreIndex, setPendingRestoreIndex] = useState<number | null>(null);
   // Guard to coalesce rapid restarts and only resume the latest change
@@ -405,6 +407,12 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
       });
       activeAbortControllers.current.clear();
       preloadRequests.current.clear();
+
+      // Revoke all active Blob URLs to prevent memory leaks
+      activeBlobUrls.current.forEach(url => {
+        URL.revokeObjectURL(url);
+      });
+      activeBlobUrls.current.clear();
     }
 
     if (pageTurnTimeoutRef.current) {
@@ -931,11 +939,14 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
         const audioBuffer = await getAudio(sentence);
         if (!audioBuffer) throw new Error('No audio data generated');
 
-        // Convert to base64 data URI
-        const bytes = new Uint8Array(audioBuffer);
-        const binaryString = bytes.reduce((acc, byte) => acc + String.fromCharCode(byte), '');
-        const base64String = btoa(binaryString);
-        return `data:audio/mp3;base64,${base64String}`;
+        // Convert to Blob URL (better browser compatibility, especially Firefox)
+        const blob = new Blob([audioBuffer], { type: 'audio/mp3' });
+        const blobUrl = URL.createObjectURL(blob);
+
+        // Track Blob URL for cleanup
+        activeBlobUrls.current.add(blobUrl);
+
+        return blobUrl;
       } catch (error) {
         setIsProcessing(false);
         throw error;
@@ -971,9 +982,9 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
 
     const createHowl = async (retryCount = 0): Promise<Howl | null> => {
       try {
-        // Get the processed audio data URI directly from processSentence
-        const audioDataUri = await processSentence(sentence);
-        if (!audioDataUri) {
+        // Get the processed audio Blob URL directly from processSentence
+        const audioBlobUrl = await processSentence(sentence);
+        if (!audioBlobUrl) {
           throw new Error('No audio data generated');
         }
 
@@ -983,7 +994,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
         }
 
         return new Howl({
-          src: [audioDataUri],
+          src: [audioBlobUrl],
           format: ['mp3', 'mpeg'],
           html5: true,
           preload: true,
@@ -1067,6 +1078,13 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
           onend: function (this: Howl) {
             this.unload();
             setActiveHowl(null);
+
+            // Revoke the Blob URL to free memory
+            if (activeBlobUrls.current.has(audioBlobUrl)) {
+              URL.revokeObjectURL(audioBlobUrl);
+              activeBlobUrls.current.delete(audioBlobUrl);
+            }
+
             if (pageTurnTimeoutRef.current) {
               clearTimeout(pageTurnTimeoutRef.current);
               pageTurnTimeoutRef.current = null;
@@ -1078,6 +1096,12 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
           onstop: function (this: Howl) {
             setIsProcessing(false);
             this.unload();
+
+            // Revoke the Blob URL to free memory
+            if (activeBlobUrls.current.has(audioBlobUrl)) {
+              URL.revokeObjectURL(audioBlobUrl);
+              activeBlobUrls.current.delete(audioBlobUrl);
+            }
           }
         });
       } catch (error) {
@@ -1186,12 +1210,17 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
   }, [activeHowl, isPlaying, currentSentenceAlignment]);
 
   /**
-   * Preloads the next sentence's audio
+   * Preloads the next 3 sentences' audio for smoother playback
    */
   const preloadNextAudio = useCallback(async () => {
     try {
-      const nextSentence = sentences[currentIndex + 1];
-      if (nextSentence) {
+      // Preload the next 3 sentences to ensure smooth playback
+      const PRELOAD_AHEAD_COUNT = 3;
+
+      for (let i = 1; i <= PRELOAD_AHEAD_COUNT; i++) {
+        const nextSentence = sentences[currentIndex + i];
+        if (!nextSentence) break; // Stop if we've reached the end
+
         const nextKey = buildCacheKey(
           nextSentence,
           voice,
@@ -1201,9 +1230,9 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
         );
 
         if (!audioCache.has(nextKey) && !preloadRequests.current.has(nextSentence)) {
-        // Start preloading but don't wait for it to complete
+          // Start preloading but don't wait for it to complete
           processSentence(nextSentence, true).catch(error => {
-            console.error('Error preloading next sentence:', error);
+            console.error(`Error preloading sentence ${i} ahead:`, error);
           });
         }
       }
