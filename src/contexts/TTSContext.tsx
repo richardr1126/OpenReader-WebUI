@@ -1057,20 +1057,16 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
                 retryHowl.play();
               }
             } else {
-              console.error('Max retries reached, moving to next sentence');
+              console.warn('Max retries reached, skipping to next sentence');
               setIsProcessing(false);
               setActiveHowl(null);
               this.unload();
-              setIsPlaying(false);
+              // Don't stop playback - keep it seamless by continuing to next sentence
+              // setIsPlaying remains true so playback continues
 
-              toast.error('Audio loading failed after retries. Moving to next sentence...', {
-                id: 'audio-load-error',
-                style: {
-                  background: 'var(--background)',
-                  color: 'var(--accent)',
-                },
-                duration: 2000,
-              });
+              // Less intrusive notification - just log to console
+              // User won't be interrupted by error toasts during reading
+              console.warn('Skipping problematic sentence, continuing playback...');
 
               advance();
             }
@@ -1119,18 +1115,13 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
 
       throw new Error('Failed to create Howl instance');
     } catch (error) {
-      console.error('Error playing TTS:', error);
+      console.warn('Error processing TTS, skipping to next sentence:', error);
       setActiveHowl(null);
       setIsProcessing(false);
 
-      toast.error('Failed to process audio. Skipping problematic sentence.', {
-        id: 'tts-processing-error',
-        style: {
-          background: 'var(--background)',
-          color: 'var(--accent)',
-        },
-        duration: 3000,
-      });
+      // Keep playback going seamlessly - don't stop on errors
+      // Just log to console and move to next sentence
+      console.warn('Skipping problematic sentence, continuing playback...');
 
       advance();
       return null;
@@ -1211,11 +1202,13 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
 
   /**
    * Preloads the next 3 sentences' audio for smoother playback
+   * Uses progressive delays to avoid overwhelming the server
    */
   const preloadNextAudio = useCallback(async () => {
     try {
       // Preload the next 3 sentences to ensure smooth playback
       const PRELOAD_AHEAD_COUNT = 3;
+      const PRELOAD_DELAY_MS = 50; // Small delay between requests
 
       for (let i = 1; i <= PRELOAD_AHEAD_COUNT; i++) {
         const nextSentence = sentences[currentIndex + i];
@@ -1230,14 +1223,20 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
         );
 
         if (!audioCache.has(nextKey) && !preloadRequests.current.has(nextSentence)) {
-          // Start preloading but don't wait for it to complete
-          processSentence(nextSentence, true).catch(error => {
-            console.error(`Error preloading sentence ${i} ahead:`, error);
-          });
+          // Add progressive delay to avoid overwhelming the server
+          // First request: 50ms, second: 100ms, third: 150ms
+          const delay = PRELOAD_DELAY_MS * i;
+
+          setTimeout(() => {
+            // Start preloading but don't wait for it to complete
+            processSentence(nextSentence, true).catch(error => {
+              console.warn(`Error preloading sentence ${i} ahead:`, error);
+            });
+          }, delay);
         }
       }
     } catch (error) {
-      console.error('Error initiating preload:', error);
+      console.warn('Error initiating preload:', error);
     }
   }, [currentIndex, sentences, audioCache, processSentence, voice, speed, configTTSProvider, ttsModel]);
 
