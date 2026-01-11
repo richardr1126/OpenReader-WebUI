@@ -21,8 +21,19 @@ OpenReader WebUI is an open source text to speech document reader web app built 
 - 📖 *(Updated)* **Read Along Experience** providing real-time text highlighting during playback (PDF/EPUB)
   - *(New)* **Word-by-word** highlighting uses word-by-word timestamps generated server-side with [*whisper.cpp*](https://github.com/ggml-org/whisper.cpp) (optional)
 - 🧠 *(New)* **Smart Sentence-Aware Narration** merges sentences across pages/chapters for smoother TTS
+- 📚 *(New)* **Smart Chapter Detection & Pagination** automatically splits large text files into chapters
+  - Detects natural chapter markers (Chapter 1, Part I, Section 1, etc.)
+  - Size-based splitting for files without chapters (~50KB chunks)
+  - Seamless TTS auto-advance through chapters during playback
+  - Chapter navigation with Previous/Next controls
 - 🎧 *(New)* **Reliable Audiobook Export** in **m4b/mp3**, with resumable, chapter-based export and regeneration
-- 🚀 *(New)* **Optimized Next.js TTS Proxy** with audio caching and optimized repeat playback
+  - Supports EPUB, PDF, and HTML/text documents
+  - Accessible via gear icon in document viewer
+- 🚀 *(Updated)* **Optimized Next.js TTS Proxy** with enhanced audio caching and cross-browser compatibility
+  - Aggressive preloading (5 sentences ahead) for seamless playback
+  - 50-sentence LRU cache for efficient memory usage
+  - Blob URL audio for improved Firefox compatibility
+  - Seamless error recovery (skips problematic sentences automatically)
 - 💾 **Local-First Architecture** stores documents and more in-browser with Dexie.js
 - 🛜 **Optional Server-side documents** using backend `/docstore` for all users
 - 🎨 **Customizable Experience**
@@ -249,7 +260,11 @@ This project would not be possible without standing on the shoulders of these gi
 - **Markdown/Text:**
   - [react-markdown](https://github.com/remarkjs/react-markdown)
   - [remark-gfm](https://github.com/remarkjs/remark-gfm)
-- **UI:** 
+  - Custom chapter detection for pagination and navigation
+- **Audio:**
+  - [Howler.js](https://howlerjs.com) for cross-browser audio playback
+  - Blob URL audio for efficient memory usage and Firefox compatibility
+- **UI:**
   - [Tailwind CSS](https://tailwindcss.com)
   - [Headless UI](https://headlessui.com)
   - [@tailwindcss/typography](https://tailwindcss.com/docs/typography-plugin)
