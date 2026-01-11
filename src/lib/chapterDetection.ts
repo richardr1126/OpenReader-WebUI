@@ -35,21 +35,27 @@ export function detectChapters(text: string, maxChunkSize = 50000): Chapter[] {
     // Check if this line is a chapter marker
     const isChapterMarker = chapterPatterns.some(pattern => pattern.test(trimmed));
 
-    if (isChapterMarker && index > 0) {
-      // Save the previous chapter
-      const chapterText = lines.slice(currentChapterStart, index).join('\n');
-      if (chapterText.trim().length > 0) {
-        chapters.push({
-          title: currentChapterTitle,
-          startIndex: currentChapterStart,
-          endIndex: index,
-          text: chapterText,
-        });
-      }
+    if (isChapterMarker) {
+      if (index === 0) {
+        // First line is a chapter marker - use it as title and start content from next line
+        currentChapterTitle = trimmed || 'Chapter 1';
+        currentChapterStart = 1;
+      } else {
+        // Save the previous chapter
+        const chapterText = lines.slice(currentChapterStart, index).join('\n');
+        if (chapterText.trim().length > 0) {
+          chapters.push({
+            title: currentChapterTitle,
+            startIndex: currentChapterStart,
+            endIndex: index,
+            text: chapterText,
+          });
+        }
 
-      // Start new chapter
-      currentChapterStart = index;
-      currentChapterTitle = trimmed || `Chapter ${chapters.length + 1}`;
+        // Start new chapter (skip the marker line itself)
+        currentChapterStart = index + 1;
+        currentChapterTitle = trimmed || `Chapter ${chapters.length + 1}`;
+      }
     }
   });
 
