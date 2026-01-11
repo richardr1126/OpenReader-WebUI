@@ -296,7 +296,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
 
   // Audio and voice management hooks
   const audioContext = useAudioContext();
-  const audioCache = useAudioCache(25);
+  const audioCache = useAudioCache(50); // Increased from 25 to 50 for better buffering
   const { availableVoices, fetchVoices } = useVoiceManagement(openApiKey, openApiBaseUrl, configTTSProvider, configTTSModel);
 
   // Add ref for location change handler
@@ -1068,7 +1068,10 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
               // User won't be interrupted by error toasts during reading
               console.warn('Skipping problematic sentence, continuing playback...');
 
-              advance();
+              // Add a small delay before advancing to give the server a brief rest
+              setTimeout(() => {
+                advance();
+              }, 500); // 500ms delay before trying next sentence
             }
           },
           onend: function (this: Howl) {
@@ -1123,7 +1126,10 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
       // Just log to console and move to next sentence
       console.warn('Skipping problematic sentence, continuing playback...');
 
-      advance();
+      // Add a small delay before advancing to give the server a brief rest
+      setTimeout(() => {
+        advance();
+      }, 500); // 500ms delay before trying next sentence
       return null;
     }
   }, [isPlaying, advance, activeHowl, processSentence, audioSpeed]);
@@ -1201,15 +1207,16 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
   }, [activeHowl, isPlaying, currentSentenceAlignment]);
 
   /**
-   * Preloads the next 3 sentences' audio for smoother playback
-   * Uses progressive delays to avoid overwhelming the server
+   * Preloads the next 5 sentences' audio for smoother playback
+   * Starts all preloads immediately for maximum buffering
    */
   const preloadNextAudio = useCallback(async () => {
     try {
-      // Preload the next 3 sentences to ensure smooth playback
-      const PRELOAD_AHEAD_COUNT = 3;
-      const PRELOAD_DELAY_MS = 50; // Small delay between requests
+      // Preload the next 5 sentences to ensure smooth playback
+      const PRELOAD_AHEAD_COUNT = 5;
 
+      // Start all preloads immediately (no delays)
+      // The server-side cache and de-duplication will handle load balancing
       for (let i = 1; i <= PRELOAD_AHEAD_COUNT; i++) {
         const nextSentence = sentences[currentIndex + i];
         if (!nextSentence) break; // Stop if we've reached the end
@@ -1222,17 +1229,13 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
           ttsModel,
         );
 
+        // Only start preload if not already cached or in progress
         if (!audioCache.has(nextKey) && !preloadRequests.current.has(nextSentence)) {
-          // Add progressive delay to avoid overwhelming the server
-          // First request: 50ms, second: 100ms, third: 150ms
-          const delay = PRELOAD_DELAY_MS * i;
-
-          setTimeout(() => {
-            // Start preloading but don't wait for it to complete
-            processSentence(nextSentence, true).catch(error => {
-              console.warn(`Error preloading sentence ${i} ahead:`, error);
-            });
-          }, delay);
+          // Start preloading immediately (no setTimeout delay)
+          // Fire and forget - errors are logged but don't block playback
+          processSentence(nextSentence, true).catch(error => {
+            console.warn(`Error preloading sentence ${i} ahead (${nextSentence.substring(0, 30)}...):`, error);
+          });
         }
       }
     } catch (error) {

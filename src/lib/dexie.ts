@@ -1,10 +1,11 @@
 import Dexie, { type EntityTable } from 'dexie';
 import { APP_CONFIG_DEFAULTS, type ViewType, type SavedVoices, type AppConfigRow } from '@/types/config';
 import { PDFDocument, EPUBDocument, HTMLDocument, DocumentListState, SyncedDocument } from '@/types/documents';
+import { Job } from '@/types/jobs';
 
 const DB_NAME = 'openreader-db';
 // Managed via Dexie (version bumped from the original manual IndexedDB)
-const DB_VERSION = 5;
+const DB_VERSION = 6; // Bumped to 6 for jobs table
 
 const PDF_TABLE = 'pdf-documents' as const;
 const EPUB_TABLE = 'epub-documents' as const;
@@ -12,6 +13,7 @@ const HTML_TABLE = 'html-documents' as const;
 const CONFIG_TABLE = 'config' as const;
 const APP_CONFIG_TABLE = 'app-config' as const;
 const LAST_LOCATION_TABLE = 'last-locations' as const;
+const JOBS_TABLE = 'jobs' as const;
 
 export interface LastLocationRow {
   docId: string;
@@ -30,6 +32,7 @@ type OpenReaderDB = Dexie & {
   [CONFIG_TABLE]: EntityTable<ConfigRow, 'key'>;
   [APP_CONFIG_TABLE]: EntityTable<AppConfigRow, 'id'>;
   [LAST_LOCATION_TABLE]: EntityTable<LastLocationRow, 'docId'>;
+  [JOBS_TABLE]: EntityTable<Job, 'id'>;
 };
 
 export const db = new Dexie(DB_NAME) as OpenReaderDB;
@@ -154,12 +157,14 @@ function buildAppConfigFromRaw(raw: RawConfigMap): AppConfigRow {
 
 // Version 5: introduce app-config and last-locations tables, migrate scattered config keys,
 // and drop the legacy config table in a single upgrade step.
+// Version 6: add jobs table for background audiobook generation
 db.version(DB_VERSION).stores({
   [PDF_TABLE]: 'id, type, name, lastModified, size, folderId',
   [EPUB_TABLE]: 'id, type, name, lastModified, size, folderId',
   [HTML_TABLE]: 'id, type, name, lastModified, size, folderId',
   [APP_CONFIG_TABLE]: 'id',
   [LAST_LOCATION_TABLE]: 'docId',
+  [JOBS_TABLE]: 'id, status, type, createdAt',
   // `null` here means: drop the old 'config' table after upgrade runs,
   // but Dexie still lets us read it inside the upgrade transaction.
   [CONFIG_TABLE]: null,
@@ -554,4 +559,57 @@ export async function loadDocumentsFromServer(
   }
 
   return { lastSync: Date.now() };
+}
+
+// Job management helpers
+
+export async function createJob(job: Job): Promise<void> {
+  await withDB(async () => {
+    console.log('Creating job via Dexie:', job.id);
+    await db[JOBS_TABLE].put(job);
+  });
+}
+
+export async function getJob(id: string): Promise<Job | undefined> {
+  return withDB(async () => {
+    console.log('Fetching job via Dexie:', id);
+    return db[JOBS_TABLE].get(id);
+  });
+}
+
+export async function getAllJobs(): Promise<Job[]> {
+  return withDB(async () => {
+    console.log('Fetching all jobs via Dexie');
+    return db[JOBS_TABLE].orderBy('createdAt').reverse().toArray();
+  });
+}
+
+export async function getJobsByStatus(status: string): Promise<Job[]> {
+  return withDB(async () => {
+    console.log('Fetching jobs by status via Dexie:', status);
+    return db[JOBS_TABLE].where('status').equals(status).toArray();
+  });
+}
+
+export async function updateJob(id: string, updates: Partial<Job>): Promise<void> {
+  await withDB(async () => {
+    console.log('Updating job via Dexie:', id);
+    await db[JOBS_TABLE].update(id, updates);
+  });
+}
+
+export async function deleteJob(id: string): Promise<void> {
+  await withDB(async () => {
+    console.log('Deleting job via Dexie:', id);
+    await db[JOBS_TABLE].delete(id);
+  });
+}
+
+export async function clearCompletedJobs(): Promise<void> {
+  await withDB(async () => {
+    console.log('Clearing completed jobs via Dexie');
+    const completedJobs = await db[JOBS_TABLE].where('status').anyOf('completed', 'failed', 'cancelled').toArray();
+    const ids = completedJobs.map(job => job.id);
+    await db[JOBS_TABLE].bulkDelete(ids);
+  });
 }
