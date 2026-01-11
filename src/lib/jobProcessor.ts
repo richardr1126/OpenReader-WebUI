@@ -100,7 +100,7 @@ export async function processAudiobookJob(
  * Fetch document content from storage
  * This would integrate with your document storage system
  */
-async function fetchDocumentContent(documentId: string, signal: AbortSignal): Promise<string> {
+async function fetchDocumentContent(_documentId: string, _signal: AbortSignal): Promise<string> {
   // In a real implementation, this would:
   // 1. Query the document from IndexedDB or file system
   // 2. Extract text content based on document type (PDF, EPUB, HTML)
@@ -115,7 +115,7 @@ async function fetchDocumentContent(documentId: string, signal: AbortSignal): Pr
  * Process text into sentences
  * Uses the existing NLP sentence splitting logic
  */
-async function processTextToSentences(text: string, signal: AbortSignal): Promise<string[]> {
+async function processTextToSentences(text: string, _signal: AbortSignal): Promise<string[]> {
   // This would use the same logic as the TTS context
   // For now, simple split on sentence boundaries
   const sentences = text

@@ -19,7 +19,6 @@ export function HTMLViewer({ className = '' }: HTMLViewerProps) {
     totalChapters,
     goToNextChapter,
     goToPreviousChapter,
-    goToChapter,
   } = useHTML();
   const containerRef = useRef<HTMLDivElement>(null);
 

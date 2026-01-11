@@ -99,7 +99,7 @@ function splitBySize(text: string, maxChunkSize: number): Chapter[] {
   let currentChunk = '';
   let chunkIndex = 0;
 
-  paragraphs.forEach((paragraph, index) => {
+  paragraphs.forEach((paragraph) => {
     const potentialChunk = currentChunk + (currentChunk ? '\n\n' : '') + paragraph;
 
     if (potentialChunk.length > maxChunkSize && currentChunk.length > 0) {

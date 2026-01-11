@@ -11,6 +11,7 @@ import {
 import { getHtmlDocument } from '@/lib/dexie';
 import { useTTS } from '@/contexts/TTSContext';
 import { detectChapters, type Chapter } from '@/lib/chapterDetection';
+import type { TTSAudiobookChapter } from '@/types/tts';
 
 interface HTMLContextType {
   currDocData: string | undefined;
@@ -31,16 +32,16 @@ interface HTMLContextType {
   createFullAudioBook: (
     onProgress: (progress: number) => void,
     signal: AbortSignal,
-    onChapterComplete: (chapter: any) => void,
+    onChapterComplete: (chapter: TTSAudiobookChapter) => void,
     documentId: string,
     format: 'mp3' | 'm4b'
-  ) => Promise<{ bookId: string; format: string }>;
+  ) => Promise<string>;
   regenerateChapter: (
     chapterIndex: number,
     bookId: string,
     format: 'mp3' | 'm4b',
     signal: AbortSignal
-  ) => Promise<void>;
+  ) => Promise<TTSAudiobookChapter>;
 }
 
 const HTMLContext = createContext<HTMLContextType | undefined>(undefined);
@@ -123,10 +124,10 @@ export function HTMLProvider({ children }: { children: ReactNode }) {
    */
   const createFullAudioBook = useCallback(async (
     onProgress: (progress: number) => void,
-    signal: AbortSignal,
-    onChapterComplete: (chapter: any) => void,
+    _signal: AbortSignal,
+    _onChapterComplete: (chapter: TTSAudiobookChapter) => void,
     documentId: string,
-    format: 'mp3' | 'm4b'
+    _format: 'mp3' | 'm4b'
   ) => {
     // Placeholder - will be implemented with job queue system
     console.log('createFullAudioBook called for HTML document:', documentId);
@@ -134,7 +135,7 @@ export function HTMLProvider({ children }: { children: ReactNode }) {
 
     // TODO: Integrate with background job queue
     // For now, return a placeholder
-    return { bookId: 'placeholder', format };
+    return 'placeholder';
   }, []);
 
   /**
@@ -145,10 +146,17 @@ export function HTMLProvider({ children }: { children: ReactNode }) {
     chapterIndex: number,
     bookId: string,
     format: 'mp3' | 'm4b',
-    signal: AbortSignal
-  ) => {
+    _signal: AbortSignal
+  ): Promise<TTSAudiobookChapter> => {
     // Placeholder
     console.log('regenerateChapter called:', chapterIndex, bookId, format);
+    return {
+      index: chapterIndex,
+      title: `Chapter ${chapterIndex + 1}`,
+      status: 'completed',
+      bookId,
+      format,
+    };
   }, []);
 
   /**

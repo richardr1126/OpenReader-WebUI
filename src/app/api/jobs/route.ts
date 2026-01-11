@@ -132,7 +132,7 @@ async function processJobInBackground(jobId: string) {
     job.currentStep = 'Loading document...';
     jobs.set(jobId, job);
 
-    const { documentId, voice, speed, ttsProvider, ttsModel, ttsInstructions, format } = job.data;
+    const { documentId, voice, speed, ttsProvider, ttsModel, format } = job.data;
 
     // In a real implementation, this would:
     // 1. Load the document from IndexedDB or file system
