@@ -6,6 +6,7 @@ import { useConfig, ViewType } from '@/contexts/ConfigContext';
 import { ChevronUpDownIcon, CheckIcon } from '@/components/icons/Icons';
 import { useEPUB } from '@/contexts/EPUBContext';
 import { usePDF } from '@/contexts/PDFContext';
+import { useHTML } from '@/contexts/HTMLContext';
 import { AudiobookExportModal } from '@/components/AudiobookExportModal';
 import { useParams } from 'next/navigation';
 import type { TTSAudiobookChapter, TTSAudiobookFormat } from '@/types/tts';
@@ -41,6 +42,7 @@ export function DocumentSettings({ isOpen, setIsOpen, epub, html }: {
   } = useConfig();
   const { createFullAudioBook: createEPUBAudioBook, regenerateChapter: regenerateEPUBChapter } = useEPUB();
   const { createFullAudioBook: createPDFAudioBook, regenerateChapter: regeneratePDFChapter } = usePDF();
+  const { createFullAudioBook: createHTMLAudioBook, regenerateChapter: regenerateHTMLChapter } = useHTML();
   const { id } = useParams();
   const [localMargins, setLocalMargins] = useState({
     header: headerMargin,
@@ -86,10 +88,12 @@ export function DocumentSettings({ isOpen, setIsOpen, epub, html }: {
   ) => {
     if (epub) {
       return createEPUBAudioBook(onProgress, signal, onChapterComplete, id as string, format);
+    } else if (html) {
+      return createHTMLAudioBook(onProgress, signal, onChapterComplete, id as string, format);
     } else {
       return createPDFAudioBook(onProgress, signal, onChapterComplete, id as string, format);
     }
-  }, [epub, createEPUBAudioBook, createPDFAudioBook, id]);
+  }, [epub, html, createEPUBAudioBook, createPDFAudioBook, createHTMLAudioBook, id]);
 
   const handleRegenerateChapter = useCallback(async (
     chapterIndex: number,
@@ -99,17 +103,19 @@ export function DocumentSettings({ isOpen, setIsOpen, epub, html }: {
   ) => {
     if (epub) {
       return regenerateEPUBChapter(chapterIndex, bookId, format, signal);
+    } else if (html) {
+      return regenerateHTMLChapter(chapterIndex, bookId, format, signal);
     } else {
       return regeneratePDFChapter(chapterIndex, bookId, format, signal);
     }
-  }, [epub, regenerateEPUBChapter, regeneratePDFChapter]);
+  }, [epub, html, regenerateEPUBChapter, regeneratePDFChapter, regenerateHTMLChapter]);
 
   return (
     <>
       <AudiobookExportModal
         isOpen={isAudiobookModalOpen}
         setIsOpen={setIsAudiobookModalOpen}
-        documentType={epub ? 'epub' : 'pdf'}
+        documentType={epub ? 'epub' : html ? 'html' : 'pdf'}
         documentId={id as string}
         onGenerateAudiobook={handleGenerateAudiobook}
         onRegenerateChapter={handleRegenerateChapter}
@@ -141,20 +147,20 @@ export function DocumentSettings({ isOpen, setIsOpen, epub, html }: {
                 leaveTo="opacity-0 scale-95"
               >
                 <DialogPanel className="w-full max-w-md transform rounded-2xl bg-base p-6 text-left align-middle shadow-xl transition-all">
-                  {!html && <div className="space-y-2 mb-4">
+                  <div className="space-y-2 mb-4">
                     <Button
                       type="button"
                       className="w-full inline-flex justify-center rounded-lg bg-accent px-3 py-1.5 text-sm
-                                    font-medium text-background hover:bg-secondary-accent focus:outline-none 
+                                    font-medium text-background hover:bg-secondary-accent focus:outline-none
                                     focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2
                                     transform transition-transform duration-200 ease-in-out hover:scale-[1.04] hover:text-background
                                     disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-[1] disabled:hover:bg-accent"
                       onClick={() => setIsAudiobookModalOpen(true)}
                       disabled={!isDev}
                     >
-                      Export Audiobook {!isDev && '(requires self-hosted)'}
+                      Generate Audiobook {!isDev && '(requires self-hosted)'}
                     </Button>
-                  </div>}
+                  </div>
 
                   <div className="space-y-4">
                     {!epub && !html && <div className="space-y-6">
