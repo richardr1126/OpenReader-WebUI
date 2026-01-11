@@ -5,6 +5,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useHTML } from '@/contexts/HTMLContext';
 import { DocumentSkeleton } from '@/components/DocumentSkeleton';
+import { TableOfContents } from '@/components/TableOfContents';
 
 interface HTMLViewerProps {
   className?: string;
@@ -19,6 +20,7 @@ export function HTMLViewer({ className = '' }: HTMLViewerProps) {
     totalChapters,
     goToNextChapter,
     goToPreviousChapter,
+    goToChapter,
   } = useHTML();
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -48,13 +50,20 @@ export function HTMLViewer({ className = '' }: HTMLViewerProps) {
             Previous
           </button>
 
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-foreground font-medium">
-              {currentChapter?.title || `Chapter ${currentChapterIndex + 1}`}
-            </span>
-            <span className="text-xs text-muted">
-              ({currentChapterIndex + 1} of {totalChapters})
-            </span>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-foreground font-medium">
+                {currentChapter?.title || `Chapter ${currentChapterIndex + 1}`}
+              </span>
+              <span className="text-xs text-muted">
+                ({currentChapterIndex + 1} of {totalChapters})
+              </span>
+            </div>
+            <TableOfContents
+              chapters={chapters}
+              currentChapterIndex={currentChapterIndex}
+              onChapterSelect={goToChapter}
+            />
           </div>
 
           <button
