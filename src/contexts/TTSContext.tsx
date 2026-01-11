@@ -1466,12 +1466,26 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     currentWordIndex
   ]);
 
-  // Use media session hook
-  useMediaSession({
-    togglePlay,
-    skipForward,
-    skipBackward,
+  // Media Session API for background playback and lock screen controls
+  const { setPlaybackState } = useMediaSession({
+    metadata: {
+      title: id ? `Document ${String(id).slice(0, 8)}...` : 'Text-to-Speech',
+      artist: 'OpenReader WebUI',
+      album: 'Audiobook',
+    },
+    controls: {
+      togglePlay,
+      skipForward,
+      skipBackward,
+      // Chapter navigation will be handled by document contexts if available
+    },
+    enabled: true,
   });
+
+  // Update playback state when isPlaying changes
+  useEffect(() => {
+    setPlaybackState(isPlaying ? 'playing' : 'paused');
+  }, [isPlaying, setPlaybackState]);
 
   // Load last location on mount for both EPUB and PDF
   useEffect(() => {

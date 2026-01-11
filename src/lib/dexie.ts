@@ -18,6 +18,7 @@ const JOBS_TABLE = 'jobs' as const;
 export interface LastLocationRow {
   docId: string;
   location: string;
+  chapterIndex?: number; // For HTML/text documents with chapters
 }
 
 export interface ConfigRow {
@@ -392,9 +393,16 @@ export async function getLastDocumentLocation(docId: string): Promise<string | n
   });
 }
 
-export async function setLastDocumentLocation(docId: string, location: string): Promise<void> {
+export async function setLastDocumentLocation(docId: string, location: string, chapterIndex?: number): Promise<void> {
   await withDB(async () => {
-    await db[LAST_LOCATION_TABLE].put({ docId, location });
+    await db[LAST_LOCATION_TABLE].put({ docId, location, chapterIndex });
+  });
+}
+
+export async function getLastChapterIndex(docId: string): Promise<number | null> {
+  return withDB(async () => {
+    const row = await db[LAST_LOCATION_TABLE].get(docId);
+    return row?.chapterIndex ?? null;
   });
 }
 

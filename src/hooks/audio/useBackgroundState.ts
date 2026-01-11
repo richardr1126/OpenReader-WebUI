@@ -7,23 +7,23 @@ interface UseBackgroundStateProps {
   playAudio: () => void;
 }
 
+/**
+ * Hook to track background state and maintain audio context
+ *
+ * NOTE: This hook does NOT pause audio when backgrounded.
+ * Audio continues playing in background tabs and when screen is off.
+ * This is enabled by the Media Session API for cross-browser support.
+ */
 export function useBackgroundState({ activeHowl, isPlaying, playAudio }: UseBackgroundStateProps) {
   const [isBackgrounded, setIsBackgrounded] = useState(false);
 
   useEffect(() => {
     const handleVisibilityChange = () => {
       setIsBackgrounded(document.hidden);
-      if (document.hidden) {
-        // When backgrounded, pause audio but maintain isPlaying state
-        if (activeHowl) {
-          activeHowl.pause();
-        }
-      } else if (isPlaying) {
-        // When returning to foreground, resume from current position
-        if (activeHowl) {
-          activeHowl.play();
-        }
-      }
+
+      // Do NOT pause when backgrounded - allow continuous playback
+      // Media Session API handles lock screen controls and background playback
+      // Howler.js will continue playing even when page is hidden
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);

@@ -4,11 +4,12 @@ import {
   createContext,
   useContext,
   useState,
+  useEffect,
   ReactNode,
   useCallback,
   useMemo,
 } from 'react';
-import { getHtmlDocument } from '@/lib/dexie';
+import { getHtmlDocument, getLastChapterIndex, setLastDocumentLocation } from '@/lib/dexie';
 import { useTTS } from '@/contexts/TTSContext';
 import { detectChapters, type Chapter } from '@/lib/chapterDetection';
 import type { TTSAudiobookChapter } from '@/types/tts';
@@ -59,6 +60,7 @@ export function HTMLProvider({ children }: { children: ReactNode }) {
   const [currDocData, setCurrDocData] = useState<string>();
   const [currDocName, setCurrDocName] = useState<string>();
   const [currDocText, setCurrDocText] = useState<string>();
+  const [currDocId, setCurrDocId] = useState<string>();
 
   // Chapter state
   const [chapters, setChapters] = useState<Chapter[]>([]);
@@ -71,6 +73,7 @@ export function HTMLProvider({ children }: { children: ReactNode }) {
     setCurrDocData(undefined);
     setCurrDocName(undefined);
     setCurrDocText(undefined);
+    setCurrDocId(undefined);
     setChapters([]);
     setCurrentChapterIndex(0);
     stop();
@@ -86,6 +89,7 @@ export function HTMLProvider({ children }: { children: ReactNode }) {
     try {
       const doc = await getHtmlDocument(id);
       if (doc) {
+        setCurrDocId(id);
         setCurrDocName(doc.name);
 
         // Detect chapters in the document (splits large files)
@@ -95,16 +99,23 @@ export function HTMLProvider({ children }: { children: ReactNode }) {
           // Document has been split into chapters
           console.log(`Document split into ${detectedChapters.length} chapters`);
           setChapters(detectedChapters);
-          setCurrentChapterIndex(0);
 
-          // Display only the first chapter
-          const firstChapter = detectedChapters[0];
-          setCurrDocData(firstChapter.text);
-          setCurrDocText(firstChapter.text);
-          setTTSText(firstChapter.text);
+          // Restore last chapter position or start from beginning
+          const lastChapterIndex = await getLastChapterIndex(id);
+          const startChapterIndex = lastChapterIndex !== null && lastChapterIndex < detectedChapters.length ? lastChapterIndex : 0;
+          setCurrentChapterIndex(startChapterIndex);
+
+          // Display the restored or first chapter
+          const startChapter = detectedChapters[startChapterIndex];
+          setCurrDocData(startChapter.text);
+          setCurrDocText(startChapter.text);
+          setTTSText(startChapter.text);
+
+          console.log(`Restored to chapter ${startChapterIndex + 1} of ${detectedChapters.length}`);
         } else {
           // Small document, no chapters needed
           setChapters([]);
+          setCurrentChapterIndex(0);
           setCurrDocData(doc.data);
           setCurrDocText(doc.data);
           setTTSText(doc.data);
@@ -228,6 +239,15 @@ export function HTMLProvider({ children }: { children: ReactNode }) {
       registerLocationChangeHandler(handleLocationChange);
     }
   }, [chapters.length, registerLocationChangeHandler, handleLocationChange]);
+
+  // Save chapter position whenever it changes
+  useEffect(() => {
+    if (currDocId && chapters.length > 1) {
+      // Save current chapter index to remember position
+      setLastDocumentLocation(currDocId, String(currentChapterIndex), currentChapterIndex)
+        .catch(error => console.error('Failed to save chapter position:', error));
+    }
+  }, [currDocId, currentChapterIndex, chapters.length]);
 
   const totalChapters = chapters.length;
 
