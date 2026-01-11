@@ -450,7 +450,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
 
   /**
    * Moves to the next or previous sentence
-   * 
+   *
    * @param {boolean} [backwards=false] - Whether to move backwards
    */
   const advance = useCallback(async (backwards = false) => {
@@ -462,14 +462,15 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
       return;
     }
 
-    // For EPUB documents, always try to advance to next/prev section
-    if (isEPUB && locationChangeHandlerRef.current) {
+    // For documents with registered location handlers (EPUB, HTML with chapters),
+    // always try to advance to next/prev section
+    if (locationChangeHandlerRef.current) {
       locationChangeHandlerRef.current(nextIndex >= sentences.length ? 'next' : 'prev');
       return;
     }
 
-    // For PDFs and other documents, check page bounds
-    if (!isEPUB) {
+    // For PDFs and other documents without handlers, check page bounds
+    if (!isEPUB && !locationChangeHandlerRef.current) {
       // Handle next/previous page transitions
       if ((nextIndex >= sentences.length && currDocPageNumber < currDocPages!) ||
         (nextIndex < 0 && currDocPageNumber > 1)) {
