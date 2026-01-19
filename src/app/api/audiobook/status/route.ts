@@ -7,6 +7,8 @@ import type { AudiobookGenerationSettings } from '@/types/client';
 import type { TTSAudiobookFormat, TTSAudiobookChapter } from '@/types/tts';
 import { readFile } from 'fs/promises';
 
+export const dynamic = 'force-dynamic';
+
 function getAudiobooksRootDir(request: NextRequest): string {
   const raw = request.headers.get('x-openreader-test-namespace')?.trim();
   if (!raw) return AUDIOBOOKS_V1_DIR;

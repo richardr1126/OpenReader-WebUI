@@ -9,6 +9,8 @@ import { encodeChapterFileName, encodeChapterTitleTag, listStoredChapters, ffpro
 import type { TTSAudioBytes, TTSAudiobookFormat } from '@/types/tts';
 import type { AudiobookGenerationSettings } from '@/types/client';
 
+export const dynamic = 'force-dynamic';
+
 function getAudiobooksRootDir(request: NextRequest): string {
   const raw = request.headers.get('x-openreader-test-namespace')?.trim();
   if (!raw) return AUDIOBOOKS_V1_DIR;

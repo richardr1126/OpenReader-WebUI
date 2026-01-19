@@ -5,6 +5,8 @@ import path from 'path';
 import { DOCUMENTS_V1_DIR, isDocumentsV1Ready } from '@/lib/server/docstore';
 import type { BaseDocument, DocumentType, SyncedDocument } from '@/types/documents';
 
+export const dynamic = 'force-dynamic';
+
 const SYNC_DIR = DOCUMENTS_V1_DIR;
 
 async function trySetFileMtime(filePath: string, lastModifiedMs: number): Promise<void> {

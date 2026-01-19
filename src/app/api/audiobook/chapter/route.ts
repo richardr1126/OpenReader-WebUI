@@ -5,6 +5,8 @@ import { join } from 'path';
 import { AUDIOBOOKS_V1_DIR, isAudiobooksV1Ready } from '@/lib/server/docstore';
 import { findStoredChapterByIndex } from '@/lib/server/audiobook';
 
+export const dynamic = 'force-dynamic';
+
 function getAudiobooksRootDir(request: NextRequest): string {
   const raw = request.headers.get('x-openreader-test-namespace')?.trim();
   if (!raw) return AUDIOBOOKS_V1_DIR;
