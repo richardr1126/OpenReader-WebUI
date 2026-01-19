@@ -1,10 +1,11 @@
 import Dexie, { type EntityTable } from 'dexie';
 import { APP_CONFIG_DEFAULTS, type ViewType, type SavedVoices, type AppConfigRow } from '@/types/config';
 import { PDFDocument, EPUBDocument, HTMLDocument, DocumentListState, SyncedDocument } from '@/types/documents';
+import type { SummaryRow } from '@/types/summary';
 
 const DB_NAME = 'openreader-db';
 // Managed via Dexie (version bumped from the original manual IndexedDB)
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 
 const PDF_TABLE = 'pdf-documents' as const;
 const EPUB_TABLE = 'epub-documents' as const;
@@ -12,6 +13,7 @@ const HTML_TABLE = 'html-documents' as const;
 const CONFIG_TABLE = 'config' as const;
 const APP_CONFIG_TABLE = 'app-config' as const;
 const LAST_LOCATION_TABLE = 'last-locations' as const;
+const SUMMARIES_TABLE = 'summaries' as const;
 
 export interface LastLocationRow {
   docId: string;
@@ -30,6 +32,7 @@ type OpenReaderDB = Dexie & {
   [CONFIG_TABLE]: EntityTable<ConfigRow, 'key'>;
   [APP_CONFIG_TABLE]: EntityTable<AppConfigRow, 'id'>;
   [LAST_LOCATION_TABLE]: EntityTable<LastLocationRow, 'docId'>;
+  [SUMMARIES_TABLE]: EntityTable<SummaryRow, 'id'>;
 };
 
 export const db = new Dexie(DB_NAME) as OpenReaderDB;
@@ -152,14 +155,16 @@ function buildAppConfigFromRaw(raw: RawConfigMap): AppConfigRow {
   return config;
 }
 
-// Version 5: introduce app-config and last-locations tables, migrate scattered config keys,
-// and drop the legacy config table in a single upgrade step.
+// Version 6: add summaries table for AI-generated document summaries.
+// Previous version 5 introduced app-config and last-locations tables, migrated scattered config keys,
+// and dropped the legacy config table.
 db.version(DB_VERSION).stores({
   [PDF_TABLE]: 'id, type, name, lastModified, size, folderId',
   [EPUB_TABLE]: 'id, type, name, lastModified, size, folderId',
   [HTML_TABLE]: 'id, type, name, lastModified, size, folderId',
   [APP_CONFIG_TABLE]: 'id',
   [LAST_LOCATION_TABLE]: 'docId',
+  [SUMMARIES_TABLE]: 'id, docId, [docId+pageNumber]',
   // `null` here means: drop the old 'config' table after upgrade runs,
   // but Dexie still lets us read it inside the upgrade transaction.
   [CONFIG_TABLE]: null,
@@ -554,4 +559,56 @@ export async function loadDocumentsFromServer(
   }
 
   return { lastSync: Date.now() };
+}
+
+// Summary helpers (for AI-generated document summaries)
+
+export async function saveSummary(summary: Omit<SummaryRow, 'id'>): Promise<string> {
+  return withDB(async () => {
+    const id = `${summary.docId}-${summary.scope}-${summary.pageNumber ?? 'all'}`;
+    const now = Date.now();
+    const existing = await db[SUMMARIES_TABLE].get(id);
+    const row: SummaryRow = {
+      ...summary,
+      id,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    };
+    await db[SUMMARIES_TABLE].put(row);
+    console.log('Saved summary:', id);
+    return id;
+  });
+}
+
+export async function getSummary(
+  docId: string,
+  docType: 'pdf' | 'epub' | 'html',
+  pageNumber?: number | null
+): Promise<SummaryRow | null> {
+  return withDB(async () => {
+    const scope = pageNumber != null ? 'page' : 'book';
+    const id = `${docId}-${scope}-${pageNumber ?? 'all'}`;
+    const row = await db[SUMMARIES_TABLE].get(id);
+    return row ?? null;
+  });
+}
+
+export async function getSummariesForDocument(docId: string): Promise<SummaryRow[]> {
+  return withDB(async () => {
+    return db[SUMMARIES_TABLE].where('docId').equals(docId).toArray();
+  });
+}
+
+export async function deleteSummary(id: string): Promise<void> {
+  await withDB(async () => {
+    await db[SUMMARIES_TABLE].delete(id);
+    console.log('Deleted summary:', id);
+  });
+}
+
+export async function deleteSummariesForDocument(docId: string): Promise<void> {
+  await withDB(async () => {
+    await db[SUMMARIES_TABLE].where('docId').equals(docId).delete();
+    console.log('Deleted all summaries for document:', docId);
+  });
 }

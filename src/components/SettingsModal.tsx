@@ -41,7 +41,7 @@ export function SettingsModal() {
   const [isOpen, setIsOpen] = useState(false);
 
   const { theme, setTheme } = useTheme();
-  const { apiKey, baseUrl, ttsProvider, ttsModel, ttsInstructions, updateConfig, updateConfigKey } = useConfig();
+  const { apiKey, baseUrl, ttsProvider, ttsModel, ttsInstructions, updateConfig, updateConfigKey, summaryProvider, summaryModel, summaryApiKey, summaryBaseUrl } = useConfig();
   const { clearPDFs, clearEPUBs, clearHTML } = useDocuments();
   const [localApiKey, setLocalApiKey] = useState(apiKey);
   const [localBaseUrl, setLocalBaseUrl] = useState(baseUrl);
@@ -49,6 +49,11 @@ export function SettingsModal() {
   const [modelValue, setModelValue] = useState(ttsModel);
   const [customModelInput, setCustomModelInput] = useState('');
   const [localTTSInstructions, setLocalTTSInstructions] = useState(ttsInstructions);
+  // Summary settings state
+  const [localSummaryProvider, setLocalSummaryProvider] = useState(summaryProvider);
+  const [localSummaryModel, setLocalSummaryModel] = useState(summaryModel);
+  const [localSummaryApiKey, setLocalSummaryApiKey] = useState(summaryApiKey);
+  const [localSummaryBaseUrl, setLocalSummaryBaseUrl] = useState(summaryBaseUrl);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [showProgress, setShowProgress] = useState(false);
@@ -63,6 +68,7 @@ export function SettingsModal() {
   const ttsProviders = useMemo(() => [
     { id: 'custom-openai', name: 'Custom OpenAI-Like' },
     { id: 'deepinfra', name: 'Deepinfra' },
+    { id: 'groq', name: 'Groq' },
     { id: 'openai', name: 'OpenAI' }
   ], []);
 
@@ -97,6 +103,11 @@ export function SettingsModal() {
           { id: 'Zyphra/Zonos-v0.1-transformer', name: 'Zyphra/Zonos-v0.1-transformer' },
           { id: 'custom', name: 'Other' }
         ];
+      case 'groq':
+        return [
+          { id: 'canopylabs/orpheus-v1-english', name: 'Orpheus English' },
+          { id: 'canopylabs/orpheus-arabic-saudi', name: 'Orpheus Arabic (Saudi)' },
+        ];
       default:
         return [
           { id: 'tts-1', name: 'TTS-1' }
@@ -105,6 +116,59 @@ export function SettingsModal() {
   }, [localTTSProvider, localApiKey]);
 
   const supportsCustom = useMemo(() => localTTSProvider !== 'openai', [localTTSProvider]);
+
+  // Summary provider and model options
+  const summaryProviders = useMemo(() => [
+    { id: 'openai', name: 'OpenAI' },
+    { id: 'anthropic', name: 'Anthropic' },
+    { id: 'groq', name: 'Groq' },
+    { id: 'openrouter', name: 'OpenRouter' },
+    { id: 'custom-openai', name: 'Custom OpenAI-Like' },
+  ], []);
+
+  const summaryModels = useMemo(() => {
+    switch (localSummaryProvider) {
+      case 'openai':
+        return [
+          { id: 'gpt-4o-mini', name: 'GPT-4o Mini' },
+          { id: 'gpt-4o', name: 'GPT-4o' },
+          { id: 'gpt-4-turbo', name: 'GPT-4 Turbo' },
+        ];
+      case 'anthropic':
+        return [
+          { id: 'claude-3-5-haiku-latest', name: 'Claude 3.5 Haiku' },
+          { id: 'claude-3-5-sonnet-latest', name: 'Claude 3.5 Sonnet' },
+          { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4' },
+        ];
+      case 'groq':
+        return [
+          { id: 'llama-3.3-70b-versatile', name: 'Llama 3.3 70B' },
+          { id: 'meta-llama/llama-4-maverick-17b-128e-instruct', name: 'Llama 4 Maverick 17B' },
+          { id: 'meta-llama/llama-4-scout-17b-16e-instruct', name: 'Llama 4 Scout 17B' },
+          { id: 'qwen/qwen3-32b', name: 'Qwen3 32B' },
+          { id: 'openai/gpt-oss-120b', name: 'GPT-OSS 120B' },
+          { id: 'moonshotai/kimi-k2-instruct', name: 'Kimi K2' },
+          { id: 'llama-3.1-8b-instant', name: 'Llama 3.1 8B Instant' },
+          { id: 'groq/compound', name: 'Compound' },
+        ];
+      case 'openrouter':
+        return [
+          { id: 'google/gemini-2.0-flash-001', name: 'Gemini 2.0 Flash' },
+          { id: 'meta-llama/llama-3.3-70b-instruct', name: 'Llama 3.3 70B' },
+          { id: 'anthropic/claude-3.5-haiku', name: 'Claude 3.5 Haiku' },
+          { id: 'openai/gpt-4o-mini', name: 'GPT-4o Mini' },
+          { id: 'mistralai/mistral-small-24b-instruct-2501', name: 'Mistral Small 24B' },
+        ];
+      case 'custom-openai':
+        return [
+          { id: 'custom', name: 'Custom Model' },
+        ];
+      default:
+        return [
+          { id: 'gpt-4o-mini', name: 'GPT-4o Mini' },
+        ];
+    }
+  }, [localSummaryProvider]);
 
   const selectedModelId = useMemo(
     () => {
@@ -137,7 +201,11 @@ export function SettingsModal() {
     setLocalTTSProvider(ttsProvider);
     setModelValue(ttsModel);
     setLocalTTSInstructions(ttsInstructions);
-  }, [apiKey, baseUrl, ttsProvider, ttsModel, ttsInstructions, checkFirstVist]);
+    setLocalSummaryProvider(summaryProvider);
+    setLocalSummaryModel(summaryModel);
+    setLocalSummaryApiKey(summaryApiKey);
+    setLocalSummaryBaseUrl(summaryBaseUrl);
+  }, [apiKey, baseUrl, ttsProvider, ttsModel, ttsInstructions, checkFirstVist, summaryProvider, summaryModel, summaryApiKey, summaryBaseUrl]);
 
   // Detect if current model is custom (not in presets) and mirror it in the input field
   useEffect(() => {
@@ -250,11 +318,16 @@ export function SettingsModal() {
     } else {
       setCustomModelInput('');
     }
-  }, [apiKey, baseUrl, ttsProvider, ttsModel, ttsInstructions, ttsModels]);
+    setLocalSummaryProvider(summaryProvider);
+    setLocalSummaryModel(summaryModel);
+    setLocalSummaryApiKey(summaryApiKey);
+    setLocalSummaryBaseUrl(summaryBaseUrl);
+  }, [apiKey, baseUrl, ttsProvider, ttsModel, ttsInstructions, ttsModels, summaryProvider, summaryModel, summaryApiKey, summaryBaseUrl]);
 
   const tabs = [
     { name: 'API', icon: '🔑' },
-    { name: 'Appearance', icon: '✨' },
+    { name: 'AI Summary', icon: '✨' },
+    { name: 'Appearance', icon: '🎨' },
     { name: 'Documents', icon: '📄' }
   ];
 
@@ -543,6 +616,212 @@ export function SettingsModal() {
                               const finalModel = selectedModelId === 'custom' ? customModelInput.trim() : modelValue;
                               await updateConfigKey('ttsModel', finalModel);
                               await updateConfigKey('ttsInstructions', localTTSInstructions);
+                              setIsOpen(false);
+                            }}
+                          >
+                            Save
+                          </Button>
+                        </div>
+                      </TabPanel>
+
+                      {/* AI Summary Tab */}
+                      <TabPanel className="space-y-2.5">
+                        <div className="space-y-1">
+                          <label className="block text-sm font-medium text-foreground">AI Provider</label>
+                          <Listbox
+                            value={summaryProviders.find(p => p.id === localSummaryProvider) || summaryProviders[0]}
+                            onChange={(provider) => {
+                              setLocalSummaryProvider(provider.id);
+                              // Set default model for each provider
+                              switch (provider.id) {
+                                case 'openai':
+                                  setLocalSummaryModel('gpt-4o-mini');
+                                  break;
+                                case 'anthropic':
+                                  setLocalSummaryModel('claude-3-5-haiku-latest');
+                                  break;
+                                case 'groq':
+                                  setLocalSummaryModel('llama-3.3-70b-versatile');
+                                  break;
+                                case 'openrouter':
+                                  setLocalSummaryModel('google/gemini-2.0-flash-001');
+                                  break;
+                                case 'custom-openai':
+                                  setLocalSummaryModel('');
+                                  break;
+                              }
+                            }}
+                          >
+                            <ListboxButton className="relative w-full cursor-pointer rounded-lg bg-background py-1.5 pl-3 pr-10 text-left text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-accent transform transition-transform duration-200 ease-in-out hover:scale-[1.009] hover:text-accent hover:bg-offbase">
+                              <span className="block truncate">
+                                {summaryProviders.find(p => p.id === localSummaryProvider)?.name || 'Select Provider'}
+                              </span>
+                              <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2">
+                                <ChevronUpDownIcon className="h-5 w-5 text-muted" />
+                              </span>
+                            </ListboxButton>
+                            <Transition
+                              as={Fragment}
+                              leave="transition ease-in duration-100"
+                              leaveFrom="opacity-100"
+                              leaveTo="opacity-0"
+                            >
+                              <ListboxOptions className="absolute mt-1 w-full overflow-auto rounded-md bg-background py-1 shadow-lg ring-1 ring-black/5 focus:outline-none z-50">
+                                {summaryProviders.map((provider) => (
+                                  <ListboxOption
+                                    key={provider.id}
+                                    className={({ active }) =>
+                                      `relative cursor-pointer select-none py-1.5 pl-10 pr-4 ${
+                                        active ? 'bg-offbase text-accent' : 'text-foreground'
+                                      }`
+                                    }
+                                    value={provider}
+                                  >
+                                    {({ selected }) => (
+                                      <>
+                                        <span className={`block truncate ${selected ? 'font-medium' : 'font-normal'}`}>
+                                          {provider.name}
+                                        </span>
+                                        {selected ? (
+                                          <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-accent">
+                                            <CheckIcon className="h-5 w-5" />
+                                          </span>
+                                        ) : null}
+                                      </>
+                                    )}
+                                  </ListboxOption>
+                                ))}
+                              </ListboxOptions>
+                            </Transition>
+                          </Listbox>
+                        </div>
+
+                        <div className="space-y-1">
+                          <label className="block text-sm font-medium text-foreground">
+                            API Key
+                            {localSummaryApiKey ? (
+                              <span className="ml-2 text-xs text-accent">(Set)</span>
+                            ) : (
+                              <span className="ml-2 text-xs text-muted">
+                                (Uses {localSummaryProvider === 'groq' ? 'GROQ_API_KEY' :
+                                       localSummaryProvider === 'anthropic' ? 'ANTHROPIC_API_KEY' :
+                                       localSummaryProvider === 'openrouter' ? 'OPENROUTER_API_KEY' :
+                                       localSummaryProvider === 'custom-openai' ? 'optional' : 'OPENAI_API_KEY'} env)
+                              </span>
+                            )}
+                          </label>
+                          <Input
+                            type="password"
+                            value={localSummaryApiKey}
+                            onChange={(e) => setLocalSummaryApiKey(e.target.value)}
+                            placeholder={localSummaryProvider === 'custom-openai' ? "Optional for local models" : "Leave empty to use env variable"}
+                            className="w-full rounded-lg bg-background py-1.5 px-3 text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                          />
+                        </div>
+
+                        <div className="space-y-1">
+                          <label className="block text-sm font-medium text-foreground">Model</label>
+                          {localSummaryProvider === 'custom-openai' ? (
+                            <Input
+                              type="text"
+                              value={localSummaryModel}
+                              onChange={(e) => setLocalSummaryModel(e.target.value)}
+                              placeholder="Enter model name (e.g., llama3)"
+                              className="w-full rounded-lg bg-background py-1.5 px-3 text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                            />
+                          ) : (
+                            <Listbox
+                              value={summaryModels.find(m => m.id === localSummaryModel) || summaryModels[0]}
+                              onChange={(model) => setLocalSummaryModel(model.id)}
+                            >
+                              <ListboxButton className="relative w-full cursor-pointer rounded-lg bg-background py-1.5 pl-3 pr-10 text-left text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-accent transform transition-transform duration-200 ease-in-out hover:scale-[1.009] hover:text-accent hover:bg-offbase">
+                                <span className="block truncate">
+                                  {summaryModels.find(m => m.id === localSummaryModel)?.name || 'Select Model'}
+                                </span>
+                                <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2">
+                                  <ChevronUpDownIcon className="h-5 w-5 text-muted" />
+                                </span>
+                              </ListboxButton>
+                              <Transition
+                                as={Fragment}
+                                leave="transition ease-in duration-100"
+                                leaveFrom="opacity-100"
+                                leaveTo="opacity-0"
+                              >
+                                <ListboxOptions className="absolute mt-1 w-full overflow-auto rounded-md bg-background py-1 shadow-lg ring-1 ring-black/5 focus:outline-none z-50">
+                                  {summaryModels.map((model) => (
+                                    <ListboxOption
+                                      key={model.id}
+                                      className={({ active }) =>
+                                        `relative cursor-pointer select-none py-1.5 pl-10 pr-4 ${
+                                          active ? 'bg-offbase text-accent' : 'text-foreground'
+                                        }`
+                                      }
+                                      value={model}
+                                    >
+                                      {({ selected }) => (
+                                        <>
+                                          <span className={`block truncate ${selected ? 'font-medium' : 'font-normal'}`}>
+                                            {model.name}
+                                          </span>
+                                          {selected ? (
+                                            <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-accent">
+                                              <CheckIcon className="h-5 w-5" />
+                                            </span>
+                                          ) : null}
+                                        </>
+                                      )}
+                                    </ListboxOption>
+                                  ))}
+                                </ListboxOptions>
+                              </Transition>
+                            </Listbox>
+                          )}
+                        </div>
+
+                        {localSummaryProvider === 'custom-openai' && (
+                          <div className="space-y-1">
+                            <label className="block text-sm font-medium text-foreground">
+                              Base URL
+                              {localSummaryBaseUrl && <span className="ml-2 text-xs text-accent">(Set)</span>}
+                            </label>
+                            <Input
+                              type="text"
+                              value={localSummaryBaseUrl}
+                              onChange={(e) => setLocalSummaryBaseUrl(e.target.value)}
+                              placeholder="http://localhost:11434/v1"
+                              className="w-full rounded-lg bg-background py-1.5 px-3 text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                            />
+                          </div>
+                        )}
+
+                        <div className="pt-4 flex justify-end gap-2">
+                          <Button
+                            type="button"
+                            className="inline-flex justify-center rounded-lg bg-background px-3 py-1.5 text-sm
+                               font-medium text-foreground hover:bg-offbase focus:outline-none
+                               focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2
+                               transform transition-transform duration-200 ease-in-out hover:scale-[1.04] hover:text-accent"
+                            onClick={() => {
+                              setLocalSummaryProvider('groq');
+                              setLocalSummaryModel('llama-3.3-70b-versatile');
+                              setLocalSummaryApiKey('');
+                              setLocalSummaryBaseUrl('');
+                            }}
+                          >
+                            Reset
+                          </Button>
+                          <Button
+                            type="button"
+                            className="inline-flex justify-center rounded-lg bg-accent px-3 py-1.5 text-sm
+                               font-medium text-background hover:bg-secondary-accent focus:outline-none
+                               focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2
+                               transform transition-transform duration-200 ease-in-out hover:scale-[1.04] hover:text-background"
+                            onClick={async () => {
+                              await updateConfigKey('summaryProvider', localSummaryProvider);
+                              await updateConfigKey('summaryModel', localSummaryModel);
+                              await updateConfigKey('summaryApiKey', localSummaryApiKey);
+                              await updateConfigKey('summaryBaseUrl', localSummaryBaseUrl);
                               setIsOpen(false);
                             }}
                           >

@@ -12,14 +12,18 @@ import { Header } from '@/components/Header';
 import { useTTS } from "@/contexts/TTSContext";
 import TTSPlayer from '@/components/player/TTSPlayer';
 import { ZoomControl } from '@/components/ZoomControl';
+import { SummarizeButton } from '@/components/SummarizeButton';
+import { SummarizeModal } from '@/components/SummarizeModal';
+import type { SummarizeMode } from '@/types/summary';
 
 export default function HTMLPage() {
   const { id } = useParams();
-  const { setCurrentDocument, currDocName, clearCurrDoc } = useHTML();
+  const { setCurrentDocument, currDocName, clearCurrDoc, currDocText } = useHTML();
   const { stop } = useTTS();
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isSummarizeModalOpen, setIsSummarizeModalOpen] = useState(false);
   const [containerHeight, setContainerHeight] = useState<string>('auto');
   const [padPct, setPadPct] = useState<number>(100); // 0..100 (100 = full width)
   const [maxPadPx, setMaxPadPx] = useState<number>(0);
@@ -69,6 +73,15 @@ export default function HTMLPage() {
     return () => window.removeEventListener('resize', compute);
   }, []);
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const handleExtractTextForSummary = useCallback(async (_mode: SummarizeMode): Promise<string> => {
+    if (!currDocText) {
+      throw new Error('Document text not loaded');
+    }
+    // For HTML documents, we always return the full text (no page concept)
+    return currDocText;
+  }, [currDocText]);
+
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen">
@@ -113,6 +126,7 @@ export default function HTMLPage() {
               min={0}
               max={100}
             />
+            <SummarizeButton onClick={() => setIsSummarizeModalOpen(true)} disabled={!currDocText} />
             <button
               onClick={() => setIsSettingsOpen(true)}
               className="inline-flex items-center h-8 px-2.5 rounded-md border border-offbase bg-base text-foreground text-xs md:text-sm hover:bg-offbase transition-all duration-200 ease-in-out hover:scale-[1.09] hover:text-accent"
@@ -134,6 +148,13 @@ export default function HTMLPage() {
           </div>
         )}
       </div>
+      <SummarizeModal
+        isOpen={isSummarizeModalOpen}
+        setIsOpen={setIsSummarizeModalOpen}
+        docId={id as string}
+        docType="html"
+        onExtractText={handleExtractTextForSummary}
+      />
       <TTSPlayer />
       <DocumentSettings html isOpen={isSettingsOpen} setIsOpen={setIsSettingsOpen} />
     </>

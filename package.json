@@ -10,10 +10,14 @@
     "test": "playwright test"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.15",
+    "@ai-sdk/groq": "^3.0.10",
+    "@ai-sdk/openai": "^3.0.12",
     "@headlessui/react": "^2.2.9",
     "@types/howler": "^2.2.12",
     "@types/uuid": "^10.0.0",
     "@vercel/analytics": "^1.6.1",
+    "ai": "^6.0.39",
     "cmpstr": "^3.0.4",
     "compromise": "^14.14.4",
     "core-js": "^3.47.0",

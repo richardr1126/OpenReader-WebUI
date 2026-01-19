@@ -30,6 +30,11 @@ export interface AppConfigValues {
   epubWordHighlightEnabled: boolean;
   firstVisit: boolean;
   documentListState: DocumentListState;
+  // Summary/AI settings
+  summaryProvider: string;
+  summaryModel: string;
+  summaryApiKey: string;
+  summaryBaseUrl: string;
 }
 
 export const APP_CONFIG_DEFAULTS: AppConfigValues = {
@@ -63,6 +68,11 @@ export const APP_CONFIG_DEFAULTS: AppConfigValues = {
     showHint: true,
     viewMode: 'grid',
   },
+  // Summary/AI defaults
+  summaryProvider: 'groq',
+  summaryModel: 'llama-3.3-70b-versatile',
+  summaryApiKey: '',
+  summaryBaseUrl: '',
 };
 
 export interface AppConfigRow extends AppConfigValues {

@@ -14,6 +14,10 @@ import { ZoomControl } from '@/components/ZoomControl';
 import { AudiobookExportModal } from '@/components/AudiobookExportModal';
 import type { TTSAudiobookChapter, TTSAudiobookFormat } from '@/types/tts';
 import TTSPlayer from '@/components/player/TTSPlayer';
+import { SummarizeButton } from '@/components/SummarizeButton';
+import { SummarizeModal } from '@/components/SummarizeModal';
+import { extractTextFromPDF } from '@/lib/pdf';
+import type { SummarizeMode } from '@/types/summary';
 
 const isDev = process.env.NEXT_PUBLIC_NODE_ENV !== 'production' || process.env.NODE_ENV == null;
 
@@ -28,13 +32,14 @@ const PDFViewer = dynamic(
 
 export default function PDFViewerPage() {
   const { id } = useParams();
-  const { setCurrentDocument, currDocName, clearCurrDoc, currDocPage, currDocPages, createFullAudioBook: createPDFAudioBook, regenerateChapter: regeneratePDFChapter } = usePDF();
+  const { setCurrentDocument, currDocName, clearCurrDoc, currDocPage, currDocPages, createFullAudioBook: createPDFAudioBook, regenerateChapter: regeneratePDFChapter, pdfDocument } = usePDF();
   const { stop } = useTTS();
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [zoomLevel, setZoomLevel] = useState<number>(100);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isAudiobookModalOpen, setIsAudiobookModalOpen] = useState(false);
+  const [isSummarizeModalOpen, setIsSummarizeModalOpen] = useState(false);
   const [containerHeight, setContainerHeight] = useState<string>('auto');
 
   const loadDocument = useCallback(async () => {
@@ -96,6 +101,28 @@ export default function PDFViewerPage() {
     return regeneratePDFChapter(chapterIndex, bookId, format, signal);
   }, [regeneratePDFChapter]);
 
+  const handleExtractTextForSummary = useCallback(async (mode: SummarizeMode, pageNumber?: number): Promise<string> => {
+    if (!pdfDocument) {
+      throw new Error('PDF document not loaded');
+    }
+
+    const margins = { header: 0.07, footer: 0.07, left: 0.07, right: 0.07 };
+
+    if (mode === 'whole_book') {
+      const textParts: string[] = [];
+      for (let page = 1; page <= pdfDocument.numPages; page++) {
+        const pageText = await extractTextFromPDF(pdfDocument, page, margins);
+        if (pageText) {
+          textParts.push(pageText);
+        }
+      }
+      return textParts.join('\n\n');
+    } else {
+      const targetPage = pageNumber ?? currDocPage ?? 1;
+      return extractTextFromPDF(pdfDocument, targetPage, margins);
+    }
+  }, [pdfDocument, currDocPage]);
+
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen">
@@ -134,6 +161,7 @@ export default function PDFViewerPage() {
         right={
           <div className="flex items-center gap-2">
             <ZoomControl value={zoomLevel} onIncrease={handleZoomIn} onDecrease={handleZoomOut} />
+            <SummarizeButton onClick={() => setIsSummarizeModalOpen(true)} disabled={!pdfDocument} />
             {isDev && (
               <button
                 onClick={() => setIsAudiobookModalOpen(true)}
@@ -173,6 +201,15 @@ export default function PDFViewerPage() {
           onRegenerateChapter={handleRegenerateChapter}
         />
       )}
+      <SummarizeModal
+        isOpen={isSummarizeModalOpen}
+        setIsOpen={setIsSummarizeModalOpen}
+        docId={id as string}
+        docType="pdf"
+        currentPage={currDocPage}
+        totalPages={currDocPages}
+        onExtractText={handleExtractTextForSummary}
+      />
       <TTSPlayer currentPage={currDocPage} numPages={currDocPages} />
       <DocumentSettings isOpen={isSettingsOpen} setIsOpen={setIsSettingsOpen} />
     </>

@@ -101,9 +101,40 @@ function makeCacheKey(input: {
 export async function POST(req: NextRequest) {
   try {
     // Get API credentials from headers or fall back to environment variables
-    const openApiKey = req.headers.get('x-openai-key') || process.env.API_KEY || 'none';
-    const openApiBaseUrl = req.headers.get('x-openai-base-url') || process.env.API_BASE;
     const provider = req.headers.get('x-tts-provider') || 'openai';
+
+    // Get API key and base URL based on provider
+    let apiKey = req.headers.get('x-openai-key') || '';
+    let baseUrl = req.headers.get('x-openai-base-url') || '';
+
+    if (!apiKey) {
+      switch (provider) {
+        case 'groq':
+          apiKey = process.env.GROQ_API_KEY || '';
+          break;
+        case 'openai':
+          apiKey = process.env.OPENAI_API_KEY || process.env.API_KEY || 'none';
+          break;
+        default:
+          apiKey = process.env.API_KEY || 'none';
+          break;
+      }
+    }
+
+    if (!baseUrl) {
+      switch (provider) {
+        case 'groq':
+          baseUrl = 'https://api.groq.com/openai/v1';
+          break;
+        case 'deepinfra':
+          baseUrl = process.env.API_BASE || 'https://api.deepinfra.com/v1/openai';
+          break;
+        default:
+          baseUrl = process.env.API_BASE || undefined as unknown as string;
+          break;
+      }
+    }
+
     const body = (await req.json()) as TTSRequestPayload;
     const { text, voice, speed, format, model: req_model, instructions } = body;
     console.log('Received TTS request:', { provider, req_model, voice, speed, format, hasInstructions: Boolean(instructions) });
@@ -115,14 +146,28 @@ export async function POST(req: NextRequest) {
       };
       return NextResponse.json(errorBody, { status: 400 });
     }
-    // Use default Kokoro model for Deepinfra if none specified, then fall back to a safe default
-    const rawModel = provider === 'deepinfra' && !req_model ? 'hexgrad/Kokoro-82M' : req_model;
-    const model: SpeechCreateParams['model'] = (rawModel ?? 'gpt-4o-mini-tts') as SpeechCreateParams['model'];
 
-    // Initialize OpenAI client with abort signal (OpenAI/deepinfra)
+    // Set default model based on provider
+    let rawModel = req_model;
+    if (!rawModel) {
+      switch (provider) {
+        case 'deepinfra':
+          rawModel = 'hexgrad/Kokoro-82M';
+          break;
+        case 'groq':
+          rawModel = 'canopylabs/orpheus-v1-english';
+          break;
+        default:
+          rawModel = 'gpt-4o-mini-tts';
+          break;
+      }
+    }
+    const model: SpeechCreateParams['model'] = rawModel as SpeechCreateParams['model'];
+
+    // Initialize OpenAI client (works with OpenAI-compatible APIs)
     const openai = new OpenAI({
-      apiKey: openApiKey,
-      baseURL: openApiBaseUrl,
+      apiKey: apiKey,
+      baseURL: baseUrl || undefined,
     });
 
     const normalizedVoice = (
@@ -131,12 +176,15 @@ export async function POST(req: NextRequest) {
       : voice
     ) as SpeechCreateParams['voice'];
     
+    // Groq Orpheus models only support WAV format
+    const actualFormat = provider === 'groq' ? 'wav' : format;
+
     const createParams: ExtendedSpeechParams = {
       model: model,
       voice: normalizedVoice,
       input: text,
       speed: speed,
-      response_format: format,
+      response_format: actualFormat,
     };
     // Only add instructions if model is gpt-4o-mini-tts and instructions are provided
     if ((model as string) === 'gpt-4o-mini-tts' && instructions) {
@@ -144,7 +192,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Compute cache key and check LRU before making provider call
-    const contentType = 'audio/mpeg';
+    const contentType = actualFormat === 'wav' ? 'audio/wav' : 'audio/mpeg';
 
     // Preserve voice string as-is for cache key (no weight stripping)
     const voiceForKey = typeof createParams.voice === 'string'
