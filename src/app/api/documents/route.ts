@@ -39,7 +39,7 @@ function parseSyncedFileName(fileName: string): { id: string; name: string } | n
   }
 }
 
-async function loadSyncedDocuments(includeData: boolean): Promise<(BaseDocument | SyncedDocument)[]> {
+async function loadSyncedDocuments(includeData: boolean, targetIds?: Set<string>): Promise<(BaseDocument | SyncedDocument)[]> {
   const results: (BaseDocument | SyncedDocument)[] = [];
   let files: string[] = [];
 
@@ -52,6 +52,9 @@ async function loadSyncedDocuments(includeData: boolean): Promise<(BaseDocument 
   for (const file of files) {
     const parsed = parseSyncedFileName(file);
     if (!parsed) continue;
+
+    // Filter by ID if specific IDs are requested
+    if (targetIds && !targetIds.has(parsed.id)) continue;
 
     const filePath = path.join(SYNC_DIR, file);
     let fileStat: Awaited<ReturnType<typeof stat>>;
@@ -154,10 +157,21 @@ export async function GET(req: NextRequest) {
     }
 
     const url = new URL(req.url);
-    const format = url.searchParams.get('format') ?? 'sync';
-    const includeData = format !== 'metadata';
+    const list = url.searchParams.get('list') === 'true';
+    const format = url.searchParams.get('format');
+    const idsParam = url.searchParams.get('ids');
 
-    const documents = await loadSyncedDocuments(includeData);
+    // If list=true, force metadata only.
+    // If format=metadata, force metadata only.
+    // Otherwise include data.
+    const includeData = !list && format !== 'metadata';
+    
+    let targetIds: Set<string> | undefined;
+    if (idsParam) {
+        targetIds = new Set(idsParam.split(',').filter(Boolean));
+    }
+
+    const documents = await loadSyncedDocuments(includeData, targetIds);
 
     return NextResponse.json({ documents });
   } catch (error) {

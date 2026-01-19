@@ -731,6 +731,67 @@ export async function syncDocumentsToServer(
   return { lastSync: Date.now() };
 }
 
+export async function syncSelectedDocumentsToServer(
+  documents: BaseDocument[],
+  onProgress?: (progress: number, status?: string) => void,
+  signal?: AbortSignal,
+): Promise<{ lastSync: number }> {
+    // Re-use logic from syncDocumentsToServer but only for specific documents
+    // Actually, syncDocumentsToServer fetches all docs from DB.
+    // We need to fetch the *full content* of the selected docs from DB.
+    
+    const fullDocs: SyncedDocument[] = [];
+    let processed = 0;
+    
+    for (const doc of documents) {
+        if (doc.type === 'pdf') {
+            const data = await getPdfDocument(doc.id);
+            if (data) fullDocs.push({ ...data, type: 'pdf', data: Array.from(new Uint8Array(data.data)) });
+        } else if (doc.type === 'epub') {
+            const data = await getEpubDocument(doc.id);
+            if (data) fullDocs.push({ ...data, type: 'epub', data: Array.from(new Uint8Array(data.data)) });
+        } else {
+            const data = await getHtmlDocument(doc.id);
+            if (data) {
+                const encoder = new TextEncoder();
+                fullDocs.push({ ...data, type: 'html', data: Array.from(encoder.encode(data.data)) });
+            }
+        }
+        processed++;
+        if (onProgress) onProgress((processed / documents.length) * 50, `Preparing ${processed}/${documents.length}...`);
+    }
+    
+    if (onProgress) onProgress(50, 'Uploading to server...');
+
+  const response = await fetch('/api/documents', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ documents: fullDocs }),
+    signal,
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to sync documents to server');
+  }
+
+  const payload = (await response.json().catch(() => null)) as
+    | { stored?: Array<{ oldId: string; id: string }> }
+    | null;
+  const stored = payload?.stored ?? [];
+  for (const mapping of stored) {
+    if (!mapping || typeof mapping.oldId !== 'string' || typeof mapping.id !== 'string') continue;
+    if (mapping.oldId === mapping.id) continue;
+    await applyDocumentIdMapping(mapping.oldId, mapping.id);
+  }
+
+  if (onProgress) {
+    onProgress(100, 'Upload complete!');
+  }
+
+  return { lastSync: Date.now() };
+}
+
+
 export async function loadDocumentsFromServer(
   onProgress?: (progress: number, status?: string) => void,
   signal?: AbortSignal,
@@ -754,6 +815,52 @@ export async function loadDocumentsFromServer(
     onProgress(40, 'Parsing documents...');
   }
 
+  await saveSyncedDocumentsLocally(documents, onProgress);
+
+  if (onProgress) {
+    onProgress(100, 'Load complete!');
+  }
+
+  return { lastSync: Date.now() };
+}
+
+export async function loadSelectedDocumentsFromServer(
+  selectedIds: string[],
+  onProgress?: (progress: number, status?: string) => void,
+  signal?: AbortSignal,
+): Promise<{ lastSync: number }> {
+  if (onProgress) {
+    onProgress(10, 'Starting download...');
+  }
+  
+  // Use new filtered API
+  const idsParam = selectedIds.join(',');
+  const response = await fetch(`/api/documents?ids=${encodeURIComponent(idsParam)}`, { signal });
+  
+  if (!response.ok) {
+    throw new Error('Failed to fetch documents from server');
+  }
+
+  if (onProgress) {
+    onProgress(30, 'Download complete');
+  }
+
+  const { documents } = (await response.json()) as { documents: SyncedDocument[] };
+
+  if (onProgress) {
+    onProgress(40, 'Parsing documents...');
+  }
+
+  await saveSyncedDocumentsLocally(documents, onProgress);
+
+  if (onProgress) {
+    onProgress(100, 'Load complete!');
+  }
+
+  return { lastSync: Date.now() };
+}
+
+async function saveSyncedDocumentsLocally(documents: SyncedDocument[], onProgress?: (progress: number, status?: string) => void) {
   const textDecoder = new TextDecoder();
 
   for (let i = 0; i < documents.length; i++) {
@@ -801,39 +908,15 @@ export async function loadDocumentsFromServer(
       onProgress(40 + ((i + 1) / documents.length) * 50, `Processing document ${i + 1}/${documents.length}...`);
     }
   }
-
-  if (onProgress) {
-    onProgress(100, 'Load complete!');
-  }
-
-  return { lastSync: Date.now() };
 }
 
-export async function importDocumentsFromLibrary(
+
+export async function importSelectedDocuments(
+  documents: BaseDocument[],
   onProgress?: (progress: number, status?: string) => void,
   signal?: AbortSignal,
 ): Promise<void> {
-  if (onProgress) {
-    onProgress(5, 'Scanning server library...');
-  }
-
-  const listResponse = await fetch('/api/documents/library', { signal });
-  if (!listResponse.ok) {
-    throw new Error('Failed to list library documents');
-  }
-
-  const { documents } = (await listResponse.json()) as { documents: BaseDocument[] };
-
-  if (documents.length === 0) {
-    if (onProgress) {
-      onProgress(100, 'No documents found in server library');
-    }
-    return;
-  }
-
-  if (onProgress) {
-    onProgress(10, `Found ${documents.length} documents. Importing...`);
-  }
+  if (documents.length === 0) return;
 
   const textDecoder = new TextDecoder();
 
@@ -890,8 +973,39 @@ export async function importDocumentsFromLibrary(
       onProgress(10 + ((i + 1) / documents.length) * 85, `Imported ${i + 1}/${documents.length}`);
     }
   }
+}
+
+export async function importDocumentsFromLibrary(
+  onProgress?: (progress: number, status?: string) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (onProgress) {
+    onProgress(5, 'Scanning server library...');
+  }
+
+  const listResponse = await fetch('/api/documents/library', { signal });
+  if (!listResponse.ok) {
+    throw new Error('Failed to list library documents');
+  }
+
+  const { documents } = (await listResponse.json()) as { documents: BaseDocument[] };
+
+  if (documents.length === 0) {
+    if (onProgress) {
+      onProgress(100, 'No documents found in server library');
+    }
+    return;
+  }
+
+  if (onProgress) {
+    onProgress(10, `Found ${documents.length} documents. Importing...`);
+  }
+
+  await importSelectedDocuments(documents, onProgress, signal);
 
   if (onProgress) {
     onProgress(100, 'Library import complete!');
   }
 }
+
+
