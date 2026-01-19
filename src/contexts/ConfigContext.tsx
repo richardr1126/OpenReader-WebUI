@@ -103,11 +103,31 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
 
         // Run server-side v1 migrations proactively, since the client may now
         // reference SHA-based IDs immediately after the Dexie migration.
-        await fetch('/api/migrations/v1', {
+        const response = await fetch('/api/migrations/v1', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ mappings }),
-        }).catch(() => undefined);
+        }).catch(() => null);
+
+        if (response?.ok) {
+          const data = await response.json();
+          const didMigrate =
+            data.documentsMigrated ||
+            data.audiobooksMigrated ||
+            (data.rekey?.renamed ?? 0) > 0 ||
+            (data.rekey?.merged ?? 0) > 0;
+
+          if (didMigrate) {
+            toast.success('Library migration complete', {
+              duration: 5000,
+              icon: '📦',
+              style: {
+                background: 'var(--offbase)',
+                color: 'var(--foreground)',
+              },
+            });
+          }
+        }
       } catch (error) {
         console.warn('Startup migrations failed:', error);
       }

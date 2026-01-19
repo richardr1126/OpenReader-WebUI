@@ -101,18 +101,18 @@ function safeDocumentName(rawName: string, fallback: string): string {
   return baseName.replaceAll('\u0000', '').slice(0, 240) || fallback;
 }
 
-export async function ensureDocumentsV1Ready(): Promise<void> {
+export async function ensureDocumentsV1Ready(): Promise<boolean> {
   await mkdir(DOCSTORE_DIR, { recursive: true });
   await mkdir(DOCUMENTS_V1_DIR, { recursive: true });
 
   const state = await loadMigrationState();
   if (state.documentsV1Migrated && !(await hasLegacyDocumentFiles())) {
-    return;
+    return false;
   }
 
   if (!(await hasLegacyDocumentFiles())) {
     await saveMigrationState({ documentsV1Migrated: true });
-    return;
+    return false;
   }
 
   let entries: Array<import('fs').Dirent> = [];
@@ -165,6 +165,7 @@ export async function ensureDocumentsV1Ready(): Promise<void> {
   }
 
   await saveMigrationState({ documentsV1Migrated: !(await hasLegacyDocumentFiles()) });
+  return true;
 }
 
 async function hasLegacyAudiobookDirs(): Promise<boolean> {
@@ -269,7 +270,7 @@ async function mergeDirectoryContents(sourceDir: string, targetDir: string): Pro
   return { moved, skipped };
 }
 
-export async function ensureAudiobooksV1Ready(): Promise<void> {
+export async function ensureAudiobooksV1Ready(): Promise<boolean> {
   await mkdir(DOCSTORE_DIR, { recursive: true });
   await mkdir(AUDIOBOOKS_V1_DIR, { recursive: true });
 
@@ -284,7 +285,7 @@ export async function ensureAudiobooksV1Ready(): Promise<void> {
     if (hasExtraKeys) {
       await saveMigrationState({ audiobooksV1Migrated: true });
     }
-    return;
+    return false;
   }
 
   let entries: Array<import('fs').Dirent> = [];
@@ -333,6 +334,7 @@ export async function ensureAudiobooksV1Ready(): Promise<void> {
   const finalLegacyRemaining = await hasLegacyAudiobookDirs();
   const finalLegacyChaptersRemaining = await hasLegacyAudiobookChapterLayout();
   await saveMigrationState({ audiobooksV1Migrated: !finalLegacyRemaining && !finalLegacyChaptersRemaining });
+  return true;
 }
 
 type LegacyChapterMeta = {

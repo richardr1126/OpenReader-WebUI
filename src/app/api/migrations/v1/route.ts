@@ -114,8 +114,8 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    await ensureDocumentsV1Ready();
-    await ensureAudiobooksV1Ready();
+    const documentsMigrated = await ensureDocumentsV1Ready();
+    const audiobooksMigrated = await ensureAudiobooksV1Ready();
     const rekey = await rekeyAudiobooksV1(mappings);
 
     const documentsReady = await isDocumentsV1Ready();
@@ -125,6 +125,8 @@ export async function POST(request: NextRequest) {
       success: true,
       documentsReady,
       audiobooksReady,
+      documentsMigrated,
+      audiobooksMigrated,
       rekey,
     });
   } catch (error) {
