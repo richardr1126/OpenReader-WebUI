@@ -11,20 +11,21 @@
 
 OpenReader WebUI is an open source text to speech document reader web app built using Next.js, offering a TTS read along experience with narration for **EPUB, PDF, TXT, MD, and DOCX documents**. It supports multiple TTS providers including OpenAI, Deepinfra, and custom OpenAI-compatible endpoints like [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI) and [Orpheus-FastAPI](https://github.com/Lex-au/Orpheus-FastAPI)
 
-- 🎯 *(New)* **Multi-Provider TTS Support**
+- 🎯 **Multi-Provider TTS Support**
   - [**Kokoro-FastAPI**](https://github.com/remsky/Kokoro-FastAPI): Supporting multi-voice combinations (like `af_heart+af_bella`)
   - [**Orpheus-FastAPI**](https://github.com/Lex-au/Orpheus-FastAPI)
   - **Custom OpenAI-compatible**: Any TTS API with `/v1/audio/voices` and `/v1/audio/speech` endpoints
   - **Cloud TTS Providers (requiring API keys)**
     - [**Deepinfra**](https://deepinfra.com/models/text-to-speech): Kokoro-82M + models with support for cloned voices and more
     - [**OpenAI API ($$)**](https://platform.openai.com/docs/pricing#transcription-and-speech): tts-1, tts-1-hd, and gpt-4o-mini-tts w/ instructions
-- 📖 *(Updated)* **Read Along Experience** providing real-time text highlighting during playback (PDF/EPUB)
+- 🛜 *(Updated)* **Server-side Sync and Storage**
+  - *(New)* **External Library Import** enables importing documents to the browser's storage from a folder mounted on the server
+  - *(Updated)* **Sync documents** between the browser and server to get them on other browsers or devices
+- 🎧 **Server-side Audiobook Export** in **m4b/mp3**, with resumable, chapter-based export and regeneration
+- 📖 **Read Along Experience** providing real-time text highlighting during playback (PDF/EPUB)
   - *(New)* **Word-by-word** highlighting uses word-by-word timestamps generated server-side with [*whisper.cpp*](https://github.com/ggml-org/whisper.cpp) (optional)
-- 🧠 *(New)* **Smart Sentence-Aware Narration** merges sentences across pages/chapters for smoother TTS
-- 🎧 *(New)* **Reliable Audiobook Export** in **m4b/mp3**, with resumable, chapter-based export and regeneration
-- 🚀 *(New)* **Optimized Next.js TTS Proxy** with audio caching and optimized repeat playback
-- 💾 **Local-First Architecture** stores documents and more in-browser with Dexie.js
-- 🛜 **Optional Server-side documents** using backend `/docstore` for all users
+- 🧠 **Smart Sentence-Aware Narration** merges sentences across pages/chapters for smoother TTS
+- 🚀 **Optimized Next.js TTS Proxy** with audio caching and optimized repeat playback
 - 🎨 **Customizable Experience**
   - 🎨 Multiple app theme options
   - ⚙️ Various TTS and document handling settings
