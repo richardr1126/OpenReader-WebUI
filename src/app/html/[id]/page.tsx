@@ -1,6 +1,6 @@
 'use client';
 
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { useHTML } from '@/contexts/HTMLContext';
@@ -12,9 +12,11 @@ import { Header } from '@/components/Header';
 import { useTTS } from "@/contexts/TTSContext";
 import TTSPlayer from '@/components/player/TTSPlayer';
 import { ZoomControl } from '@/components/ZoomControl';
+import { resolveDocumentId } from '@/lib/dexie';
 
 export default function HTMLPage() {
   const { id } = useParams();
+  const router = useRouter();
   const { setCurrentDocument, currDocName, clearCurrDoc } = useHTML();
   const { stop } = useTTS();
   const [error, setError] = useState<string | null>(null);
@@ -28,19 +30,28 @@ export default function HTMLPage() {
     if (!isLoading) return;
     console.log('Loading new HTML document (from page.tsx)');
     stop();
+    let didRedirect = false;
     try {
       if (!id) {
         setError('Document not found');
         return;
       }
-      await setCurrentDocument(id as string);
+      const resolved = await resolveDocumentId(id as string);
+      if (resolved !== (id as string)) {
+        didRedirect = true;
+        router.replace(`/html/${resolved}`);
+        return;
+      }
+      await setCurrentDocument(resolved);
     } catch (err) {
       console.error('Error loading document:', err);
       setError('Failed to load document');
     } finally {
-      setIsLoading(false);
+      if (!didRedirect) {
+        setIsLoading(false);
+      }
     }
-  }, [isLoading, id, setCurrentDocument, stop]);
+  }, [isLoading, id, router, setCurrentDocument, stop]);
 
   useEffect(() => {
     loadDocument();

@@ -50,6 +50,7 @@ import type {
   TTSRequestHeaders,
   TTSRequestPayload,
   TTSRetryOptions,
+  AudiobookGenerationSettings,
 } from '@/types/client';
 
 /**
@@ -77,8 +78,21 @@ interface PDFContextType {
     sentence: string | null | undefined,
     containerRef: RefObject<HTMLDivElement>
   ) => void;
-  createFullAudioBook: (onProgress: (progress: number) => void, signal?: AbortSignal, onChapterComplete?: (chapter: TTSAudiobookChapter) => void, bookId?: string, format?: TTSAudiobookFormat) => Promise<string>;
-  regenerateChapter: (chapterIndex: number, bookId: string, format: TTSAudiobookFormat, signal: AbortSignal) => Promise<TTSAudiobookChapter>;
+  createFullAudioBook: (
+    onProgress: (progress: number) => void,
+    signal?: AbortSignal,
+    onChapterComplete?: (chapter: TTSAudiobookChapter) => void,
+    bookId?: string,
+    format?: TTSAudiobookFormat,
+    settings?: AudiobookGenerationSettings
+  ) => Promise<string>;
+  regenerateChapter: (
+    chapterIndex: number,
+    bookId: string,
+    format: TTSAudiobookFormat,
+    signal: AbortSignal,
+    settings?: AudiobookGenerationSettings
+  ) => Promise<TTSAudiobookChapter>;
   isAudioCombining: boolean;
 }
 
@@ -264,12 +278,26 @@ export function PDFProvider({ children }: { children: ReactNode }) {
     signal?: AbortSignal,
     onChapterComplete?: (chapter: TTSAudiobookChapter) => void,
     providedBookId?: string,
-    format: TTSAudiobookFormat = 'mp3'
+    format: TTSAudiobookFormat = 'mp3',
+    settings?: AudiobookGenerationSettings
   ): Promise<string> => {
     try {
       if (!pdfDocument) {
         throw new Error('No PDF document loaded');
       }
+
+      const effectiveProvider = settings?.ttsProvider ?? ttsProvider;
+      const effectiveModel = settings?.ttsModel ?? ttsModel;
+      const effectiveVoice =
+        settings?.voice ||
+        voice ||
+        (effectiveProvider === 'openai'
+          ? 'alloy'
+          : effectiveProvider === 'deepinfra'
+            ? 'af_bella'
+            : 'af_sarah');
+      const effectiveNativeSpeed = settings?.nativeSpeed ?? voiceSpeed;
+      const effectiveFormat = settings?.format ?? format;
 
       // First pass: extract and measure all text
       const textPerPage: string[] = [];
@@ -342,16 +370,16 @@ export function PDFProvider({ children }: { children: ReactNode }) {
           'Content-Type': 'application/json',
           'x-openai-key': apiKey,
           'x-openai-base-url': baseUrl,
-          'x-tts-provider': ttsProvider,
+          'x-tts-provider': effectiveProvider,
         };
 
         const reqBody: TTSRequestPayload = {
           text,
-          voice: voice || (ttsProvider === 'openai' ? 'alloy' : (ttsProvider === 'deepinfra' ? 'af_bella' : 'af_sarah')),
-          speed: voiceSpeed,
+          voice: effectiveVoice,
+          speed: effectiveNativeSpeed,
           format: 'mp3',
-          model: ttsModel,
-          instructions: ttsModel === 'gpt-4o-mini-tts' ? ttsInstructions : undefined
+          model: effectiveModel,
+          instructions: effectiveModel === 'gpt-4o-mini-tts' ? ttsInstructions : undefined
         };
 
         const retryOptions: TTSRetryOptions = {
@@ -390,8 +418,9 @@ export function PDFProvider({ children }: { children: ReactNode }) {
             chapterTitle,
             buffer: Array.from(new Uint8Array(audioBuffer)),
             bookId,
-            format,
-            chapterIndex: i
+            format: effectiveFormat,
+            chapterIndex: i,
+            settings
           }, signal);
           
           if (!bookId) {
@@ -423,7 +452,7 @@ export function PDFProvider({ children }: { children: ReactNode }) {
               title: `Page ${i + 1}`,
               status: 'error',
               bookId,
-              format
+              format: effectiveFormat
             });
           }
         }
@@ -447,12 +476,26 @@ export function PDFProvider({ children }: { children: ReactNode }) {
     chapterIndex: number,
     bookId: string,
     format: TTSAudiobookFormat,
-    signal: AbortSignal
+    signal: AbortSignal,
+    settings?: AudiobookGenerationSettings
   ): Promise<TTSAudiobookChapter> => {
     try {
       if (!pdfDocument) {
         throw new Error('No PDF document loaded');
       }
+
+      const effectiveProvider = settings?.ttsProvider ?? ttsProvider;
+      const effectiveModel = settings?.ttsModel ?? ttsModel;
+      const effectiveVoice =
+        settings?.voice ||
+        voice ||
+        (effectiveProvider === 'openai'
+          ? 'alloy'
+          : effectiveProvider === 'deepinfra'
+            ? 'af_bella'
+            : 'af_sarah');
+      const effectiveNativeSpeed = settings?.nativeSpeed ?? voiceSpeed;
+      const effectiveFormat = settings?.format ?? format;
 
       // IMPORTANT: Chapter indices are based on non-empty pages used during generation.
       // Build a mapping of "chapterIndex" -> actual PDF page number (1-based).
@@ -500,16 +543,16 @@ export function PDFProvider({ children }: { children: ReactNode }) {
         'Content-Type': 'application/json',
         'x-openai-key': apiKey,
         'x-openai-base-url': baseUrl,
-        'x-tts-provider': ttsProvider,
+        'x-tts-provider': effectiveProvider,
       };
 
       const reqBody: TTSRequestPayload = {
         text: textForTTS,
-        voice: voice || (ttsProvider === 'openai' ? 'alloy' : (ttsProvider === 'deepinfra' ? 'af_bella' : 'af_sarah')),
-        speed: voiceSpeed,
+        voice: effectiveVoice,
+        speed: effectiveNativeSpeed,
         format: 'mp3',
-        model: ttsModel,
-        instructions: ttsModel === 'gpt-4o-mini-tts' ? ttsInstructions : undefined
+        model: effectiveModel,
+        instructions: effectiveModel === 'gpt-4o-mini-tts' ? ttsInstructions : undefined
       };
 
       const retryOptions: TTSRetryOptions = {
@@ -539,8 +582,9 @@ export function PDFProvider({ children }: { children: ReactNode }) {
         chapterTitle,
         buffer: Array.from(new Uint8Array(audioBuffer)),
         bookId,
-        format,
-        chapterIndex
+        format: effectiveFormat,
+        chapterIndex,
+        settings
       }, signal);
 
       return chapter;

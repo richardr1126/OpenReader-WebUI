@@ -1,7 +1,7 @@
 import { DocumentListDocument } from '@/types/documents';
 import { PDFIcon, EPUBIcon, FileIcon } from '@/components/icons/Icons';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { db } from '@/lib/dexie';
+import { getEpubDocument, getHtmlDocument, getPdfDocument } from '@/lib/dexie';
 import {
   extractEpubCoverToDataUrl,
   extractRawTextSnippet,
@@ -75,44 +75,44 @@ export function DocumentPreview({ doc }: DocumentPreviewProps) {
 
     let cancelled = false;
 
-    const run = async () => {
-      setIsGenerating(true);
-      try {
-        const targetWidth = 240;
+	    const run = async () => {
+	      setIsGenerating(true);
+	      try {
+	        const targetWidth = 240;
 
-        if (doc.type === 'pdf') {
-          const pdfDoc = await db['pdf-documents'].get(doc.id);
-          if (!pdfDoc?.data) return;
-          const dataUrl = await renderPdfFirstPageToDataUrl(pdfDoc.data, targetWidth);
-          if (cancelled) return;
-          imagePreviewCache.set(previewKey, dataUrl);
-          setImagePreview(dataUrl);
-          setTextPreview(null);
-          return;
-        }
+	        if (doc.type === 'pdf') {
+	          const pdfDoc = await getPdfDocument(doc.id);
+	          if (!pdfDoc?.data) return;
+	          const dataUrl = await renderPdfFirstPageToDataUrl(pdfDoc.data, targetWidth);
+	          if (cancelled) return;
+	          imagePreviewCache.set(previewKey, dataUrl);
+	          setImagePreview(dataUrl);
+	          setTextPreview(null);
+	          return;
+	        }
 
-        if (doc.type === 'epub') {
-          const epubDoc = await db['epub-documents'].get(doc.id);
-          if (!epubDoc?.data) return;
-          const cover = await extractEpubCoverToDataUrl(epubDoc.data, targetWidth);
-          if (cancelled) return;
-          if (cover) {
-            imagePreviewCache.set(previewKey, cover);
-            setImagePreview(cover);
-            setTextPreview(null);
-          }
-          return;
-        }
+	        if (doc.type === 'epub') {
+	          const epubDoc = await getEpubDocument(doc.id);
+	          if (!epubDoc?.data) return;
+	          const cover = await extractEpubCoverToDataUrl(epubDoc.data, targetWidth);
+	          if (cancelled) return;
+	          if (cover) {
+	            imagePreviewCache.set(previewKey, cover);
+	            setImagePreview(cover);
+	            setTextPreview(null);
+	          }
+	          return;
+	        }
 
-        if (doc.type === 'html') {
-          const htmlDoc = await db['html-documents'].get(doc.id);
-          if (cancelled) return;
-          const snippet = extractRawTextSnippet(htmlDoc?.data ?? '');
-          textPreviewCache.set(previewKey, snippet);
-          setTextPreview(snippet);
-          setImagePreview(null);
-          return;
-        }
+	        if (doc.type === 'html') {
+	          const htmlDoc = await getHtmlDocument(doc.id);
+	          if (cancelled) return;
+	          const snippet = extractRawTextSnippet(htmlDoc?.data ?? '');
+	          textPreviewCache.set(previewKey, snippet);
+	          setTextPreview(snippet);
+	          setImagePreview(null);
+	          return;
+	        }
       } catch {
         // fall back to icon
       } finally {

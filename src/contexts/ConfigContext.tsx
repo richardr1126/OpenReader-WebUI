@@ -1,9 +1,10 @@
 'use client';
 
-import { createContext, useContext, useEffect, useMemo, useState, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState, ReactNode } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db, initDB, updateAppConfig } from '@/lib/dexie';
+import { db, getDocumentIdMappings, initDB, migrateLegacyDexieDocumentIdsToSha, updateAppConfig } from '@/lib/dexie';
 import { APP_CONFIG_DEFAULTS, type ViewType, type SavedVoices, type AppConfigValues, type AppConfigRow } from '@/types/config';
+import toast from 'react-hot-toast';
 export type { ViewType } from '@/types/config';
 
 /** Configuration values for the application */
@@ -48,9 +49,31 @@ const ConfigContext = createContext<ConfigContextType | undefined>(undefined);
 export function ConfigProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [isDBReady, setIsDBReady] = useState(false);
+  const didRunStartupMigrations = useRef(false);
 
   // Helper function to generate provider-model key
   const getVoiceKey = (provider: string, model: string) => `${provider}:${model}`;
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ status?: string; ms?: number }>).detail;
+      const status = detail?.status;
+      if (status === 'opened') {
+        toast.dismiss('dexie-blocked');
+        return;
+      }
+      if (status === 'blocked' || status === 'stalled') {
+        const message =
+          'Database upgrade is waiting for another OpenReader tab. Close other OpenReader tabs and reload.';
+        toast.error(message, { id: 'dexie-blocked', duration: Infinity });
+      }
+    };
+
+    window.addEventListener('openreader:dexie', handler as EventListener);
+    return () => {
+      window.removeEventListener('openreader:dexie', handler as EventListener);
+    };
+  }, []);
 
   useEffect(() => {
     const initializeDB = async () => {
@@ -67,6 +90,31 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
 
     initializeDB();
   }, []);
+
+  useEffect(() => {
+    if (!isDBReady) return;
+    if (didRunStartupMigrations.current) return;
+    didRunStartupMigrations.current = true;
+
+    const run = async () => {
+      try {
+        await migrateLegacyDexieDocumentIdsToSha();
+        const mappings = await getDocumentIdMappings();
+
+        // Run server-side v1 migrations proactively, since the client may now
+        // reference SHA-based IDs immediately after the Dexie migration.
+        await fetch('/api/migrations/v1', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mappings }),
+        }).catch(() => undefined);
+      } catch (error) {
+        console.warn('Startup migrations failed:', error);
+      }
+    };
+
+    void run();
+  }, [isDBReady]);
 
   const appConfig = useLiveQuery(
     async () => {

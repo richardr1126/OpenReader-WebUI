@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useState, useRef, useCallback, useEffect } from 'react';
+import { Fragment, useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { Dialog, DialogPanel, Transition, TransitionChild, Button, Listbox, ListboxButton, ListboxOptions, ListboxOption, Menu, MenuButton, MenuItems, MenuItem } from '@headlessui/react';
 import { useTimeEstimation } from '@/hooks/useTimeEstimation';
 import { ProgressPopup } from '@/components/ProgressPopup';
@@ -9,6 +9,8 @@ import { DownloadIcon, CheckCircleIcon, XCircleIcon, ClockIcon, ChevronUpDownIco
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { LoadingSpinner } from '@/components/Spinner';
 import { useConfig } from '@/contexts/ConfigContext';
+import { useTTS } from '@/contexts/TTSContext';
+import { VoicesControlBase } from '@/components/player/VoicesControlBase';
 import type { TTSAudiobookChapter, TTSAudiobookFormat } from '@/types/tts';
 import { 
   getAudiobookStatus, 
@@ -17,6 +19,7 @@ import {
   downloadAudiobookChapter, 
   downloadAudiobook 
 } from '@/lib/client';
+import type { AudiobookGenerationSettings } from '@/types/client';
 interface AudiobookExportModalProps {
   isOpen: boolean;
   setIsOpen: (isOpen: boolean) => void;
@@ -26,12 +29,12 @@ interface AudiobookExportModalProps {
     onProgress: (progress: number) => void,
     signal: AbortSignal,
     onChapterComplete: (chapter: TTSAudiobookChapter) => void,
-    format: TTSAudiobookFormat
+    settings: AudiobookGenerationSettings
   ) => Promise<string>; // Returns bookId
   onRegenerateChapter?: (
     chapterIndex: number,
     bookId: string,
-    format: TTSAudiobookFormat,
+    settings: AudiobookGenerationSettings,
     signal: AbortSignal
   ) => Promise<TTSAudiobookChapter>;
 }
@@ -44,7 +47,8 @@ export function AudiobookExportModal({
   onGenerateAudiobook,
   onRegenerateChapter
 }: AudiobookExportModalProps) {
-  const { isLoading, isDBReady } = useConfig();
+  const { isLoading, isDBReady, ttsProvider, ttsModel, voice: configVoice, voiceSpeed, audioPlayerSpeed } = useConfig();
+  const { availableVoices } = useTTS();
   const { progress, setProgress, estimatedTimeRemaining } = useTimeEstimation();
   const [isGenerating, setIsGenerating] = useState(false);
   const [chapters, setChapters] = useState<TTSAudiobookChapter[]>([]);
@@ -54,12 +58,45 @@ export function AudiobookExportModal({
   const [isRefreshingChapters, setIsRefreshingChapters] = useState(false);
   const [currentChapter, setCurrentChapter] = useState<string>('');
   const [format, setFormat] = useState<TTSAudiobookFormat>('m4b');
+  const [audiobookVoice, setAudiobookVoice] = useState<string>(configVoice || '');
+  const [nativeSpeed, setNativeSpeed] = useState<number>(voiceSpeed);
+  const [postSpeed, setPostSpeed] = useState<number>(audioPlayerSpeed);
+  const [savedSettings, setSavedSettings] = useState<AudiobookGenerationSettings | null>(null);
   const [regeneratingChapter, setRegeneratingChapter] = useState<number | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const [pendingDeleteChapter, setPendingDeleteChapter] = useState<TTSAudiobookChapter | null>(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showRegenerateHint, setShowRegenerateHint] = useState(false);
+
+  const formatSpeed = useCallback((speed: number) => {
+    return Number.isInteger(speed) ? speed.toString() : speed.toFixed(1);
+  }, []);
+
+  const hasExistingAudiobook = Boolean(bookId) || chapters.length > 0;
+  const isLegacyAudiobookMissingSettings = hasExistingAudiobook && savedSettings === null;
+
+  useEffect(() => {
+    if (savedSettings) return;
+    if (audiobookVoice) return;
+    if (availableVoices.length > 0) {
+      setAudiobookVoice(availableVoices[0] || '');
+    }
+  }, [savedSettings, audiobookVoice, availableVoices]);
+
+  const effectiveSettings: AudiobookGenerationSettings | null = useMemo(() => {
+    if (savedSettings) return savedSettings;
+    const nextVoice = audiobookVoice || configVoice || availableVoices[0] || '';
+    if (!nextVoice) return null;
+    return {
+      ttsProvider,
+      ttsModel,
+      voice: nextVoice,
+      nativeSpeed,
+      postSpeed,
+      format,
+    };
+  }, [savedSettings, audiobookVoice, configVoice, availableVoices, ttsProvider, ttsModel, nativeSpeed, postSpeed, format]);
 
   const fetchExistingChapters = useCallback(async (soft: boolean = false) => {
     if (soft) {
@@ -69,15 +106,22 @@ export function AudiobookExportModal({
     }
     try {
       const data = await getAudiobookStatus(documentId);
-      if (data.exists && data.chapters.length > 0) {
-        setChapters(data.chapters);
+      if (data.exists) {
+        setChapters(data.chapters || []);
         setBookId(data.bookId);
-        // Set format from existing chapters - this ensures the format matches what was actually generated
         if (data.chapters[0]?.format) {
           const detectedFormat = data.chapters[0].format as TTSAudiobookFormat;
           setFormat(detectedFormat);
         }
-        // If we have a complete audiobook, we're done
+        if (data.settings) {
+          setSavedSettings(data.settings);
+          setAudiobookVoice(data.settings.voice);
+          setNativeSpeed(data.settings.nativeSpeed);
+          setPostSpeed(data.settings.postSpeed);
+          setFormat(data.settings.format);
+        } else {
+          setSavedSettings(null);
+        }
         if (data.hasComplete) {
           setProgress(100);
         }
@@ -85,6 +129,7 @@ export function AudiobookExportModal({
         // If nothing exists, clear chapters/bookId to reflect current state
         setChapters([]);
         setBookId(null);
+        setSavedSettings(null);
       }
     } catch (error) {
       console.error('Error fetching existing chapters:', error);
@@ -116,6 +161,10 @@ export function AudiobookExportModal({
   }, []);
 
   const handleStartGeneration = useCallback(async () => {
+    if (!effectiveSettings) {
+      setErrorMessage('No voice selected; please choose a voice before generating.');
+      return;
+    }
     setIsGenerating(true);
     setProgress(0);
     setCurrentChapter('');
@@ -131,7 +180,7 @@ export function AudiobookExportModal({
         (progress) => setProgress(progress),
         abortControllerRef.current.signal,
         handleChapterComplete,
-        format
+        effectiveSettings
       );
       setBookId(generatedBookId);
     } catch (error) {
@@ -141,7 +190,7 @@ export function AudiobookExportModal({
         console.log('Audiobook generation cancelled gracefully');
       } else {
         // Show error to user for actual errors
-        setErrorMessage('Failed to generate audiobook. Please try again.');
+        setErrorMessage(error instanceof Error ? error.message : 'Failed to generate audiobook. Please try again.');
       }
     } finally {
       setIsGenerating(false);
@@ -152,7 +201,7 @@ export function AudiobookExportModal({
         await fetchExistingChapters(true);
       }
     }
-  }, [onGenerateAudiobook, handleChapterComplete, setProgress, bookId, format, documentId, fetchExistingChapters]);
+  }, [onGenerateAudiobook, handleChapterComplete, setProgress, bookId, documentId, fetchExistingChapters, effectiveSettings]);
 
   const handleCancel = useCallback(() => {
     if (abortControllerRef.current) {
@@ -181,6 +230,10 @@ export function AudiobookExportModal({
 
   const handleRegenerateChapter = useCallback(async (chapter: TTSAudiobookChapter) => {
     if (!onRegenerateChapter || !bookId) return;
+    if (!effectiveSettings) {
+      setErrorMessage('No voice selected; please choose a voice before generating.');
+      return;
+    }
 
     if (!showRegenerateHint) {
       setShowRegenerateHint(true);
@@ -208,7 +261,7 @@ export function AudiobookExportModal({
       const regeneratedChapter = await onRegenerateChapter(
         chapter.index,
         bookId,
-        format,
+        effectiveSettings,
         abortControllerRef.current.signal
       );
 
@@ -224,7 +277,7 @@ export function AudiobookExportModal({
       if (error instanceof Error && error.message.includes('cancelled')) {
         console.log('Chapter regeneration cancelled');
       } else {
-        setErrorMessage('Failed to regenerate chapter. Please try again.');
+        setErrorMessage(error instanceof Error ? error.message : 'Failed to regenerate chapter. Please try again.');
         // Mark as error
         setChapters(prev => prev.map(c =>
           c.index === chapter.index
@@ -240,7 +293,7 @@ export function AudiobookExportModal({
       // Refresh chapters to get updated data (soft refresh list only)
       await fetchExistingChapters(true);
     }
-  }, [onRegenerateChapter, bookId, format, setProgress, fetchExistingChapters, showRegenerateHint]);
+  }, [onRegenerateChapter, bookId, setProgress, fetchExistingChapters, showRegenerateHint, effectiveSettings]);
 
   const performDeleteChapter = useCallback(async () => {
     if (!bookId || !pendingDeleteChapter) return;
@@ -358,6 +411,8 @@ export function AudiobookExportModal({
   const hasAnyChapters = chapters.length > 0;
   const showResumeButton = !isGenerating && !regeneratingChapter && hasAnyChapters;
   const showResetButton = !isGenerating && !regeneratingChapter && hasAnyChapters;
+  const settingsLocked = savedSettings !== null;
+  const canGenerate = effectiveSettings !== null;
 
   // Do not render until storage/config is initialized
   if (isLoading || !isDBReady) {
@@ -410,101 +465,203 @@ export function AudiobookExportModal({
                       <LoadingSpinner />
                     </div>
                   ) : (
-                    <>
-                      <div className="space-y-4">
-                        <div className="flex justify-between items-center gap-3">
-                          <h3 className="text-lg font-medium text-foreground">Export Audiobook</h3>
-                          {!isGenerating && (
-                            <div className="flex items-center gap-2">
-                              {chapters.length === 0 && (
-                                <Listbox
-                                  value={format}
-                                  onChange={(newFormat) => setFormat(newFormat)}
-                                  disabled={chapters.length > 0}
-                                >
-                                  <div className="relative">
-                                    <ListboxButton className="relative cursor-pointer rounded-lg bg-background py-1.5 pl-3 pr-10 text-left text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-accent transform transition-transform duration-200 ease-in-out hover:scale-[1.01] hover:text-accent min-w-[100px]">
-                                      <span className="block truncate text-sm font-medium">{format.toUpperCase()}</span>
-                                      <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2">
-                                        <ChevronUpDownIcon className="h-5 w-5 text-muted" />
-                                      </span>
-                                    </ListboxButton>
-                                    <Transition
-                                      as={Fragment}
-                                      leave="transition ease-in duration-100"
-                                      leaveFrom="opacity-100"
-                                      leaveTo="opacity-0"
-                                    >
-                                      <ListboxOptions className="absolute right-0 mt-1 max-h-60 w-full overflow-auto rounded-md bg-background py-1 shadow-lg ring-1 ring-black/5 focus:outline-none z-10">
-                                        <ListboxOption
-                                          value="m4b"
-                                          className={({ active }) =>
-                                            `relative cursor-pointer select-none py-2 pl-3 pr-4 ${active ? 'bg-offbase text-accent' : 'text-foreground'
-                                            }`
-                                          }
-                                        >
-                                          {({ selected }) => (
-                                            <span className={`block truncate text-sm ${selected ? 'font-medium' : 'font-normal'}`}>
-                                              M4B
-                                            </span>
-                                          )}
-                                        </ListboxOption>
-                                        <ListboxOption
-                                          value="mp3"
-                                          className={({ active }) =>
-                                            `relative cursor-pointer select-none py-2 pl-3 pr-4 ${active ? 'bg-offbase text-accent' : 'text-foreground'
-                                            }`
-                                          }
-                                        >
-                                          {({ selected }) => (
-                                            <span className={`block truncate text-sm ${selected ? 'font-medium' : 'font-normal'}`}>
-                                              MP3
-                                            </span>
-                                          )}
-                                        </ListboxOption>
-                                      </ListboxOptions>
-                                    </Transition>
-                                  </div>
-                                </Listbox>
-                              )}
-                              {chapters.length === 0 && (
-                                <Button
-                                  onClick={handleStartGeneration}
-                                  className="inline-flex justify-center rounded-lg bg-accent px-3 py-1.5 text-sm
-                                          font-medium text-background hover:bg-secondary-accent focus:outline-none
-                                          focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2
-                                          transform transition-transform duration-200 ease-in-out hover:scale-[1.04]"
-                                >
-                                  Start Generation
-                                </Button>
-                              )}
-                              {showResumeButton && (
-                                <Button
-                                  onClick={handleStartGeneration}
-                                  className="inline-flex justify-center rounded-lg bg-accent px-3 py-1.5 text-sm
-                                          font-medium text-background hover:bg-secondary-accent focus:outline-none
-                                          focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2
-                                          transform transition-transform duration-200 ease-in-out hover:scale-[1.04]"
-                                >
-                                  Resume
-                                </Button>
-                              )}
-                              {showResetButton && (
-                                <Button
-                                  onClick={() => setShowResetConfirm(true)}
-                                  disabled={isGenerating}
-                                  className="justify-center rounded-lg bg-red-500 px-3 py-1.5 text-sm 
-                                         font-medium text-background hover:bg-red-500/90 focus:outline-none 
-                                         focus-visible:ring-2 focus-visible:bg-red-500 focus-visible:ring-offset-2
-                                       transform transition-transform duration-200 ease-in-out hover:scale-[1.04]"
-                                  title="Delete all generated chapters/pages for this document"
-                                >
-                                  Reset
-                                </Button>
-                              )}
-                            </div>
-                          )}
-                        </div>
+	                    <>
+			                      <div className="space-y-4">
+			                        <div className="flex justify-between items-start gap-3">
+			                          <h3 className="text-lg font-medium text-foreground">Export Audiobook</h3>
+			                        </div>
+			                        {!isGenerating && (
+			                          <div className="flex justify-center">
+			                            <div className="w-full rounded-xl border border-offbase bg-background p-4">
+			                              <div className="flex items-start justify-between gap-3">
+			                                <div>
+			                                  <h4 className="text-sm font-medium text-foreground">Generation settings</h4>
+			                                  <p className="text-xs text-muted mt-0.5">
+			                                    These settings are saved per audiobook for consistent resumes across devices.
+			                                  </p>
+			                                </div>
+				                                {settingsLocked && (
+				                                  <span className="inline-flex items-center rounded-full bg-offbase px-2 py-0.5 text-xs text-muted">
+				                                    Locked
+				                                  </span>
+				                                )}
+				                              </div>
+
+				                              {isLegacyAudiobookMissingSettings && (
+				                                <div className="mt-3 rounded-lg border border-yellow-500/30 bg-yellow-500/10 p-3 text-xs text-foreground">
+				                                  <div className="font-medium">Saved generation settings not found</div>
+				                                  <div className="mt-1 text-muted">
+				                                    This audiobook was likely created before v1 metadata was introduced, so OpenReader can’t know
+				                                    which voice/speeds/format were used. Consider resetting this audiobook to regenerate it with
+				                                    v1 metadata (so settings are saved for resumes across devices).
+				                                  </div>
+				                                </div>
+				                              )}
+
+				                              {settingsLocked && savedSettings ? (
+				                                <div className="mt-3 text-sm">
+				                                  <div className="text-muted">
+				                                    Voice: <span className="text-foreground">{savedSettings.voice}</span>
+			                                  </div>
+			                                  <div className="text-muted">
+			                                    Native speed: <span className="text-foreground">{formatSpeed(savedSettings.nativeSpeed)}x</span>
+			                                  </div>
+			                                  <div className="text-muted">
+			                                    Post speed: <span className="text-foreground">{formatSpeed(savedSettings.postSpeed)}x</span>
+			                                  </div>
+			                                  <div className="text-muted">
+			                                    Format: <span className="text-foreground">{savedSettings.format.toUpperCase()}</span>
+			                                  </div>
+			                                  <p className="text-xs text-muted mt-2">
+			                                    Reset the audiobook to change generation settings.
+			                                  </p>
+			                                </div>
+			                              ) : (
+			                                <div className="mt-3 space-y-4">
+			                                  <div className="space-y-1">
+			                                    <div className="text-xs font-medium text-foreground">Voice</div>
+			                                    <VoicesControlBase
+			                                      availableVoices={availableVoices}
+			                                      voice={audiobookVoice}
+			                                      onChangeVoice={setAudiobookVoice}
+			                                      ttsProvider={ttsProvider}
+			                                      ttsModel={ttsModel}
+			                                    />
+			                                  </div>
+
+			                                  <div className="space-y-1">
+			                                    <div className="text-xs font-medium text-foreground">Output format</div>
+			                                    {chapters.length === 0 ? (
+			                                      <Listbox
+			                                        value={format}
+			                                        onChange={(newFormat) => setFormat(newFormat)}
+			                                        disabled={chapters.length > 0 || settingsLocked}
+			                                      >
+			                                        <div className="relative inline-block">
+			                                          <ListboxButton className="relative cursor-pointer rounded-lg bg-base py-1.5 pl-3 pr-10 text-left text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-accent transform transition-transform duration-200 ease-in-out hover:scale-[1.01] hover:text-accent min-w-[120px]">
+			                                            <span className="block truncate text-sm font-medium">{format.toUpperCase()}</span>
+			                                            <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2">
+			                                              <ChevronUpDownIcon className="h-5 w-5 text-muted" />
+			                                            </span>
+			                                          </ListboxButton>
+			                                          <Transition
+			                                            as={Fragment}
+			                                            leave="transition ease-in duration-100"
+			                                            leaveFrom="opacity-100"
+			                                            leaveTo="opacity-0"
+			                                          >
+			                                            <ListboxOptions className="absolute left-0 mt-1 max-h-60 w-full overflow-auto rounded-md bg-base py-1 shadow-lg ring-1 ring-black/5 focus:outline-none z-10">
+			                                              <ListboxOption
+			                                                value="m4b"
+			                                                className={({ active }) =>
+			                                                  `relative cursor-pointer select-none py-2 pl-3 pr-4 ${active ? 'bg-offbase text-accent' : 'text-foreground'
+			                                                  }`
+			                                                }
+			                                              >
+			                                                {({ selected }) => (
+			                                                  <span className={`block truncate text-sm ${selected ? 'font-medium' : 'font-normal'}`}>
+			                                                    M4B
+			                                                  </span>
+			                                                )}
+			                                              </ListboxOption>
+			                                              <ListboxOption
+			                                                value="mp3"
+			                                                className={({ active }) =>
+			                                                  `relative cursor-pointer select-none py-2 pl-3 pr-4 ${active ? 'bg-offbase text-accent' : 'text-foreground'
+			                                                  }`
+			                                                }
+			                                              >
+			                                                {({ selected }) => (
+			                                                  <span className={`block truncate text-sm ${selected ? 'font-medium' : 'font-normal'}`}>
+			                                                    MP3
+			                                                  </span>
+			                                                )}
+			                                              </ListboxOption>
+			                                            </ListboxOptions>
+			                                          </Transition>
+			                                        </div>
+			                                      </Listbox>
+			                                    ) : (
+			                                      <div className="text-sm text-foreground">{format.toUpperCase()}</div>
+			                                    )}
+			                                  </div>
+
+			                                  <div className="space-y-1">
+			                                    <div className="flex items-center">
+			                                      <div className="text-xs font-medium text-foreground mr-1">Native model speed</div>
+			                                      <div className="text-xs text-muted">• {formatSpeed(nativeSpeed)}x</div>
+			                                    </div>
+			                                    <input
+			                                      type="range"
+			                                      min="0.5"
+			                                      max="3"
+			                                      step="0.1"
+			                                      value={nativeSpeed}
+			                                      onChange={(e) => setNativeSpeed(parseFloat(e.target.value))}
+			                                      className="w-full max-w-xs bg-offbase rounded-lg appearance-none cursor-pointer accent-accent [&::-webkit-slider-runnable-track]:bg-offbase [&::-webkit-slider-runnable-track]:rounded-lg [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-accent [&::-moz-range-track]:bg-offbase [&::-moz-range-track]:rounded-lg [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-accent"
+			                                    />
+			                                  </div>
+
+			                                  <div className="space-y-1">
+			                                    <div className="flex items-center">
+			                                      <div className="text-xs font-medium text-foreground mr-1">Post-generation speed</div>
+			                                      <div className="text-xs text-muted">• {formatSpeed(postSpeed)}x</div>
+			                                    </div>
+			                                    <input
+			                                      type="range"
+			                                      min="0.5"
+			                                      max="3"
+			                                      step="0.1"
+			                                      value={postSpeed}
+			                                      onChange={(e) => setPostSpeed(parseFloat(e.target.value))}
+			                                      className="w-full max-w-xs bg-offbase rounded-lg appearance-none cursor-pointer accent-accent [&::-webkit-slider-runnable-track]:bg-offbase [&::-webkit-slider-runnable-track]:rounded-lg [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-accent [&::-moz-range-track]:bg-offbase [&::-moz-range-track]:rounded-lg [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-accent"
+			                                    />
+			                                  </div>
+			                                </div>
+			                              )}
+
+			                              <div className="mt-4 space-y-2">
+			                                {chapters.length === 0 && (
+			                                  <Button
+			                                    onClick={handleStartGeneration}
+			                                    disabled={!canGenerate}
+			                                    className="w-full inline-flex justify-center rounded-lg bg-accent px-3 py-2 text-sm
+			                                            font-medium text-background hover:bg-secondary-accent focus:outline-none
+			                                            focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2
+			                                            transform transition-transform duration-200 ease-in-out hover:scale-[1.01] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+			                                  >
+			                                    Start Generation
+			                                  </Button>
+			                                )}
+			                                {showResumeButton && (
+			                                  <Button
+			                                    onClick={handleStartGeneration}
+			                                    disabled={!canGenerate}
+			                                    className="w-full inline-flex justify-center rounded-lg bg-accent px-3 py-2 text-sm
+			                                            font-medium text-background hover:bg-secondary-accent focus:outline-none
+			                                            focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2
+			                                            transform transition-transform duration-200 ease-in-out hover:scale-[1.01] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+			                                  >
+			                                    Resume
+			                                  </Button>
+			                                )}
+			                                {showResetButton && (
+			                                  <Button
+			                                    onClick={() => setShowResetConfirm(true)}
+			                                    disabled={isGenerating}
+			                                    className="w-full justify-center rounded-lg bg-red-500 px-3 py-2 text-sm 
+			                                           font-medium text-background hover:bg-red-500/90 focus:outline-none 
+			                                           focus-visible:ring-2 focus-visible:bg-red-500 focus-visible:ring-offset-2
+			                                         transform transition-transform duration-200 ease-in-out hover:scale-[1.01]"
+			                                    title="Delete all generated chapters/pages for this document"
+			                                  >
+			                                    Reset
+			                                  </Button>
+			                                )}
+			                              </div>
+			                            </div>
+			                          </div>
+			                        )}
                         {showRegenerateHint && (
                           <div className="flex items-start justify-between bg-offbase border border-offbase rounded-md px-3 py-2 text-xs sm:text-sm">
                             <p className="text-xs sm:text-sm text-foreground">
@@ -681,11 +838,11 @@ export function AudiobookExportModal({
                         )}
 
                         {chapters.length === 0 && !isGenerating && !isLoadingExisting && (
-                          <div className="text-center py-8">
+                          <div className="text-center">
                             <p className="text-sm text-muted">
-                              Generation will use current TTS playback options.
-                              <br />
-                              Individual chapters will appear here as they are generated.
+                            Audiobook settings are fixed after generation. Chapters will appear here as they are ready.
+                            <br></br>
+                            You can close this dialog while the audiobook is being generated. But returning to the home screen will cancel the generation.
                             </p>
                           </div>
                         )}

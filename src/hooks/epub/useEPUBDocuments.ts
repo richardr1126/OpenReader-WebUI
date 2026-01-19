@@ -1,10 +1,10 @@
 'use client';
 
 import { useCallback } from 'react';
-import { v4 as uuidv4 } from 'uuid';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/lib/dexie';
 import type { EPUBDocument } from '@/types/documents';
+import { sha256HexFromArrayBuffer } from '@/lib/sha256';
 
 export function useEPUBDocuments() {
   const documents = useLiveQuery(
@@ -16,8 +16,8 @@ export function useEPUBDocuments() {
   const isLoading = documents === undefined;
 
   const addDocument = useCallback(async (file: File): Promise<string> => {
-    const id = uuidv4();
     const arrayBuffer = await file.arrayBuffer();
+    const id = await sha256HexFromArrayBuffer(arrayBuffer);
 
     console.log('Original file size:', file.size);
     console.log('ArrayBuffer size:', arrayBuffer.byteLength);
@@ -31,7 +31,7 @@ export function useEPUBDocuments() {
       data: arrayBuffer,
     };
 
-    await db['epub-documents'].add(newDoc);
+    await db['epub-documents'].put(newDoc);
     return id;
   }, []);
 

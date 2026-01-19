@@ -22,7 +22,7 @@ import {
 import { useTheme } from '@/contexts/ThemeContext';
 import { useConfig } from '@/contexts/ConfigContext';
 import { ChevronUpDownIcon, CheckIcon, SettingsIcon } from '@/components/icons/Icons';
-import { syncDocumentsToServer, loadDocumentsFromServer, getFirstVisit, setFirstVisit } from '@/lib/dexie';
+import { syncDocumentsToServer, loadDocumentsFromServer, importDocumentsFromLibrary, getFirstVisit, setFirstVisit } from '@/lib/dexie';
 import { useDocuments } from '@/contexts/DocumentContext';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { ProgressPopup } from '@/components/ProgressPopup';
@@ -51,9 +51,10 @@ export function SettingsModal() {
   const [localTTSInstructions, setLocalTTSInstructions] = useState(ttsInstructions);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isImportingLibrary, setIsImportingLibrary] = useState(false);
   const [showProgress, setShowProgress] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
-  const [operationType, setOperationType] = useState<'sync' | 'load'>('sync');
+  const [operationType, setOperationType] = useState<'sync' | 'load' | 'library'>('sync');
   const [abortController, setAbortController] = useState<AbortController | null>(null);
   const selectedTheme = themes.find(t => t.id === theme) || themes[0];
   const [showClearLocalConfirm, setShowClearLocalConfirm] = useState(false);
@@ -207,6 +208,38 @@ export function SettingsModal() {
       }
     } finally {
       setIsLoading(false);
+      setShowProgress(false);
+      setProgress(0);
+      setStatusMessage('');
+      setAbortController(null);
+    }
+  };
+
+  const handleImportLibrary = async () => {
+    const controller = new AbortController();
+    setAbortController(controller);
+
+    try {
+      setIsImportingLibrary(true);
+      setShowProgress(true);
+      setProgress(0);
+      setOperationType('library');
+      setStatusMessage('Scanning server library...');
+      await importDocumentsFromLibrary((progress, status) => {
+        if (controller.signal.aborted) return;
+        setProgress(progress);
+        if (status) setStatusMessage(status);
+      }, controller.signal);
+    } catch (error) {
+      if (controller.signal.aborted) {
+        console.log('Library import cancelled');
+        setStatusMessage('Operation cancelled');
+      } else {
+        console.error('Library import failed:', error);
+        setStatusMessage('Library import failed. Please try again.');
+      }
+    } finally {
+      setIsImportingLibrary(false);
       setShowProgress(false);
       setProgress(0);
       setStatusMessage('');
@@ -598,12 +631,29 @@ export function SettingsModal() {
                       </TabPanel>
 
                       <TabPanel className="space-y-4">
+                        <div className="space-y-1">
+                          <label className="block text-sm font-medium text-foreground">Server Library Import</label>
+                          <div className="flex gap-2">
+                            <Button
+                              onClick={handleImportLibrary}
+                              disabled={isSyncing || isLoading || isImportingLibrary}
+                              className="justify-center rounded-lg bg-background px-3 py-1.5 text-sm 
+                                       font-medium text-foreground hover:bg-offbase focus:outline-none 
+                                       focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2
+                                       transform transition-transform duration-200 ease-in-out hover:scale-[1.04] hover:text-accent
+                                       disabled:opacity-50"
+                            >
+                              {isImportingLibrary ? `Importing... ${Math.round(progress)}%` : 'Import from library'}
+                            </Button>
+                          </div>
+                        </div>
+
                         {isDev && <div className="space-y-1">
                           <label className="block text-sm font-medium text-foreground">Server Document Sync</label>
                           <div className="flex gap-2">
                             <Button
                               onClick={handleLoad}
-                              disabled={isSyncing || isLoading}
+                              disabled={isSyncing || isLoading || isImportingLibrary}
                               className="justify-center rounded-lg bg-background px-3 py-1.5 text-sm 
                                        font-medium text-foreground hover:bg-offbase focus:outline-none 
                                        focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2
@@ -614,7 +664,7 @@ export function SettingsModal() {
                             </Button>
                             <Button
                               onClick={handleSync}
-                              disabled={isSyncing || isLoading}
+                              disabled={isSyncing || isLoading || isImportingLibrary}
                               className="justify-center rounded-lg bg-background px-3 py-1.5 text-sm 
                                        font-medium text-foreground hover:bg-offbase focus:outline-none 
                                        focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2
@@ -631,6 +681,7 @@ export function SettingsModal() {
                           <div className="flex gap-2">
                             <Button
                               onClick={() => setShowClearLocalConfirm(true)}
+                              disabled={isSyncing || isLoading || isImportingLibrary}
                               className="justify-center rounded-lg bg-red-500 px-3 py-1.5 text-sm 
                                          font-medium text-background hover:bg-red-500/90 focus:outline-none 
                                          focus-visible:ring-2 focus-visible:bg-red-500 focus-visible:ring-offset-2
@@ -640,6 +691,7 @@ export function SettingsModal() {
                             </Button>
                             {isDev && <Button
                               onClick={() => setShowClearServerConfirm(true)}
+                              disabled={isSyncing || isLoading || isImportingLibrary}
                               className="justify-center rounded-lg bg-red-500 px-3 py-1.5 text-sm 
                                          font-medium text-background hover:bg-red-500/90 focus:outline-none 
                                          focus-visible:ring-2 focus-visible:bg-red-500 focus-visible:ring-offset-2
@@ -691,6 +743,7 @@ export function SettingsModal() {
           setProgress(0);
           setIsSyncing(false);
           setIsLoading(false);
+          setIsImportingLibrary(false);
           setStatusMessage('');
           setOperationType('sync');
           setAbortController(null);

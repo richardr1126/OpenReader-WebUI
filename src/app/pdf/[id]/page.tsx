@@ -2,7 +2,7 @@
 
 import dynamic from 'next/dynamic';
 import { usePDF } from '@/contexts/PDFContext';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { DocumentSkeleton } from '@/components/DocumentSkeleton';
@@ -12,8 +12,10 @@ import { SettingsIcon, DownloadIcon } from '@/components/icons/Icons';
 import { Header } from '@/components/Header';
 import { ZoomControl } from '@/components/ZoomControl';
 import { AudiobookExportModal } from '@/components/AudiobookExportModal';
-import type { TTSAudiobookChapter, TTSAudiobookFormat } from '@/types/tts';
+import type { TTSAudiobookChapter } from '@/types/tts';
+import type { AudiobookGenerationSettings } from '@/types/client';
 import TTSPlayer from '@/components/player/TTSPlayer';
+import { resolveDocumentId } from '@/lib/dexie';
 
 const isDev = process.env.NEXT_PUBLIC_NODE_ENV !== 'production' || process.env.NODE_ENV == null;
 
@@ -28,6 +30,7 @@ const PDFViewer = dynamic(
 
 export default function PDFViewerPage() {
   const { id } = useParams();
+  const router = useRouter();
   const { setCurrentDocument, currDocName, clearCurrDoc, currDocPage, currDocPages, createFullAudioBook: createPDFAudioBook, regenerateChapter: regeneratePDFChapter } = usePDF();
   const { stop } = useTTS();
   const [error, setError] = useState<string | null>(null);
@@ -41,19 +44,28 @@ export default function PDFViewerPage() {
     if (!isLoading) return; // Prevent calls when not loading new doc
     console.log('Loading new document (from page.tsx)');
     stop(); // Reset TTS when loading new document
+    let didRedirect = false;
     try {
       if (!id) {
         setError('Document not found');
         return;
       }
-      setCurrentDocument(id as string);
+      const resolved = await resolveDocumentId(id as string);
+      if (resolved !== (id as string)) {
+        didRedirect = true;
+        router.replace(`/pdf/${resolved}`);
+        return;
+      }
+      setCurrentDocument(resolved);
     } catch (err) {
       console.error('Error loading document:', err);
       setError('Failed to load document');
     } finally {
-      setIsLoading(false);
+      if (!didRedirect) {
+        setIsLoading(false);
+      }
     }
-  }, [isLoading, id, setCurrentDocument, stop]);
+  }, [isLoading, id, router, setCurrentDocument, stop]);
 
   useEffect(() => {
     loadDocument();
@@ -82,18 +94,18 @@ export default function PDFViewerPage() {
     onProgress: (progress: number) => void,
     signal: AbortSignal,
     onChapterComplete: (chapter: TTSAudiobookChapter) => void,
-    format: TTSAudiobookFormat
+    settings: AudiobookGenerationSettings
   ) => {
-    return createPDFAudioBook(onProgress, signal, onChapterComplete, id as string, format);
+    return createPDFAudioBook(onProgress, signal, onChapterComplete, id as string, settings.format, settings);
   }, [createPDFAudioBook, id]);
 
   const handleRegenerateChapter = useCallback(async (
     chapterIndex: number,
     bookId: string,
-    format: TTSAudiobookFormat,
+    settings: AudiobookGenerationSettings,
     signal: AbortSignal
   ) => {
-    return regeneratePDFChapter(chapterIndex, bookId, format, signal);
+    return regeneratePDFChapter(chapterIndex, bookId, settings.format, signal, settings);
   }, [regeneratePDFChapter]);
 
   if (error) {

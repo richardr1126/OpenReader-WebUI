@@ -1,10 +1,19 @@
 import Dexie, { type EntityTable } from 'dexie';
 import { APP_CONFIG_DEFAULTS, type ViewType, type SavedVoices, type AppConfigRow } from '@/types/config';
-import { PDFDocument, EPUBDocument, HTMLDocument, DocumentListState, SyncedDocument } from '@/types/documents';
+import {
+  PDFDocument,
+  EPUBDocument,
+  HTMLDocument,
+  DocumentListState,
+  SyncedDocument,
+  BaseDocument,
+  DocumentListDocument,
+} from '@/types/documents';
+import { sha256HexFromBytes, sha256HexFromString } from '@/lib/sha256';
 
 const DB_NAME = 'openreader-db';
 // Managed via Dexie (version bumped from the original manual IndexedDB)
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 
 const PDF_TABLE = 'pdf-documents' as const;
 const EPUB_TABLE = 'epub-documents' as const;
@@ -12,10 +21,17 @@ const HTML_TABLE = 'html-documents' as const;
 const CONFIG_TABLE = 'config' as const;
 const APP_CONFIG_TABLE = 'app-config' as const;
 const LAST_LOCATION_TABLE = 'last-locations' as const;
+const DOCUMENT_ID_MAP_TABLE = 'document-id-map' as const;
 
 export interface LastLocationRow {
   docId: string;
   location: string;
+}
+
+export interface DocumentIdMapRow {
+  oldId: string;
+  id: string;
+  createdAt: number;
 }
 
 export interface ConfigRow {
@@ -30,11 +46,34 @@ type OpenReaderDB = Dexie & {
   [CONFIG_TABLE]: EntityTable<ConfigRow, 'key'>;
   [APP_CONFIG_TABLE]: EntityTable<AppConfigRow, 'id'>;
   [LAST_LOCATION_TABLE]: EntityTable<LastLocationRow, 'docId'>;
+  [DOCUMENT_ID_MAP_TABLE]: EntityTable<DocumentIdMapRow, 'oldId'>;
 };
 
 export const db = new Dexie(DB_NAME) as OpenReaderDB;
 
 const isDev = process.env.NEXT_PUBLIC_NODE_ENV !== 'production' || process.env.NODE_ENV == null;
+
+type DexieOpenStatus = 'opening' | 'opened' | 'blocked' | 'stalled' | 'error';
+
+function emitDexieStatus(status: DexieOpenStatus, detail?: Record<string, unknown>): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.dispatchEvent(
+      new CustomEvent('openreader:dexie', {
+        detail: { status, ...detail },
+      }),
+    );
+  } catch {
+    // ignore
+  }
+}
+
+if (typeof window !== 'undefined') {
+  // Fired when this tab's open/upgrade is blocked by another tab holding the DB open.
+  db.on('blocked', () => {
+    emitDexieStatus('blocked');
+  });
+}
 
 const PROVIDER_DEFAULT_BASE_URL: Record<string, string> = {
   openai: 'https://api.openai.com/v1',
@@ -152,7 +191,7 @@ function buildAppConfigFromRaw(raw: RawConfigMap): AppConfigRow {
   return config;
 }
 
-// Version 5: introduce app-config and last-locations tables, migrate scattered config keys,
+// Version 6: add document-id-map table; keep v5 upgrade to migrate scattered config keys
 // and drop the legacy config table in a single upgrade step.
 db.version(DB_VERSION).stores({
   [PDF_TABLE]: 'id, type, name, lastModified, size, folderId',
@@ -160,6 +199,7 @@ db.version(DB_VERSION).stores({
   [HTML_TABLE]: 'id, type, name, lastModified, size, folderId',
   [APP_CONFIG_TABLE]: 'id',
   [LAST_LOCATION_TABLE]: 'docId',
+  [DOCUMENT_ID_MAP_TABLE]: 'oldId, id, createdAt',
   // `null` here means: drop the old 'config' table after upgrade runs,
   // but Dexie still lets us read it inside the upgrade transaction.
   [CONFIG_TABLE]: null,
@@ -199,10 +239,18 @@ export async function initDB(): Promise<void> {
   dbOpenPromise = (async () => {
     try {
       console.log('Opening Dexie database...');
+      emitDexieStatus('opening');
+      const startedAt = Date.now();
+      const stallTimer = setTimeout(() => {
+        emitDexieStatus('stalled', { ms: Date.now() - startedAt });
+      }, 4000);
       await db.open();
+      clearTimeout(stallTimer);
       console.log('Dexie database opened successfully');
+      emitDexieStatus('opened');
     } catch (error) {
       console.error('Dexie initialization error:', error);
+      emitDexieStatus('error', { message: error instanceof Error ? error.message : String(error) });
       dbOpenPromise = null;
       throw error;
     }
@@ -214,6 +262,193 @@ export async function initDB(): Promise<void> {
 async function withDB<T>(operation: () => Promise<T>): Promise<T> {
   await initDB();
   return operation();
+}
+
+function isSha256HexId(value: string): boolean {
+  return /^[a-f0-9]{64}$/i.test(value);
+}
+
+async function getMappedDocumentId(docId: string): Promise<string> {
+  if (isSha256HexId(docId)) return docId.toLowerCase();
+  const row = await db[DOCUMENT_ID_MAP_TABLE].get(docId);
+  return row?.id ?? docId;
+}
+
+export async function resolveDocumentId(docId: string): Promise<string> {
+  return withDB(async () => getMappedDocumentId(docId));
+}
+
+async function recordDocumentIdMapping(oldId: string, id: string): Promise<void> {
+  if (oldId === id) return;
+  await db[DOCUMENT_ID_MAP_TABLE].put({ oldId, id, createdAt: Date.now() });
+}
+
+function rewriteDocumentListStateDocIds(state: DocumentListState, mapping: Map<string, string>): DocumentListState {
+  let didChange = false;
+
+  const folders = state.folders.map((folder) => {
+    let folderChanged = false;
+    const seen = new Set<string>();
+    const documents: DocumentListDocument[] = [];
+
+    for (const doc of folder.documents) {
+      const mappedId = mapping.get(doc.id) ?? doc.id;
+      if (mappedId !== doc.id) folderChanged = true;
+      if (seen.has(mappedId)) {
+        folderChanged = true;
+        continue;
+      }
+      seen.add(mappedId);
+      documents.push(mappedId === doc.id ? doc : { ...doc, id: mappedId });
+    }
+
+    if (!folderChanged) return folder;
+    didChange = true;
+    return { ...folder, documents };
+  });
+
+  return didChange ? { ...state, folders } : state;
+}
+
+async function applyDocumentIdMapping(oldId: string, newId: string): Promise<void> {
+  if (!oldId || !newId || oldId === newId) return;
+  const nextId = newId.toLowerCase();
+
+  await withDB(async () => {
+    await db.transaction(
+      'readwrite',
+      [
+        db[PDF_TABLE],
+        db[EPUB_TABLE],
+        db[HTML_TABLE],
+        db[LAST_LOCATION_TABLE],
+        db[APP_CONFIG_TABLE],
+        db[DOCUMENT_ID_MAP_TABLE],
+      ],
+      async () => {
+        await recordDocumentIdMapping(oldId, nextId);
+
+        const pdf = await db[PDF_TABLE].get(oldId);
+        if (pdf) {
+          const existing = await db[PDF_TABLE].get(nextId);
+          if (existing) {
+            const merged: PDFDocument = {
+              ...pdf,
+              ...existing,
+              id: nextId,
+              folderId: existing.folderId ?? pdf.folderId,
+              name: existing.name || pdf.name,
+            };
+            await db[PDF_TABLE].put(merged);
+            await db[PDF_TABLE].delete(oldId);
+          } else {
+            await db[PDF_TABLE].put({ ...pdf, id: nextId });
+            await db[PDF_TABLE].delete(oldId);
+          }
+        }
+
+        const epub = await db[EPUB_TABLE].get(oldId);
+        if (epub) {
+          const existing = await db[EPUB_TABLE].get(nextId);
+          if (existing) {
+            const merged: EPUBDocument = {
+              ...epub,
+              ...existing,
+              id: nextId,
+              folderId: existing.folderId ?? epub.folderId,
+              name: existing.name || epub.name,
+            };
+            await db[EPUB_TABLE].put(merged);
+            await db[EPUB_TABLE].delete(oldId);
+          } else {
+            await db[EPUB_TABLE].put({ ...epub, id: nextId });
+            await db[EPUB_TABLE].delete(oldId);
+          }
+        }
+
+        const html = await db[HTML_TABLE].get(oldId);
+        if (html) {
+          const existing = await db[HTML_TABLE].get(nextId);
+          if (existing) {
+            const merged: HTMLDocument = {
+              ...html,
+              ...existing,
+              id: nextId,
+              folderId: existing.folderId ?? html.folderId,
+              name: existing.name || html.name,
+            };
+            await db[HTML_TABLE].put(merged);
+            await db[HTML_TABLE].delete(oldId);
+          } else {
+            await db[HTML_TABLE].put({ ...html, id: nextId });
+            await db[HTML_TABLE].delete(oldId);
+          }
+        }
+
+        const oldLocation = await db[LAST_LOCATION_TABLE].get(oldId);
+        if (oldLocation) {
+          const newLocation = await db[LAST_LOCATION_TABLE].get(nextId);
+          if (!newLocation) {
+            await db[LAST_LOCATION_TABLE].put({ docId: nextId, location: oldLocation.location });
+          }
+          await db[LAST_LOCATION_TABLE].delete(oldId);
+        }
+
+        const appConfig = await db[APP_CONFIG_TABLE].get('singleton');
+        if (appConfig?.documentListState) {
+          const mapped = rewriteDocumentListStateDocIds(appConfig.documentListState, new Map([[oldId, nextId]]));
+          if (mapped !== appConfig.documentListState) {
+            await db[APP_CONFIG_TABLE].update('singleton', { documentListState: mapped });
+          }
+        }
+      },
+    );
+  });
+}
+
+export async function migrateLegacyDexieDocumentIdsToSha(): Promise<Array<{ oldId: string; id: string }>> {
+  return withDB(async () => {
+    const mappings: Array<{ oldId: string; id: string }> = [];
+
+    const pdfDocs = await db[PDF_TABLE].toArray();
+    for (const doc of pdfDocs) {
+      if (isSha256HexId(doc.id)) continue;
+      const id = await sha256HexFromBytes(new Uint8Array(doc.data));
+      if (id !== doc.id) {
+        mappings.push({ oldId: doc.id, id });
+        await applyDocumentIdMapping(doc.id, id);
+      }
+    }
+
+    const epubDocs = await db[EPUB_TABLE].toArray();
+    for (const doc of epubDocs) {
+      if (isSha256HexId(doc.id)) continue;
+      const id = await sha256HexFromBytes(new Uint8Array(doc.data));
+      if (id !== doc.id) {
+        mappings.push({ oldId: doc.id, id });
+        await applyDocumentIdMapping(doc.id, id);
+      }
+    }
+
+    const htmlDocs = await db[HTML_TABLE].toArray();
+    for (const doc of htmlDocs) {
+      if (isSha256HexId(doc.id)) continue;
+      const id = await sha256HexFromString(doc.data);
+      if (id !== doc.id) {
+        mappings.push({ oldId: doc.id, id });
+        await applyDocumentIdMapping(doc.id, id);
+      }
+    }
+
+    return mappings;
+  });
+}
+
+export async function getDocumentIdMappings(): Promise<Array<{ oldId: string; id: string }>> {
+  return withDB(async () => {
+    const rows = await db[DOCUMENT_ID_MAP_TABLE].toArray();
+    return rows.map((row) => ({ oldId: row.oldId, id: row.id }));
+  });
 }
 
 // PDF document helpers
@@ -228,7 +463,8 @@ export async function addPdfDocument(document: PDFDocument): Promise<void> {
 export async function getPdfDocument(id: string): Promise<PDFDocument | undefined> {
   return withDB(async () => {
     console.log('Fetching PDF document via Dexie:', id);
-    return db[PDF_TABLE].get(id);
+    const resolved = await getMappedDocumentId(id);
+    return db[PDF_TABLE].get(resolved);
   });
 }
 
@@ -242,9 +478,10 @@ export async function getAllPdfDocuments(): Promise<PDFDocument[]> {
 export async function removePdfDocument(id: string): Promise<void> {
   await withDB(async () => {
     console.log('Removing PDF document via Dexie:', id);
+    const resolved = await getMappedDocumentId(id);
     await db.transaction('readwrite', db[PDF_TABLE], db[LAST_LOCATION_TABLE], async () => {
-      await db[PDF_TABLE].delete(id);
-      await db[LAST_LOCATION_TABLE].delete(id);
+      await db[PDF_TABLE].delete(resolved);
+      await db[LAST_LOCATION_TABLE].delete(resolved);
     });
   });
 }
@@ -277,7 +514,8 @@ export async function addEpubDocument(document: EPUBDocument): Promise<void> {
 export async function getEpubDocument(id: string): Promise<EPUBDocument | undefined> {
   return withDB(async () => {
     console.log('Fetching EPUB document via Dexie:', id);
-    return db[EPUB_TABLE].get(id);
+    const resolved = await getMappedDocumentId(id);
+    return db[EPUB_TABLE].get(resolved);
   });
 }
 
@@ -291,9 +529,10 @@ export async function getAllEpubDocuments(): Promise<EPUBDocument[]> {
 export async function removeEpubDocument(id: string): Promise<void> {
   await withDB(async () => {
     console.log('Removing EPUB document via Dexie:', id);
+    const resolved = await getMappedDocumentId(id);
     await db.transaction('readwrite', db[EPUB_TABLE], db[LAST_LOCATION_TABLE], async () => {
-      await db[EPUB_TABLE].delete(id);
-      await db[LAST_LOCATION_TABLE].delete(id);
+      await db[EPUB_TABLE].delete(resolved);
+      await db[LAST_LOCATION_TABLE].delete(resolved);
     });
   });
 }
@@ -317,7 +556,8 @@ export async function addHtmlDocument(document: HTMLDocument): Promise<void> {
 export async function getHtmlDocument(id: string): Promise<HTMLDocument | undefined> {
   return withDB(async () => {
     console.log('Fetching HTML document via Dexie:', id);
-    return db[HTML_TABLE].get(id);
+    const resolved = await getMappedDocumentId(id);
+    return db[HTML_TABLE].get(resolved);
   });
 }
 
@@ -331,7 +571,8 @@ export async function getAllHtmlDocuments(): Promise<HTMLDocument[]> {
 export async function removeHtmlDocument(id: string): Promise<void> {
   await withDB(async () => {
     console.log('Removing HTML document via Dexie:', id);
-    await db[HTML_TABLE].delete(id);
+    const resolved = await getMappedDocumentId(id);
+    await db[HTML_TABLE].delete(resolved);
   });
 }
 
@@ -382,14 +623,16 @@ export async function getDocumentListState(): Promise<DocumentListState | null> 
 
 export async function getLastDocumentLocation(docId: string): Promise<string | null> {
   return withDB(async () => {
-    const row = await db[LAST_LOCATION_TABLE].get(docId);
+    const resolved = await getMappedDocumentId(docId);
+    const row = await db[LAST_LOCATION_TABLE].get(resolved);
     return row ? row.location : null;
   });
 }
 
 export async function setLastDocumentLocation(docId: string, location: string): Promise<void> {
   await withDB(async () => {
-    await db[LAST_LOCATION_TABLE].put({ docId, location });
+    const resolved = await getMappedDocumentId(docId);
+    await db[LAST_LOCATION_TABLE].put({ docId: resolved, location });
   });
 }
 
@@ -469,6 +712,16 @@ export async function syncDocumentsToServer(
 
   if (!response.ok) {
     throw new Error('Failed to sync documents to server');
+  }
+
+  const payload = (await response.json().catch(() => null)) as
+    | { stored?: Array<{ oldId: string; id: string }> }
+    | null;
+  const stored = payload?.stored ?? [];
+  for (const mapping of stored) {
+    if (!mapping || typeof mapping.oldId !== 'string' || typeof mapping.id !== 'string') continue;
+    if (mapping.oldId === mapping.id) continue;
+    await applyDocumentIdMapping(mapping.oldId, mapping.id);
   }
 
   if (onProgress) {
@@ -554,4 +807,91 @@ export async function loadDocumentsFromServer(
   }
 
   return { lastSync: Date.now() };
+}
+
+export async function importDocumentsFromLibrary(
+  onProgress?: (progress: number, status?: string) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (onProgress) {
+    onProgress(5, 'Scanning server library...');
+  }
+
+  const listResponse = await fetch('/api/documents/library', { signal });
+  if (!listResponse.ok) {
+    throw new Error('Failed to list library documents');
+  }
+
+  const { documents } = (await listResponse.json()) as { documents: BaseDocument[] };
+
+  if (documents.length === 0) {
+    if (onProgress) {
+      onProgress(100, 'No documents found in server library');
+    }
+    return;
+  }
+
+  if (onProgress) {
+    onProgress(10, `Found ${documents.length} documents. Importing...`);
+  }
+
+  const textDecoder = new TextDecoder();
+
+  for (let i = 0; i < documents.length; i++) {
+    const doc = documents[i];
+
+    if (onProgress) {
+      onProgress(10 + (i / documents.length) * 85, `Downloading ${i + 1}/${documents.length}: ${doc.name}`);
+    }
+
+    const contentResponse = await fetch(`/api/documents/library/content?id=${encodeURIComponent(doc.id)}`, { signal });
+    if (!contentResponse.ok) {
+      console.warn(`Failed to download library document: ${doc.name}`);
+      continue;
+    }
+
+    const buffer = await contentResponse.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+
+    if (doc.type === 'pdf') {
+      const localId = await sha256HexFromBytes(bytes);
+      await addPdfDocument({
+        id: localId,
+        type: 'pdf',
+        name: doc.name,
+        size: bytes.byteLength,
+        lastModified: doc.lastModified,
+        data: buffer,
+      });
+    } else if (doc.type === 'epub') {
+      const localId = await sha256HexFromBytes(bytes);
+      await addEpubDocument({
+        id: localId,
+        type: 'epub',
+        name: doc.name,
+        size: bytes.byteLength,
+        lastModified: doc.lastModified,
+        data: buffer,
+      });
+    } else {
+      const decoded = textDecoder.decode(bytes);
+      const localId = await sha256HexFromString(decoded);
+      await addHtmlDocument({
+        id: localId,
+        type: 'html',
+        name: doc.name,
+        size: bytes.byteLength,
+        lastModified: doc.lastModified,
+        data: decoded,
+      });
+    }
+
+    if (onProgress) {
+      onProgress(10 + ((i + 1) / documents.length) * 85, `Imported ${i + 1}/${documents.length}`);
+    }
+  }
+
+  if (onProgress) {
+    onProgress(100, 'Library import complete!');
+  }
 }
