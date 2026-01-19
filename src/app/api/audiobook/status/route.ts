@@ -16,10 +16,16 @@ function getAudiobooksRootDir(request: NextRequest): string {
   return safe ? join(AUDIOBOOKS_V1_DIR, safe) : AUDIOBOOKS_V1_DIR;
 }
 
+const SAFE_ID_REGEX = /^[a-zA-Z0-9._-]{1,128}$/;
+
+function isSafeId(value: string): boolean {
+  return SAFE_ID_REGEX.test(value);
+}
+
 export async function GET(request: NextRequest) {
   try {
     const bookId = request.nextUrl.searchParams.get('bookId');
-    if (!bookId) {
+    if (!bookId || !isSafeId(bookId)) {
       return NextResponse.json({ error: 'Missing bookId parameter' }, { status: 400 });
     }
 

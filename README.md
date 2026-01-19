@@ -119,7 +119,7 @@ docker run --name openreader-webui \
   -v /path/to/your/library:/app/docstore/library:ro \
   ghcr.io/richardr1126/openreader-webui:latest
 ```
-Seperate from the docstore volume, this will mount an external folder to `/app/docstore/library` (read-only recommended). This allows you to connect OpenReader to an existing library of documents.
+Separate from the main docstore volume, this mounts an external folder into the container at `/app/docstore/library` (read-only recommended) so OpenReader can use an existing library of documents.
 
 To import from the mounted library: **Settings → Documents → Server Library Import**
 

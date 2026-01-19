@@ -203,7 +203,8 @@ export async function POST(request: NextRequest) {
       existingSettings?.format ??
       incomingSettings?.format ??
       requestedFormat;
-    const postSpeed = incomingSettings?.postSpeed ?? existingSettings?.postSpeed ?? 1;
+    const rawPostSpeed = incomingSettings?.postSpeed ?? existingSettings?.postSpeed ?? 1;
+    const postSpeed = Number.isFinite(Number(rawPostSpeed)) ? Number(rawPostSpeed) : 1;
 
     // Use provided chapter index or find the next available index robustly (handles gaps)
     let chapterIndex: number;

@@ -75,7 +75,7 @@ async function expectChaptersBackendState(page: Page, bookId: string) {
 
 async function resetAudiobookById(page: Page, bookId: string) {
   const res = await page.request.delete(`/api/audiobook?bookId=${bookId}`);
-  expect(res.ok()).toBeTruthy();
+  expect(res.ok() || res.status() === 404).toBeTruthy();
 }
 
 async function resetAudiobookIfPresent(page: Page) {

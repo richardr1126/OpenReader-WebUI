@@ -512,7 +512,7 @@ async function normalizeAudiobookDirectoryChapterLayout(intermediateDir: string)
     if (/^\d+-input\.mp3$/i.test(file)) {
       await unlink(path.join(intermediateDir, file)).catch(() => {});
     }
-    if (file.endsWith('.meta.json')) {
+    if (file.endsWith('.meta.json') && file !== 'audiobook.meta.json') {
       await unlink(path.join(intermediateDir, file)).catch(() => {});
     }
   }
