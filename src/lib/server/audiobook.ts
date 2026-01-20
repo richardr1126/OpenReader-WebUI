@@ -57,7 +57,7 @@ export function encodeChapterFileName(index: number, title: string, format: 'mp3
   return `${oneBased}__${encodeURIComponent(safeTitle)}.${format}`;
 }
 
-function decodeChapterFileName(fileName: string): { index: number; title: string; format: 'mp3' | 'm4b' } | null {
+export function decodeChapterFileName(fileName: string): { index: number; title: string; format: 'mp3' | 'm4b' } | null {
   const match = /^(\d{1,6})__(.+)\.(mp3|m4b)$/i.exec(fileName);
   if (!match) return null;
   const oneBased = Number(match[1]);
