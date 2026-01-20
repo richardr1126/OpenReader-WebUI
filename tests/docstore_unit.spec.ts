@@ -26,13 +26,11 @@ test.describe('Docstore Filename Safety', () => {
     const result = getMigratedDocumentFileName(id, specialName);
     
     expect(result.length).toBeLessThanOrEqual(240);
-    if (result.includes('truncated-')) {
-        expect(result).toContain('truncated-');
-    } else {
-        // If it fits (depends on length), just ensure it is valid
-        // 30 * 4 = 120 chars raw, but encoded?
-        // Let's ensure logic works.
-    }
+    expect(result).toContain('truncated-');
+    // The implementation replaces the name with a hash, so it should NOT contain the original special chars
+    // and might not contain % if the hash is hex.
+    expect(result).toMatch(/truncated-[a-f0-9]{32}$/);
+    expect(result.startsWith(`${id}__`)).toBeTruthy();
   });
 
   test('should handle edge case length exactly', () => {

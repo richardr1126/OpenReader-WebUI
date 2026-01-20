@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { spawn } from 'child_process';
 import { readFile, writeFile, mkdir, unlink, rm, rename, readdir } from 'fs/promises';
 import { existsSync, createReadStream } from 'fs';
-import { basename, join } from 'path';
+import { basename, join, resolve } from 'path';
 import { randomUUID } from 'crypto';
 import { AUDIOBOOKS_V1_DIR, isAudiobooksV1Ready } from '@/lib/server/docstore';
 import { encodeChapterFileName, encodeChapterTitleTag, listStoredChapters, ffprobeAudio } from '@/lib/server/audiobook';
@@ -15,7 +15,14 @@ function getAudiobooksRootDir(request: NextRequest): string {
   const raw = request.headers.get('x-openreader-test-namespace')?.trim();
   if (!raw) return AUDIOBOOKS_V1_DIR;
   const safe = raw.replace(/[^a-zA-Z0-9._-]/g, '');
-  return safe ? join(AUDIOBOOKS_V1_DIR, safe) : AUDIOBOOKS_V1_DIR;
+  if (!safe || safe === '.' || safe === '..' || safe.includes('..')) {
+    return AUDIOBOOKS_V1_DIR;
+  }
+  const resolved = resolve(AUDIOBOOKS_V1_DIR, safe);
+  if (!resolved.startsWith(resolve(AUDIOBOOKS_V1_DIR) + '/')) {
+    return AUDIOBOOKS_V1_DIR;
+  }
+  return resolved;
 }
 
 interface ConversionRequest {
