@@ -101,6 +101,20 @@ function safeDocumentName(rawName: string, fallback: string): string {
   return baseName.replaceAll('\u0000', '').slice(0, 240) || fallback;
 }
 
+export function getMigratedDocumentFileName(id: string, name: string): string {
+  const prefix = `${id}__`;
+  const encodedName = encodeURIComponent(name);
+  let targetFileName = `${prefix}${encodedName}`;
+
+  // Ensure total filename length is within safe limits (e.g. 240 chars).
+  // If too long, use a deterministic hash of the name instead of the full encoded name.
+  if (targetFileName.length > 240) {
+    const nameHash = createHash('sha256').update(name).digest('hex').slice(0, 32);
+    targetFileName = `${prefix}truncated-${nameHash}`;
+  }
+  return targetFileName;
+}
+
 export async function ensureDocumentsV1Ready(): Promise<boolean> {
   await mkdir(DOCSTORE_DIR, { recursive: true });
   await mkdir(DOCUMENTS_V1_DIR, { recursive: true });
@@ -149,7 +163,8 @@ export async function ensureDocumentsV1Ready(): Promise<boolean> {
     const id = createHash('sha256').update(content).digest('hex');
     const fallbackName = `${id}.${metadata.type}`;
     const name = safeDocumentName(metadata.name, fallbackName);
-    const targetFileName = `${id}__${encodeURIComponent(name)}`;
+    
+    const targetFileName = getMigratedDocumentFileName(id, name);
     const targetPath = path.join(DOCUMENTS_V1_DIR, targetFileName);
 
     if (!existsSync(targetPath)) {

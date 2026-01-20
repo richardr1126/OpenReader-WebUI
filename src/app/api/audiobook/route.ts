@@ -140,6 +140,12 @@ function buildAtempoFilter(speed: number): string {
   return `atempo=2.0,atempo=${second.toFixed(3)}`;
 }
 
+const SAFE_ID_REGEX = /^[a-zA-Z0-9._-]{1,128}$/;
+
+function isSafeId(value: string): boolean {
+  return SAFE_ID_REGEX.test(value);
+}
+
 export async function POST(request: NextRequest) {
   try {
     // Parse the request body
@@ -155,6 +161,11 @@ export async function POST(request: NextRequest) {
 
     // Generate or use existing book ID
     const bookId = data.bookId || randomUUID();
+    
+    if (!isSafeId(bookId)) {
+      return NextResponse.json({ error: 'Invalid bookId parameter' }, { status: 400 });
+    }
+
     const intermediateDir = join(getAudiobooksRootDir(request), `${bookId}-audiobook`);
     
     // Create intermediate directory
@@ -323,6 +334,9 @@ export async function GET(request: NextRequest) {
     const requestedFormat = request.nextUrl.searchParams.get('format') as TTSAudiobookFormat | null;
     if (!bookId) {
       return NextResponse.json({ error: 'Missing bookId parameter' }, { status: 400 });
+    }
+    if (!isSafeId(bookId)) {
+      return NextResponse.json({ error: 'Invalid bookId parameter' }, { status: 400 });
     }
 
     if (!(await isAudiobooksV1Ready())) {
@@ -513,6 +527,9 @@ export async function DELETE(request: NextRequest) {
     const bookId = request.nextUrl.searchParams.get('bookId');
     if (!bookId) {
       return NextResponse.json({ error: 'Missing bookId parameter' }, { status: 400 });
+    }
+    if (!isSafeId(bookId)) {
+      return NextResponse.json({ error: 'Invalid bookId parameter' }, { status: 400 });
     }
 
     if (!(await isAudiobooksV1Ready())) {
