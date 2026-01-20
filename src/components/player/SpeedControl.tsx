@@ -3,7 +3,7 @@
 import { Input, Popover, PopoverButton, PopoverPanel } from '@headlessui/react';
 import { ChevronUpDownIcon, SpeedometerIcon } from '@/components/icons/Icons';
 import { useConfig } from '@/contexts/ConfigContext';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 export const SpeedControl = ({ 
   setSpeedAndRestart, 
@@ -13,10 +13,10 @@ export const SpeedControl = ({
   setAudioPlayerSpeedAndRestart: (speed: number) => void;
 }) => {
   const { voiceSpeed, audioPlayerSpeed } = useConfig();
+
   const [localVoiceSpeed, setLocalVoiceSpeed] = useState(voiceSpeed);
   const [localAudioSpeed, setLocalAudioSpeed] = useState(audioPlayerSpeed);
 
-  // Sync local speeds with global state
   useEffect(() => {
     setLocalVoiceSpeed(voiceSpeed);
   }, [voiceSpeed]);
@@ -25,32 +25,31 @@ export const SpeedControl = ({
     setLocalAudioSpeed(audioPlayerSpeed);
   }, [audioPlayerSpeed]);
 
-  // Handler for voice speed slider change (updates local state only)
   const handleVoiceSpeedChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     setLocalVoiceSpeed(parseFloat(event.target.value));
   }, []);
 
-  // Handler for audio player speed slider change (updates local state only)
   const handleAudioSpeedChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     setLocalAudioSpeed(parseFloat(event.target.value));
   }, []);
 
-  // Handler for voice speed slider release
   const handleVoiceSpeedChangeComplete = useCallback(() => {
     if (localVoiceSpeed !== voiceSpeed) {
       setSpeedAndRestart(localVoiceSpeed);
     }
   }, [localVoiceSpeed, voiceSpeed, setSpeedAndRestart]);
 
-  // Handler for audio player speed slider release
   const handleAudioSpeedChangeComplete = useCallback(() => {
     if (localAudioSpeed !== audioPlayerSpeed) {
       setAudioPlayerSpeedAndRestart(localAudioSpeed);
     }
   }, [localAudioSpeed, audioPlayerSpeed, setAudioPlayerSpeedAndRestart]);
 
-  // Display the currently active speed (prioritize audio player speed if different from 1.0)
-  const displaySpeed = localAudioSpeed !== 1.0 ? localAudioSpeed : localVoiceSpeed;
+  const displaySpeed = useMemo(() => (localAudioSpeed !== 1.0 ? localAudioSpeed : localVoiceSpeed), [localAudioSpeed, localVoiceSpeed]);
+
+  const min = 0.5;
+  const max = 3;
+  const step = 0.1;
 
   return (
     <Popover className="relative">
@@ -61,19 +60,20 @@ export const SpeedControl = ({
       </PopoverButton>
       <PopoverPanel anchor="top" className="absolute z-50 bg-base p-3 rounded-md shadow-lg border border-offbase">
         <div className="flex flex-col space-y-4">
-          {/* Native Model Speed */}
           <div className="flex flex-col space-y-2">
             <div className="text-xs font-medium text-foreground">Native model speed</div>
             <div className="flex justify-between">
-              <span className="text-xs">0.5x</span>
-              <span className="text-xs font-bold">{Number.isInteger(localVoiceSpeed) ? localVoiceSpeed.toString() : localVoiceSpeed.toFixed(1)}x</span>
-              <span className="text-xs">3x</span>
+              <span className="text-xs">{min.toFixed(1)}x</span>
+              <span className="text-xs font-bold">
+                {Number.isInteger(localVoiceSpeed) ? localVoiceSpeed.toString() : localVoiceSpeed.toFixed(1)}x
+              </span>
+              <span className="text-xs">{max.toFixed(1)}x</span>
             </div>
             <Input
               type="range"
-              min="0.5"
-              max="3"
-              step="0.1"
+              min={min}
+              max={max}
+              step={step}
               value={localVoiceSpeed}
               onChange={handleVoiceSpeedChange}
               onMouseUp={handleVoiceSpeedChangeComplete}
@@ -83,19 +83,20 @@ export const SpeedControl = ({
             />
           </div>
 
-          {/* Audio Player Speed */}
           <div className="flex flex-col space-y-2">
             <div className="text-xs font-medium text-foreground">Audio player speed</div>
             <div className="flex justify-between">
-              <span className="text-xs">0.5x</span>
-              <span className="text-xs font-bold">{Number.isInteger(localAudioSpeed) ? localAudioSpeed.toString() : localAudioSpeed.toFixed(1)}x</span>
-              <span className="text-xs">3x</span>
+              <span className="text-xs">{min.toFixed(1)}x</span>
+              <span className="text-xs font-bold">
+                {Number.isInteger(localAudioSpeed) ? localAudioSpeed.toString() : localAudioSpeed.toFixed(1)}x
+              </span>
+              <span className="text-xs">{max.toFixed(1)}x</span>
             </div>
             <Input
               type="range"
-              min="0.5"
-              max="3"
-              step="0.1"
+              min={min}
+              max={max}
+              step={step}
               value={localAudioSpeed}
               onChange={handleAudioSpeedChange}
               onMouseUp={handleAudioSpeedChangeComplete}

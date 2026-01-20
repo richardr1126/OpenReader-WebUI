@@ -21,6 +21,45 @@ test.describe('Document Upload Tests', () => {
     await expectDocumentListed(page, 'sample.txt');
   });
 
+  test('hashes text/HTML docs using UTF-8 encoded stored string', async ({ page }) => {
+    await uploadFile(page, 'sample.txt');
+    await expectDocumentListed(page, 'sample.txt');
+
+    const result = await page.evaluate(async () => {
+      const idb = await new Promise<IDBDatabase>((resolve, reject) => {
+        const request = indexedDB.open('openreader-db');
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => resolve(request.result);
+      });
+
+      try {
+        const docs = await new Promise<any[]>((resolve, reject) => {
+          const tx = idb.transaction('html-documents', 'readonly');
+          const store = tx.objectStore('html-documents');
+          const request = store.getAll();
+          request.onerror = () => reject(request.error);
+          request.onsuccess = () => resolve(request.result as any[]);
+        });
+
+        if (!docs[0]?.data || !docs[0]?.id) {
+          return { ok: false, reason: 'Missing stored html document' as const };
+        }
+
+        const bytes = new TextEncoder().encode(String(docs[0].data));
+        const digest = await crypto.subtle.digest('SHA-256', bytes);
+        const computedId = Array.from(new Uint8Array(digest))
+          .map((b) => b.toString(16).padStart(2, '0'))
+          .join('');
+
+        return { ok: computedId === docs[0].id, storedId: docs[0].id as string, computedId };
+      } finally {
+        idb.close();
+      }
+    });
+
+    expect(result.ok, `Expected storedId=${(result as any).storedId} computedId=${(result as any).computedId}`).toBeTruthy();
+  });
+
   test('uploads and converts a DOCX document', async ({ page }) => {
     // This test only runs in development mode
     test.skip(process.env.NODE_ENV === 'production', 'DOCX upload is only available in development mode');

@@ -73,6 +73,11 @@ async function expectChaptersBackendState(page: Page, bookId: string) {
   return json;
 }
 
+async function resetAudiobookById(page: Page, bookId: string) {
+  const res = await page.request.delete(`/api/audiobook?bookId=${bookId}`);
+  expect(res.ok() || res.status() === 404).toBeTruthy();
+}
+
 async function resetAudiobookIfPresent(page: Page) {
   const resetButtons = page.getByRole('button', { name: 'Reset' });
   const count = await resetButtons.count();
@@ -88,9 +93,7 @@ async function resetAudiobookIfPresent(page: Page) {
   const confirmReset = page.getByRole('button', { name: 'Reset' }).last();
   await confirmReset.click();
 
-  await expect(
-    page.getByText(/Generation will use current TTS playback options./i)
-  ).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByRole('button', { name: 'Start Generation' })).toBeVisible({ timeout: 60_000 });
 }
 
 test.describe('Audiobook export', () => {
@@ -105,6 +108,7 @@ test.describe('Audiobook export', () => {
 
     // Capture the generated document/book id from the /pdf/[id] URL
     const bookId = await getBookIdFromUrl(page, 'pdf');
+    await resetAudiobookById(page, bookId);
 
     // Open the audiobook export modal from the header button
     await openExportModal(page);
@@ -155,6 +159,7 @@ test.describe('Audiobook export', () => {
 
     // URL should now be /epub/[id]
     const bookId = await getBookIdFromUrl(page, 'epub');
+    await resetAudiobookById(page, bookId);
 
     // Open the audiobook export modal from the header button
     await openExportModal(page);
@@ -220,6 +225,7 @@ test.describe('Audiobook export', () => {
     await uploadAndDisplay(page, 'sample.pdf');
 
     const bookId = await getBookIdFromUrl(page, 'pdf');
+    await resetAudiobookById(page, bookId);
 
     await openExportModal(page);
     await setContainerFormatToMP3(page);
@@ -247,6 +253,7 @@ test.describe('Audiobook export', () => {
     await uploadAndDisplay(page, 'sample.pdf');
 
     const bookId = await getBookIdFromUrl(page, 'pdf');
+    await resetAudiobookById(page, bookId);
 
     await openExportModal(page);
     await setContainerFormatToMP3(page);
@@ -265,10 +272,8 @@ test.describe('Audiobook export', () => {
     const confirmReset = page.getByRole('button', { name: 'Reset' }).last();
     await confirmReset.click();
 
-    // After reset, the hint text for starting generation should re-appear
-    await expect(
-      page.getByText(/Generation will use current TTS playback options./i)
-    ).toBeVisible({ timeout: 60_000 });
+    // After reset, generation should be startable again
+    await expect(page.getByRole('button', { name: 'Start Generation' })).toBeVisible({ timeout: 60_000 });
 
     // Backend should report no existing chapters for this bookId
     const res = await page.request.get(`/api/audiobook/status?bookId=${bookId}`);
@@ -285,6 +290,7 @@ test.describe('Audiobook export', () => {
 
     // Extract bookId from /pdf/[id] URL (for backend verification later)
     const bookId = await getBookIdFromUrl(page, 'pdf');
+    await resetAudiobookById(page, bookId);
 
     // Open Export Audiobook modal
     await openExportModal(page);

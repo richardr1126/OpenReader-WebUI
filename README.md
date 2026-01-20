@@ -11,20 +11,21 @@
 
 OpenReader WebUI is an open source text to speech document reader web app built using Next.js, offering a TTS read along experience with narration for **EPUB, PDF, TXT, MD, and DOCX documents**. It supports multiple TTS providers including OpenAI, Deepinfra, and custom OpenAI-compatible endpoints like [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI) and [Orpheus-FastAPI](https://github.com/Lex-au/Orpheus-FastAPI)
 
-- 🎯 *(New)* **Multi-Provider TTS Support**
+- 🎯 **Multi-Provider TTS Support**
   - [**Kokoro-FastAPI**](https://github.com/remsky/Kokoro-FastAPI): Supporting multi-voice combinations (like `af_heart+af_bella`)
   - [**Orpheus-FastAPI**](https://github.com/Lex-au/Orpheus-FastAPI)
   - **Custom OpenAI-compatible**: Any TTS API with `/v1/audio/voices` and `/v1/audio/speech` endpoints
   - **Cloud TTS Providers (requiring API keys)**
     - [**Deepinfra**](https://deepinfra.com/models/text-to-speech): Kokoro-82M + models with support for cloned voices and more
     - [**OpenAI API ($$)**](https://platform.openai.com/docs/pricing#transcription-and-speech): tts-1, tts-1-hd, and gpt-4o-mini-tts w/ instructions
-- 📖 *(Updated)* **Read Along Experience** providing real-time text highlighting during playback (PDF/EPUB)
+- 🛜 *(Updated)* **Server-side Sync and Storage**
+  - *(New)* **External Library Import** enables importing documents to the browser's storage from a folder mounted on the server
+  - *(Updated)* **Sync documents** between the browser and server to get them on other browsers or devices
+- 🎧 **Server-side Audiobook Export** in **m4b/mp3**, with resumable, chapter-based export and regeneration
+- 📖 **Read Along Experience** providing real-time text highlighting during playback (PDF/EPUB)
   - *(New)* **Word-by-word** highlighting uses word-by-word timestamps generated server-side with [*whisper.cpp*](https://github.com/ggml-org/whisper.cpp) (optional)
-- 🧠 *(New)* **Smart Sentence-Aware Narration** merges sentences across pages/chapters for smoother TTS
-- 🎧 *(New)* **Reliable Audiobook Export** in **m4b/mp3**, with resumable, chapter-based export and regeneration
-- 🚀 *(New)* **Optimized Next.js TTS Proxy** with audio caching and optimized repeat playback
-- 💾 **Local-First Architecture** stores documents and more in-browser with Dexie.js
-- 🛜 **Optional Server-side documents** using backend `/docstore` for all users
+- 🧠 **Smart Sentence-Aware Narration** merges sentences across pages/chapters for smoother TTS
+- 🚀 **Optimized Next.js TTS Proxy** with audio caching and optimized repeat playback
 - 🎨 **Customizable Experience**
   - 🎨 Multiple app theme options
   - ⚙️ Various TTS and document handling settings
@@ -43,7 +44,6 @@ OpenReader WebUI is an open source text to speech document reader web app built 
   docker run --name openreader-webui \
     --restart unless-stopped \
     -p 3003:3003 \
-    -v openreader_docstore:/app/docstore \
     ghcr.io/richardr1126/openreader-webui:latest
   ```
 
@@ -54,15 +54,12 @@ OpenReader WebUI is an open source text to speech document reader web app built 
     -e API_KEY=none \
     -e API_BASE=http://host.docker.internal:8880/v1 \
     -p 3003:3003 \
-    -v openreader_docstore:/app/docstore \
     ghcr.io/richardr1126/openreader-webui:latest
   ```
 
-  > **Note:** Requesting audio from the TTS API happens on the Next.js server not the client. So the base URL for the TTS API should be accessible and relative to the Next.js server. If it is in a Docker you may need to use `host.docker.internal` to access the host machine, instead of `localhost`.
-
   Visit [http://localhost:3003](http://localhost:3003) to run the app and set your settings.
 
-  > **Note:** The `openreader_docstore` volume is used to store server-side documents. You can mount a local directory instead. Or remove it if you don't need server-side documents.
+  > **Note:** Requesting audio from the TTS API happens on the Next.js server not the client. So the base URL for the TTS API should be accessible and relative to the Next.js server. If it is in a Docker you may need to use `host.docker.internal` to access the host machine, instead of `localhost`.
 
 ### 2. ⚙️ Configure the app settings in the UI:
   - Set the TTS Provider and Model in the Settings modal
@@ -76,6 +73,60 @@ docker rm openreader-webui && \
 docker pull ghcr.io/richardr1126/openreader-webui:latest
 ```
 
+### 📦 Volume mounts and Library import
+
+By default (no volume mounts), OpenReader will store its server-side files inside the container filesystem (which is lost if you remove the container).
+
+<details>
+<summary>
+
+**Persist server-side storage (`/app/docstore`)**
+
+</summary>
+
+Run the container with the volume mounted:
+```bash
+docker run --name openreader-webui \
+  --restart unless-stopped \
+  -p 3003:3003 \
+  -v openreader_docstore:/app/docstore \
+  ghcr.io/richardr1126/openreader-webui:latest
+```
+This will create a Docker named volume `openreader_docstore` to persist all server-side files, including:
+
+- **Documents:** Stored under `/app/docstore/documents_v1`
+- **Audiobook exports:** Stored under `/app/docstore/audiobooks_v1`
+  - Per-audiobook settings: `/app/docstore/audiobooks_v1/<bookId>-audiobook/audiobook.meta.json`
+  - Chapters: `0001__<title>.m4b` or `0001__<title>.mp3` (no per-chapter `.meta.json` files)
+- **Settings**
+
+This ensures that your documents, exported audiobooks, and server-side settings are retained even if the container is removed or recreated.
+
+</details>
+
+<details open>
+<summary>
+
+**Mount an external library folder (read-only recommended)**
+
+</summary>
+
+```bash
+docker run --name openreader-webui \
+  --restart unless-stopped \
+  -p 3003:3003 \
+  -v openreader_docstore:/app/docstore \
+  -v /path/to/your/library:/app/docstore/library:ro \
+  ghcr.io/richardr1126/openreader-webui:latest
+```
+Separate from the main docstore volume, this mounts an external folder into the container at `/app/docstore/library` (read-only recommended) so OpenReader can use an existing library of documents.
+
+To import from the mounted library: **Settings → Documents → Server Library Import**
+
+> **Note:** Every file in the mounted volume is imported to the client browser's storage. Please ensure that the mounted library is not too large to avoid performance issues.
+
+</details>
+
 ### 🗣️ Local Kokoro-FastAPI Quick-start (CPU or GPU)
 
 You can run the Kokoro TTS API server directly with Docker. **We are not responsible for issues with [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI).** For best performance, use an NVIDIA GPU (for GPU version) or Apple Silicon (for CPU version).
@@ -84,7 +135,7 @@ You can run the Kokoro TTS API server directly with Docker. **We are not respons
 <details>
 <summary>
 
-**Docker CPU**
+**Kokoro-FastAPI (CPU)**
 
 </summary>
 
@@ -110,7 +161,7 @@ docker run -d \
 <details>
 <summary>
 
-**Docker GPU**
+**Kokoro-FastAPI (GPU)**
 
 </summary>
 
@@ -225,9 +276,9 @@ Contributions are welcome! Fork the repository and submit a pull request with yo
 This project would not be possible without standing on the shoulders of these giants:
 
 - [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) model
-- [Orpheus-TTS](https://huggingface.co/collections/canopylabs/orpheus-tts-67d9ea3f6c05a941c06ad9d2) model
 - [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI)
-- [Orpheus-FastAPI](https://github.com/Lex-au/Orpheus-FastAPI)
+- [whisper.cpp](https://github.com/ggerganov/whisper.cpp)
+- [ffmpeg](https://ffmpeg.org)
 - [react-pdf](https://github.com/wojtekmaj/react-pdf) npm package
 - [react-reader](https://github.com/happyr/react-reader) npm package
 
@@ -239,7 +290,8 @@ This project would not be possible without standing on the shoulders of these gi
 
 - **Framework:** Next.js (React)
 - **Containerization:** Docker
-- **Storage:** Dexie + IndexedDB (in-browser local database)
+- **Storage:**
+  - [Dexie.js](https://dexie.org/) IndexedDB wrapper for client-side storage
 - **PDF:** 
   - [react-pdf](https://github.com/wojtekmaj/react-pdf)
   - [pdf.js](https://mozilla.github.io/pdf.js/)
@@ -257,7 +309,10 @@ This project would not be possible without standing on the shoulders of these gi
   - [Deepinfra API](https://deepinfra.com) (Kokoro-82M, Orpheus-3B, Sesame-1B)
   - [Kokoro FastAPI TTS](https://github.com/remsky/Kokoro-FastAPI/tree/v0.0.5post1-stable)
   - [Orpheus FastAPI TTS](https://github.com/Lex-au/Orpheus-FastAPI)
-- **NLP:** [compromise](https://github.com/spencermountain/compromise) NLP library for sentence splitting
+- **NLP:**
+  - [compromise](https://github.com/spencermountain/compromise) NLP library for sentence splitting
+  - [cmpstr](https://github.com/remsky/cmpstr) String comparison library
+  - [whisper.cpp](https://github.com/ggerganov/whisper.cpp) for TTS timestamps (word-by-word highlighting)
 
 ## License
 

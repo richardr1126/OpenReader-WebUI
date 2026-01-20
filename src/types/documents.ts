@@ -65,3 +65,8 @@ export interface DocumentListState {
   showHint: boolean;
   viewMode?: 'list' | 'grid';
 }
+
+export interface LibraryDocument extends BaseDocument {
+  // `id` is a stable server-provided reference, not necessarily the same as the local document id.
+  id: string;
+}

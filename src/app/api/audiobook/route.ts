@@ -1,10 +1,29 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { spawn } from 'child_process';
-import { writeFile, readFile, mkdir, unlink, readdir, rm } from 'fs/promises';
+import { readFile, writeFile, mkdir, unlink, rm, rename, readdir } from 'fs/promises';
 import { existsSync, createReadStream } from 'fs';
-import { join } from 'path';
+import { basename, join, resolve } from 'path';
 import { randomUUID } from 'crypto';
+import { AUDIOBOOKS_V1_DIR, isAudiobooksV1Ready } from '@/lib/server/docstore';
+import { encodeChapterFileName, encodeChapterTitleTag, listStoredChapters, ffprobeAudio, escapeFFMetadata } from '@/lib/server/audiobook';
 import type { TTSAudioBytes, TTSAudiobookFormat } from '@/types/tts';
+import type { AudiobookGenerationSettings } from '@/types/client';
+
+export const dynamic = 'force-dynamic';
+
+function getAudiobooksRootDir(request: NextRequest): string {
+  const raw = request.headers.get('x-openreader-test-namespace')?.trim();
+  if (!raw) return AUDIOBOOKS_V1_DIR;
+  const safe = raw.replace(/[^a-zA-Z0-9._-]/g, '');
+  if (!safe || safe === '.' || safe === '..' || safe.includes('..')) {
+    return AUDIOBOOKS_V1_DIR;
+  }
+  const resolved = resolve(AUDIOBOOKS_V1_DIR, safe);
+  if (!resolved.startsWith(resolve(AUDIOBOOKS_V1_DIR) + '/')) {
+    return AUDIOBOOKS_V1_DIR;
+  }
+  return resolved;
+}
 
 interface ConversionRequest {
   chapterTitle: string;
@@ -12,6 +31,7 @@ interface ConversionRequest {
   bookId?: string;
   format?: TTSAudiobookFormat;
   chapterIndex?: number;
+  settings?: AudiobookGenerationSettings;
 }
 
 async function getAudioDuration(filePath: string, signal?: AbortSignal): Promise<number> {
@@ -119,38 +139,105 @@ async function runFFmpeg(args: string[], signal?: AbortSignal): Promise<void> {
   });
 }
 
+function buildAtempoFilter(speed: number): string {
+  const clamped = Math.max(0.5, Math.min(speed, 3));
+  // atempo supports 0.5..2.0 per filter; chain for >2.0
+  if (clamped <= 2) return `atempo=${clamped.toFixed(3)}`;
+  const second = clamped / 2;
+  return `atempo=2.0,atempo=${second.toFixed(3)}`;
+}
+
+const SAFE_ID_REGEX = /^[a-zA-Z0-9._-]{1,128}$/;
+
+function isSafeId(value: string): boolean {
+  return SAFE_ID_REGEX.test(value);
+}
+
 export async function POST(request: NextRequest) {
   try {
     // Parse the request body
     const data: ConversionRequest = await request.json();
-    const format = data.format || 'm4b';
+    const requestedFormat = data.format || 'm4b';
     
-    // Use docstore directory
-    const docstoreDir = join(process.cwd(), 'docstore');
-    if (!existsSync(docstoreDir)) {
-      await mkdir(docstoreDir);
+    if (!(await isAudiobooksV1Ready())) {
+      return NextResponse.json(
+        { error: 'Audiobooks storage is not migrated; run /api/migrations/v1 first.' },
+        { status: 409 },
+      );
     }
 
     // Generate or use existing book ID
     const bookId = data.bookId || randomUUID();
-    const intermediateDir = join(docstoreDir, `${bookId}-audiobook`);
     
-    // Create intermediate directory
-    if (!existsSync(intermediateDir)) {
-      await mkdir(intermediateDir);
+    if (!isSafeId(bookId)) {
+      return NextResponse.json({ error: 'Invalid bookId parameter' }, { status: 400 });
     }
 
+    const intermediateDir = join(getAudiobooksRootDir(request), `${bookId}-audiobook`);
+    
+    // Create intermediate directory
+    await mkdir(intermediateDir, { recursive: true });
+
+    const existingChapters = await listStoredChapters(intermediateDir, request.signal);
+    const hasChapters = existingChapters.length > 0;
+
+    const metaPath = join(intermediateDir, 'audiobook.meta.json');
+    const incomingSettings = data.settings;
+    let existingSettings: AudiobookGenerationSettings | null = null;
+    try {
+      existingSettings = JSON.parse(await readFile(metaPath, 'utf8')) as AudiobookGenerationSettings;
+    } catch {
+      existingSettings = null;
+    }
+
+    // Only enforce mismatch check if we already have generated chapters.
+    // If no chapters exist, we can overwrite/ignore "existing" settings (which might be stale or partial).
+    if (existingSettings && hasChapters) {
+      if (incomingSettings) {
+        const mismatch =
+          existingSettings.ttsProvider !== incomingSettings.ttsProvider ||
+          existingSettings.ttsModel !== incomingSettings.ttsModel ||
+          existingSettings.voice !== incomingSettings.voice ||
+          existingSettings.nativeSpeed !== incomingSettings.nativeSpeed ||
+          existingSettings.postSpeed !== incomingSettings.postSpeed ||
+          existingSettings.format !== incomingSettings.format;
+        if (mismatch) {
+          return NextResponse.json(
+            { error: 'Audiobook settings mismatch', settings: existingSettings },
+            { status: 409 },
+          );
+        }
+      }
+    }
+    // Note: We deliberately do NOT write the meta file here yet.
+    // We wait until a chapter is successfully generated/saved below.
+    const existingFormats = new Set(existingChapters.map((c) => c.format));
+    if (existingFormats.size > 1) {
+      return NextResponse.json(
+        { error: 'Mixed chapter formats detected; reset the audiobook to continue' },
+        { status: 400 },
+      );
+    }
+
+    const format: TTSAudiobookFormat =
+      (existingFormats.values().next().value as TTSAudiobookFormat | undefined) ??
+      existingSettings?.format ??
+      incomingSettings?.format ??
+      requestedFormat;
+    const rawPostSpeed = incomingSettings?.postSpeed ?? existingSettings?.postSpeed ?? 1;
+    const postSpeed = Number.isFinite(Number(rawPostSpeed)) ? Number(rawPostSpeed) : 1;
+
+    // Use provided chapter index or find the next available index robustly (handles gaps)
     // Use provided chapter index or find the next available index robustly (handles gaps)
     let chapterIndex: number;
     if (data.chapterIndex !== undefined) {
-      chapterIndex = data.chapterIndex;
+      const normalized = Number(data.chapterIndex);
+      if (!Number.isInteger(normalized) || normalized < 0) {
+        return NextResponse.json({ error: 'Invalid chapterIndex parameter' }, { status: 400 });
+      }
+      chapterIndex = normalized;
     } else {
-      const files = await readdir(intermediateDir);
-      const indices = files
-        .map(f => f.match(/^(\d+)-chapter\.(m4b|mp3)$/))
-        .filter((m): m is RegExpMatchArray => Boolean(m))
-        .map(m => parseInt(m[1], 10))
-        .sort((a, b) => a - b);
+      const indices = existingChapters.map((c) => c.index);
       // Find smallest non-negative integer not present
       let next = 0;
       for (const idx of indices) {
@@ -165,43 +252,69 @@ export async function POST(request: NextRequest) {
 
     // Write input file (MP3 from TTS)
     const inputPath = join(intermediateDir, `${chapterIndex}-input.mp3`);
-    const chapterOutputPath = join(intermediateDir, `${chapterIndex}-chapter.${format}`);
-    const metadataPath = join(intermediateDir, `${chapterIndex}.meta.json`);
+    const chapterOutputTempPath = join(intermediateDir, `${chapterIndex}-chapter.tmp.${format}`);
+    const titleTag = encodeChapterTitleTag(chapterIndex, data.chapterTitle);
     
     // Write the chapter audio to a temp file
     await writeFile(inputPath, Buffer.from(new Uint8Array(data.buffer)));
-    
+
+    // We intentionally do not delete the existing chapter file up-front. This avoids a long
+    // window where the chapter is "missing" while ffmpeg is running (which can lead to
+    // partial/stale "complete.*" downloads). We clean up duplicates and invalidate the
+    // combined output only after the new chapter is written successfully.
+
     if (format === 'mp3') {
       // For MP3, re-encode to ensure proper headers and consistent format
       await runFFmpeg([
         '-y', // Overwrite output file without asking
         '-i', inputPath,
+        ...(postSpeed !== 1 ? ['-filter:a', buildAtempoFilter(postSpeed)] : []),
         '-c:a', 'libmp3lame',
         '-b:a', '64k',
-        '-metadata', `title=${data.chapterTitle}`,
-        chapterOutputPath
+        '-metadata', `title=${titleTag}`,
+        chapterOutputTempPath
       ], request.signal);
     } else {
       // Convert MP3 to M4B container with proper encoding and metadata
       await runFFmpeg([
         '-y', // Overwrite output file without asking
         '-i', inputPath,
+        ...(postSpeed !== 1 ? ['-filter:a', buildAtempoFilter(postSpeed)] : []),
         '-c:a', 'aac',
         '-b:a', '64k',
-        '-metadata', `title=${data.chapterTitle}`,
+        '-metadata', `title=${titleTag}`,
         '-f', 'mp4',
-        chapterOutputPath
+        chapterOutputTempPath
       ], request.signal);
     }
 
-    // Get the duration and save metadata
-    const duration = await getAudioDuration(chapterOutputPath, request.signal);
-    await writeFile(metadataPath, JSON.stringify({
-      title: data.chapterTitle,
-      duration,
-      index: chapterIndex,
-      format
-    }));
+    const probe = await ffprobeAudio(chapterOutputTempPath, request.signal);
+    const duration = probe.durationSec ?? (await getAudioDuration(chapterOutputTempPath, request.signal));
+
+    const finalChapterPath = join(intermediateDir, encodeChapterFileName(chapterIndex, data.chapterTitle, format));
+    await unlink(finalChapterPath).catch(() => {});
+    await rename(chapterOutputTempPath, finalChapterPath);
+
+    // Remove any existing chapter files for this index (e.g., if the title changed and the
+    // filename changed) and invalidate the combined output now that the chapter is updated.
+    const chapterPrefix = `${String(chapterIndex + 1).padStart(4, '0')}__`;
+    const finalChapterName = basename(finalChapterPath);
+    const existingFiles = await readdir(intermediateDir).catch(() => []);
+    for (const file of existingFiles) {
+      if (!file.startsWith(chapterPrefix)) continue;
+      if (!file.endsWith('.mp3') && !file.endsWith('.m4b')) continue;
+      if (file === finalChapterName) continue;
+      await unlink(join(intermediateDir, file)).catch(() => {});
+    }
+    await unlink(join(intermediateDir, 'complete.mp3')).catch(() => {});
+    await unlink(join(intermediateDir, 'complete.m4b')).catch(() => {});
+    await unlink(join(intermediateDir, 'complete.mp3.manifest.json')).catch(() => {});
+    await unlink(join(intermediateDir, 'complete.m4b.manifest.json')).catch(() => {});
+
+    // Ensure meta exists after first successful chapter.
+    if (!existingSettings && incomingSettings) {
+      await writeFile(metaPath, JSON.stringify(incomingSettings, null, 2)).catch(() => {});
+    }
 
     // Clean up input file
     await unlink(inputPath).catch(console.error);
@@ -237,70 +350,108 @@ export async function GET(request: NextRequest) {
     if (!bookId) {
       return NextResponse.json({ error: 'Missing bookId parameter' }, { status: 400 });
     }
+    if (!isSafeId(bookId)) {
+      return NextResponse.json({ error: 'Invalid bookId parameter' }, { status: 400 });
+    }
 
-    const docstoreDir = join(process.cwd(), 'docstore');
-    const intermediateDir = join(docstoreDir, `${bookId}-audiobook`);
+    if (!(await isAudiobooksV1Ready())) {
+      return NextResponse.json(
+        { error: 'Audiobooks storage is not migrated; run /api/migrations/v1 first.' },
+        { status: 409 },
+      );
+    }
+    const intermediateDir = join(getAudiobooksRootDir(request), `${bookId}-audiobook`);
 
     if (!existsSync(intermediateDir)) {
       return NextResponse.json({ error: 'Book not found' }, { status: 404 });
     }
 
-    // Read all chapter metadata
-    const files = await readdir(intermediateDir);
-    const metaFiles = files.filter(f => f.endsWith('.meta.json'));
-    const chapters: { title: string; duration: number; index: number; format: string }[] = [];
-    
-    for (const metaFile of metaFiles) {
-      const meta = JSON.parse(await readFile(join(intermediateDir, metaFile), 'utf-8'));
-      chapters.push(meta);
-    }
+    const stored = await listStoredChapters(intermediateDir, request.signal);
+    const chapters = stored.map((chapter) => ({
+      title: chapter.title,
+      duration: chapter.durationSec ?? 0,
+      index: chapter.index,
+      format: chapter.format,
+      filePath: chapter.filePath,
+    }));
 
     if (chapters.length === 0) {
       return NextResponse.json({ error: 'No chapters found' }, { status: 404 });
     }
 
+    const chapterFormats = new Set(chapters.map((chapter) => chapter.format));
+    if (chapterFormats.size > 1) {
+      return NextResponse.json(
+        { error: 'Mixed chapter formats detected; reset the audiobook to continue' },
+        { status: 400 },
+      );
+    }
+
     // Sort chapters by index
     chapters.sort((a, b) => a.index - b.index);
-    // Determine output format from existing chapter metadata to avoid mismatches
-    const chapterFormat = (chapters[0]?.format === 'mp3' || chapters[0]?.format === 'm4b') ? chapters[0].format : 'm4b';
-    if (requestedFormat && requestedFormat !== chapterFormat) {
-      console.warn(`Requested format ${requestedFormat} differs from chapter format ${chapterFormat}. Using ${chapterFormat}.`);
-    }
-    const format = chapterFormat;
+    const format: TTSAudiobookFormat = requestedFormat ?? (chapters[0]?.format as TTSAudiobookFormat) ?? 'm4b';
     const outputPath = join(intermediateDir, `complete.${format}`);
+    const manifestPath = join(intermediateDir, `complete.${format}.manifest.json`);
     const metadataPath = join(intermediateDir, 'metadata.txt');
     const listPath = join(intermediateDir, 'list.txt');
 
-    // Check if combined file already exists
+    const signature = chapters.map((chapter) => ({
+      index: chapter.index,
+      fileName: basename(chapter.filePath),
+    }));
+
     if (existsSync(outputPath)) {
-      // Stream the existing file
-      return streamFile(outputPath, format);
+      let cached: typeof signature | null = null;
+      try {
+        cached = JSON.parse(await readFile(manifestPath, 'utf8')) as typeof signature;
+      } catch {
+        cached = null;
+      }
+
+      if (cached && JSON.stringify(cached) === JSON.stringify(signature)) {
+        return streamFile(outputPath, format);
+      }
+
+      await unlink(outputPath).catch(() => {});
+      await unlink(manifestPath).catch(() => {});
+    }
+
+    // Ensure we have chapter durations for chapter markers / ordering.
+    for (const chapter of chapters) {
+      if (chapter.duration && chapter.duration > 0) continue;
+      try {
+        const probe = await ffprobeAudio(chapter.filePath, request.signal);
+        if (probe.durationSec && probe.durationSec > 0) {
+          chapter.duration = probe.durationSec;
+          continue;
+        }
+      } catch {}
+
+      try {
+        chapter.duration = await getAudioDuration(chapter.filePath, request.signal);
+      } catch {
+        chapter.duration = 0;
+      }
     }
 
     // Create chapter metadata file for M4B
     const metadata: string[] = [];
     let currentTime = 0;
-    
-    chapters.forEach((chapter) => {
+
+    for (const chapter of chapters) {
       const startMs = Math.floor(currentTime * 1000);
       currentTime += chapter.duration;
       const endMs = Math.floor(currentTime * 1000);
 
-      metadata.push(
-        `[CHAPTER]`,
-        `TIMEBASE=1/1000`,
-        `START=${startMs}`,
-        `END=${endMs}`,
-        `title=${chapter.title}`
-      );
-    });
+      metadata.push('[CHAPTER]', 'TIMEBASE=1/1000', `START=${startMs}`, `END=${endMs}`, `title=${escapeFFMetadata(chapter.title)}`);
+    }
     
     await writeFile(metadataPath, ';FFMETADATA1\n' + metadata.join('\n'));
 
     // Create list file for concat
     await writeFile(
       listPath,
-      chapters.map(c => `file '${join(intermediateDir, `${c.index}-chapter.${format}`)}'`).join('\n')
+      chapters.map(c => `file '${c.filePath}'`).join('\n')
     );
 
     if (format === 'mp3') {
@@ -322,7 +473,8 @@ export async function GET(request: NextRequest) {
         '-i', listPath,
         '-i', metadataPath,
         '-map_metadata', '1',
-        '-c:a', 'copy',
+        '-c:a', 'aac',
+        '-b:a', '64k',
         '-f', 'mp4',
         outputPath
       ], request.signal);
@@ -333,6 +485,8 @@ export async function GET(request: NextRequest) {
       unlink(metadataPath).catch(console.error),
       unlink(listPath).catch(console.error)
     ]);
+
+    await writeFile(manifestPath, JSON.stringify(signature, null, 2)).catch(() => {});
 
     // Stream the file back to the client
     return streamFile(outputPath, format);
@@ -389,9 +543,17 @@ export async function DELETE(request: NextRequest) {
     if (!bookId) {
       return NextResponse.json({ error: 'Missing bookId parameter' }, { status: 400 });
     }
+    if (!isSafeId(bookId)) {
+      return NextResponse.json({ error: 'Invalid bookId parameter' }, { status: 400 });
+    }
 
-    const docstoreDir = join(process.cwd(), 'docstore');
-    const intermediateDir = join(docstoreDir, `${bookId}-audiobook`);
+    if (!(await isAudiobooksV1Ready())) {
+      return NextResponse.json(
+        { error: 'Audiobooks storage is not migrated; run /api/migrations/v1 first.' },
+        { status: 409 },
+      );
+    }
+    const intermediateDir = join(getAudiobooksRootDir(request), `${bookId}-audiobook`);
 
     // If directory doesn't exist, consider it already reset
     if (!existsSync(intermediateDir)) {

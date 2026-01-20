@@ -1,10 +1,10 @@
 'use client';
 
 import { useCallback } from 'react';
-import { v4 as uuidv4 } from 'uuid';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/lib/dexie';
 import type { HTMLDocument } from '@/types/documents';
+import { sha256HexFromString } from '@/lib/sha256';
 
 export function useHTMLDocuments() {
   const documents = useLiveQuery(
@@ -16,8 +16,10 @@ export function useHTMLDocuments() {
   const isLoading = documents === undefined;
 
   const addDocument = useCallback(async (file: File): Promise<string> => {
-    const id = uuidv4();
-    const content = await file.text();
+    const buffer = await file.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+    const content = new TextDecoder().decode(bytes);
+    const id = await sha256HexFromString(content);
 
     const newDoc: HTMLDocument = {
       id,
@@ -28,7 +30,7 @@ export function useHTMLDocuments() {
       data: content,
     };
 
-    await db['html-documents'].add(newDoc);
+    await db['html-documents'].put(newDoc);
     return id;
   }, []);
 

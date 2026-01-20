@@ -155,6 +155,33 @@ let lastSentenceTokenWindow: { start: number; end: number } | null = null;
 let lastSentencePattern: string | null = null;
 let lastSentenceWordToTokenMap: number[] | null = null;
 
+function getOrCreateHighlightLayer(span: HTMLElement): {
+  layer: HTMLElement;
+  pageElement: HTMLElement;
+  pageRect: DOMRect;
+} | null {
+  const pageElement = span.closest('.react-pdf__Page') as HTMLElement | null;
+  if (!pageElement) return null;
+
+  let layer = pageElement.querySelector('.pdf-highlight-layer') as HTMLElement | null;
+  if (!layer) {
+    layer = document.createElement('div');
+    layer.className = 'pdf-highlight-layer';
+    pageElement.appendChild(layer);
+  }
+
+  layer.style.position = 'absolute';
+  layer.style.inset = '0';
+  layer.style.pointerEvents = 'none';
+  layer.style.zIndex = '4';
+  layer.style.overflow = 'hidden';
+  // Force a compositor layer to avoid Safari occasionally not painting
+  // newly-added positioned overlays.
+  layer.style.transform = 'translateZ(0)';
+
+  return { layer, pageElement, pageRect: pageElement.getBoundingClientRect() };
+}
+
 const normalizeWordForMatch = (text: string): string =>
   text
     .trim()
@@ -453,12 +480,10 @@ export function highlightPattern(
         range.setStart(textNode, startOffset);
         range.setEnd(textNode, endOffset);
 
-        const pageLayer = span.closest(
-          '.react-pdf__Page__textContent'
-        ) as HTMLElement | null;
-        if (!pageLayer) return;
+        const highlightTarget = getOrCreateHighlightLayer(span);
+        if (!highlightTarget) return;
 
-        const pageRect = pageLayer.getBoundingClientRect();
+        const { layer: highlightLayer, pageRect } = highlightTarget;
         const rects = Array.from(range.getClientRects());
 
         rects.forEach((rect) => {
@@ -468,11 +493,12 @@ export function highlightPattern(
           highlight.style.backgroundColor = 'grey';
           highlight.style.opacity = '0.4';
           highlight.style.pointerEvents = 'none';
+          highlight.style.zIndex = '1';
           highlight.style.left = `${rect.left - pageRect.left}px`;
           highlight.style.top = `${rect.top - pageRect.top}px`;
           highlight.style.width = `${rect.width}px`;
           highlight.style.height = `${rect.height}px`;
-          pageLayer.appendChild(highlight);
+          highlightLayer.appendChild(highlight);
 
           scrollIntoViewRects.push(rect);
         });
@@ -688,12 +714,10 @@ export function highlightWordIndex(
     range.setStart(node, token.startOffset);
     range.setEnd(node, token.endOffset);
 
-    const pageLayer = span.closest(
-      '.react-pdf__Page__textContent'
-    ) as HTMLElement | null;
-    if (!pageLayer) return;
+    const highlightTarget = getOrCreateHighlightLayer(span);
+    if (!highlightTarget) return;
 
-    const pageRect = pageLayer.getBoundingClientRect();
+    const { layer: highlightLayer, pageRect } = highlightTarget;
     const rects = Array.from(range.getClientRects());
 
     rects.forEach((rect) => {
@@ -708,7 +732,7 @@ export function highlightWordIndex(
       highlight.style.width = `${rect.width}px`;
       highlight.style.height = `${rect.height}px`;
       highlight.style.zIndex = '2';
-      pageLayer.appendChild(highlight);
+      highlightLayer.appendChild(highlight);
     });
   } catch {
     // Ignore range errors

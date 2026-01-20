@@ -1,64 +1,77 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { readdir, readFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join } from 'path';
-import type { TTSAudiobookFormat } from '@/types/tts';
+import { AUDIOBOOKS_V1_DIR, isAudiobooksV1Ready } from '@/lib/server/docstore';
+import { listStoredChapters } from '@/lib/server/audiobook';
+import type { AudiobookGenerationSettings } from '@/types/client';
+import type { TTSAudiobookFormat, TTSAudiobookChapter } from '@/types/tts';
+import { readFile } from 'fs/promises';
+
+export const dynamic = 'force-dynamic';
+
+function getAudiobooksRootDir(request: NextRequest): string {
+  const raw = request.headers.get('x-openreader-test-namespace')?.trim();
+  if (!raw) return AUDIOBOOKS_V1_DIR;
+  const safe = raw.replace(/[^a-zA-Z0-9._-]/g, '');
+  return safe ? join(AUDIOBOOKS_V1_DIR, safe) : AUDIOBOOKS_V1_DIR;
+}
+
+const SAFE_ID_REGEX = /^[a-zA-Z0-9._-]{1,128}$/;
+
+function isSafeId(value: string): boolean {
+  return SAFE_ID_REGEX.test(value);
+}
 
 export async function GET(request: NextRequest) {
   try {
     const bookId = request.nextUrl.searchParams.get('bookId');
-    if (!bookId) {
+    if (!bookId || !isSafeId(bookId)) {
       return NextResponse.json({ error: 'Missing bookId parameter' }, { status: 400 });
     }
 
-    const docstoreDir = join(process.cwd(), 'docstore');
-    const intermediateDir = join(docstoreDir, `${bookId}-audiobook`);
+    if (!(await isAudiobooksV1Ready())) {
+      return NextResponse.json(
+        { error: 'Audiobooks storage is not migrated; run /api/migrations/v1 first.' },
+        { status: 409 },
+      );
+    }
+    const intermediateDir = join(getAudiobooksRootDir(request), `${bookId}-audiobook`);
 
     if (!existsSync(intermediateDir)) {
-      return NextResponse.json({ chapters: [], exists: false });
+      return NextResponse.json({
+        chapters: [],
+        exists: false,
+        hasComplete: false,
+        bookId: null,
+        settings: null,
+      });
     }
 
-    // Read all chapter metadata
-    const files = await readdir(intermediateDir);
-    const metaFiles = files.filter(f => f.endsWith('.meta.json'));
-    const chapters: Array<{
-      index: number;
-      title: string;
-      duration?: number;
-      status: 'completed' | 'error';
-      bookId: string;
-      format?: TTSAudiobookFormat;
-    }> = [];
-    
-    for (const metaFile of metaFiles) {
-      try {
-        const meta = JSON.parse(await readFile(join(intermediateDir, metaFile), 'utf-8'));
-        chapters.push({
-          index: meta.index,
-          title: meta.title,
-          duration: meta.duration,
-          status: 'completed',
-          bookId,
-          format: meta.format || 'm4b'
-        });
-      } catch (error) {
-        console.error(`Error reading metadata file ${metaFile}:`, error);
-      }
+    const stored = await listStoredChapters(intermediateDir, request.signal);
+    const chapters: TTSAudiobookChapter[] = stored.map((chapter) => ({
+      index: chapter.index,
+      title: chapter.title,
+      duration: chapter.durationSec,
+      status: 'completed',
+      bookId,
+      format: chapter.format as TTSAudiobookFormat,
+    }));
+
+    let settings: AudiobookGenerationSettings | null = null;
+    try {
+      settings = JSON.parse(await readFile(join(intermediateDir, 'audiobook.meta.json'), 'utf8')) as AudiobookGenerationSettings;
+    } catch {
+      settings = null;
     }
 
-    // Sort chapters by index
-    chapters.sort((a, b) => a.index - b.index);
-
-    // Check if complete audiobook exists (either format)
-    const format = chapters[0]?.format || 'm4b';
-    const completePath = join(intermediateDir, `complete.${format}`);
-    const hasComplete = existsSync(completePath);
+    const hasComplete = existsSync(join(intermediateDir, 'complete.mp3')) || existsSync(join(intermediateDir, 'complete.m4b'));
 
     return NextResponse.json({ 
       chapters, 
       exists: true,
       hasComplete,
-      bookId 
+      bookId,
+      settings,
     });
 
   } catch (error) {

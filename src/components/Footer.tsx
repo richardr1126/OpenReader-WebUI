@@ -91,6 +91,7 @@ export function Footer() {
 -e API_BASE=http://kokoro-tts:8880/v1 \\
 -p 3003:3003 \\
 -v openreader_docstore:/app/docstore \\
+-v /path/to/your/library:/app/docstore/library:ro \\
 ghcr.io/richardr1126/openreader-webui:latest`
 }
                   </CodeBlock>
