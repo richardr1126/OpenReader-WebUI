@@ -5,7 +5,7 @@ import { existsSync, createReadStream } from 'fs';
 import { basename, join, resolve } from 'path';
 import { randomUUID } from 'crypto';
 import { AUDIOBOOKS_V1_DIR, isAudiobooksV1Ready } from '@/lib/server/docstore';
-import { encodeChapterFileName, encodeChapterTitleTag, listStoredChapters, ffprobeAudio } from '@/lib/server/audiobook';
+import { encodeChapterFileName, encodeChapterTitleTag, listStoredChapters, ffprobeAudio, escapeFFMetadata } from '@/lib/server/audiobook';
 import type { TTSAudioBytes, TTSAudiobookFormat } from '@/types/tts';
 import type { AudiobookGenerationSettings } from '@/types/client';
 
@@ -178,6 +178,9 @@ export async function POST(request: NextRequest) {
     // Create intermediate directory
     await mkdir(intermediateDir, { recursive: true });
 
+    const existingChapters = await listStoredChapters(intermediateDir, request.signal);
+    const hasChapters = existingChapters.length > 0;
+
     const metaPath = join(intermediateDir, 'audiobook.meta.json');
     const incomingSettings = data.settings;
     let existingSettings: AudiobookGenerationSettings | null = null;
@@ -187,7 +190,9 @@ export async function POST(request: NextRequest) {
       existingSettings = null;
     }
 
-    if (existingSettings) {
+    // Only enforce mismatch check if we already have generated chapters.
+    // If no chapters exist, we can overwrite/ignore "existing" settings (which might be stale or partial).
+    if (existingSettings && hasChapters) {
       if (incomingSettings) {
         const mismatch =
           existingSettings.ttsProvider !== incomingSettings.ttsProvider ||
@@ -203,11 +208,9 @@ export async function POST(request: NextRequest) {
           );
         }
       }
-    } else if (incomingSettings) {
-      await writeFile(metaPath, JSON.stringify(incomingSettings, null, 2));
     }
-
-    const existingChapters = await listStoredChapters(intermediateDir, request.signal);
+    // Note: We deliberately do NOT write the meta file here yet.
+    // We wait until a chapter is successfully generated/saved below.
     const existingFormats = new Set(existingChapters.map((c) => c.format));
     if (existingFormats.size > 1) {
       return NextResponse.json(
@@ -225,9 +228,14 @@ export async function POST(request: NextRequest) {
     const postSpeed = Number.isFinite(Number(rawPostSpeed)) ? Number(rawPostSpeed) : 1;
 
     // Use provided chapter index or find the next available index robustly (handles gaps)
+    // Use provided chapter index or find the next available index robustly (handles gaps)
     let chapterIndex: number;
     if (data.chapterIndex !== undefined) {
-      chapterIndex = data.chapterIndex;
+      const normalized = Number(data.chapterIndex);
+      if (!Number.isInteger(normalized) || normalized < 0) {
+        return NextResponse.json({ error: 'Invalid chapterIndex parameter' }, { status: 400 });
+      }
+      chapterIndex = normalized;
     } else {
       const indices = existingChapters.map((c) => c.index);
       // Find smallest non-negative integer not present
@@ -435,7 +443,7 @@ export async function GET(request: NextRequest) {
       currentTime += chapter.duration;
       const endMs = Math.floor(currentTime * 1000);
 
-      metadata.push('[CHAPTER]', 'TIMEBASE=1/1000', `START=${startMs}`, `END=${endMs}`, `title=${chapter.title}`);
+      metadata.push('[CHAPTER]', 'TIMEBASE=1/1000', `START=${startMs}`, `END=${endMs}`, `title=${escapeFFMetadata(chapter.title)}`);
     }
     
     await writeFile(metadataPath, ';FFMETADATA1\n' + metadata.join('\n'));

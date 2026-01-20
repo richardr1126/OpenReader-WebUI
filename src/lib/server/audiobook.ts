@@ -23,6 +23,15 @@ function sanitizeFileStem(value: string): string {
     .slice(0, 180);
 }
 
+export function escapeFFMetadata(value: string): string {
+  return value
+    .replace(/\\/g, '\\\\')
+    .replace(/=/g, '\\=')
+    .replace(/;/g, '\\;')
+    .replace(/#/g, '\\#')
+    .replace(/\r|\n/g, ' ');
+}
+
 export function encodeChapterTitleTag(index: number, title: string): string {
   const safeTitle = sanitizeTagValue(title) || `Chapter ${index + 1}`;
   const prefix = String(index + 1).padStart(4, '0');
