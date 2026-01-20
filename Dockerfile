@@ -1,14 +1,16 @@
 # Stage 1: build whisper.cpp (no model download – the app handles that)
-FROM alpine:3.20 AS whisper-builder
+FROM alpine:3.23 AS whisper-builder
 
 RUN apk add --no-cache git cmake build-base
 
 WORKDIR /opt
 
+ARG TARGETARCH
+
 RUN git clone --depth 1 https://github.com/ggml-org/whisper.cpp.git && \
     cd whisper.cpp && \
-    cmake -B build && \
-    cmake --build build -j --config Release
+    cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DGGML_NATIVE=OFF $( [ "$TARGETARCH" = "arm64" ] && echo "-DGGML_CPU_ARM_ARCH=armv8-a" || true ) && \
+    cmake --build build -j
 
 
 # Stage 2: build the Next.js app
