@@ -138,6 +138,8 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
 
   // Word-level highlight layered on top of the block highlight
   useEffect(() => {
+    clearWordHighlightTimeouts();
+
     if (!pdfHighlightEnabled || !pdfWordHighlightEnabled) {
       clearWordHighlights();
       return;
@@ -149,8 +151,7 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
     }
 
     const wordEntry =
-      currentSentenceAlignment &&
-      currentWordIndex < currentSentenceAlignment.words.length
+      currentSentenceAlignment && currentWordIndex < currentSentenceAlignment.words.length
         ? currentSentenceAlignment.words[currentWordIndex]
         : undefined;
     const wordText = wordEntry?.text || null;
@@ -159,8 +160,6 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
       clearWordHighlights();
       return;
     }
-
-    clearWordHighlightTimeouts();
 
     const seq = ++wordHighlightSeqRef.current;
     const isLayoutChange = layoutKey !== lastWordLayoutKeyRef.current;
@@ -188,13 +187,18 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
       }
     };
 
+    const cleanup = () => {
+      clearWordHighlightTimeouts();
+    };
+
     if (isLayoutChange) {
       clearWordHighlights();
       scheduleWordTimeout(() => tryApplyWord(0), 250);
-      return;
+      return cleanup;
     }
 
     tryApplyWord(0);
+    return cleanup;
   }, [
     currentWordIndex,
     currentSentence,

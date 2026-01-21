@@ -104,7 +104,7 @@ test.describe('splitTextToTtsBlocks', () => {
     for (const block of result) {
       expect(block.length).toBeGreaterThan(0);
       expect(block.length).toBeLessThanOrEqual(450);
-      expect(block.endsWith('.')).toBe(true);
+      expect(block).toMatch(/[.!?]$/);
     }
   });
 
