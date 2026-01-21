@@ -96,6 +96,14 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
 
     clearSentenceHighlightTimeouts();
 
+    if (!currentSentence) {
+      // Cancel any in-flight retry loops and ensure stale highlights don't remain
+      // when the current sentence becomes null/undefined.
+      sentenceHighlightSeqRef.current += 1;
+      clearHighlights();
+      return;
+    }
+
     const seq = ++sentenceHighlightSeqRef.current;
     const isLayoutChange = layoutKey !== lastSentenceLayoutKeyRef.current;
     lastSentenceLayoutKeyRef.current = layoutKey;
@@ -108,7 +116,6 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
       if (seq !== sentenceHighlightSeqRef.current) return;
       const container = containerRef.current;
       if (!container) return;
-      if (!currentSentence) return;
 
       const spans = container.querySelectorAll('.react-pdf__Page__textContent span');
       if (!spans.length) {
