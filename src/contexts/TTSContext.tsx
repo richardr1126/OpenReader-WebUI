@@ -37,7 +37,7 @@ import { useAudioContext } from '@/hooks/audio/useAudioContext';
 import { getLastDocumentLocation, setLastDocumentLocation } from '@/lib/dexie';
 import { useBackgroundState } from '@/hooks/audio/useBackgroundState';
 import { withRetry, generateTTS, alignAudio } from '@/lib/client';
-import { preprocessSentenceForAudio, splitTextToTtsBlocks } from '@/lib/nlp';
+import { preprocessSentenceForAudio, splitTextToTtsBlocks, splitTextToTtsBlocksEPUB } from '@/lib/nlp';
 import { isKokoroModel } from '@/utils/voice';
 import type {
   TTSLocation,
@@ -385,8 +385,8 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     }
 
     // Use the shared utility directly instead of making an API call
-    return splitTextToTtsBlocks(text);
-  }, []);
+    return isEPUB ? splitTextToTtsBlocksEPUB(text) : splitTextToTtsBlocks(text);
+  }, [isEPUB]);
 
   /**
    * Stops the current audio playback and clears the active Howl instance

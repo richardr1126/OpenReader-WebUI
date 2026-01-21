@@ -7,7 +7,7 @@
 
 import nlp from 'compromise';
 
-const MAX_BLOCK_LENGTH = 450;
+export const MAX_BLOCK_LENGTH = 450;
 
 const splitOversizedText = (text: string, maxLen: number): string[] => {
   const normalized = text.replace(/\s+/g, ' ').trim();
@@ -179,6 +179,46 @@ export const splitTextToTtsBlocks = (text: string): string[] => {
     }
   }
   
+  return blocks;
+};
+
+/**
+ * EPUB block splitting used where we want the produced sentences
+ * to closely match the original DOM text (for exact-match highlighting).
+ */
+export const splitTextToTtsBlocksEPUB = (text: string): string[] => {
+  const paragraphs = text.split(/\n+/);
+  const blocks: string[] = [];
+
+  for (const paragraph of paragraphs) {
+    if (!paragraph.trim()) continue;
+
+    const cleanedText = preprocessSentenceForAudio(paragraph);
+    const doc = nlp(cleanedText);
+    const rawSentences = doc.sentences().out('array') as string[];
+
+    const mergedSentences = mergeQuotedDialogue(rawSentences);
+
+    let currentBlock = '';
+
+    for (const sentence of mergedSentences) {
+      const trimmedSentence = sentence.trim();
+
+      if (currentBlock && (currentBlock.length + trimmedSentence.length + 1) > MAX_BLOCK_LENGTH) {
+        blocks.push(currentBlock.trim());
+        currentBlock = trimmedSentence;
+      } else {
+        currentBlock = currentBlock
+          ? `${currentBlock} ${trimmedSentence}`
+          : trimmedSentence;
+      }
+    }
+
+    if (currentBlock) {
+      blocks.push(currentBlock.trim());
+    }
+  }
+
   return blocks;
 };
 

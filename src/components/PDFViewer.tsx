@@ -152,7 +152,7 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
       return;
     }
 
-    if (currentWordIndex === null || currentWordIndex === undefined || currentWordIndex < 0) {
+    if (!currentSentence || currentWordIndex === null || currentWordIndex === undefined || currentWordIndex < 0) {
       clearWordHighlights();
       return;
     }
