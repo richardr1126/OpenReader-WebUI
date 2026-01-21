@@ -44,6 +44,7 @@ export default defineConfig({
 
     {
       name: 'firefox',
+      testIgnore: '**/unit/**',
       use: {
         ...devices['Desktop Firefox'],
         extraHTTPHeaders: { 'x-openreader-test-namespace': 'firefox' },
@@ -52,6 +53,7 @@ export default defineConfig({
 
     {
       name: 'webkit',
+      testIgnore: '**/unit/**',
       use: {
         ...devices['Desktop Safari'],
         extraHTTPHeaders: { 'x-openreader-test-namespace': 'webkit' },
