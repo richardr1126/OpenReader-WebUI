@@ -203,14 +203,20 @@ export const splitTextToTtsBlocksEPUB = (text: string): string[] => {
 
     for (const sentence of mergedSentences) {
       const trimmedSentence = sentence.trim();
+      const sentenceParts =
+        trimmedSentence.length > MAX_BLOCK_LENGTH
+          ? splitOversizedText(trimmedSentence, MAX_BLOCK_LENGTH)
+          : [trimmedSentence];
 
-      if (currentBlock && (currentBlock.length + trimmedSentence.length + 1) > MAX_BLOCK_LENGTH) {
-        blocks.push(currentBlock.trim());
-        currentBlock = trimmedSentence;
-      } else {
-        currentBlock = currentBlock
-          ? `${currentBlock} ${trimmedSentence}`
-          : trimmedSentence;
+      for (const sentencePart of sentenceParts) {
+        if (currentBlock && (currentBlock.length + sentencePart.length + 1) > MAX_BLOCK_LENGTH) {
+          blocks.push(currentBlock.trim());
+          currentBlock = sentencePart;
+        } else {
+          currentBlock = currentBlock
+            ? `${currentBlock} ${sentencePart}`
+            : sentencePart;
+        }
       }
     }
 
@@ -231,72 +237,6 @@ export const splitTextToTtsBlocksEPUB = (text: string): string[] => {
  */
 export const normalizeTextForTts = (text: string): string =>
   splitTextToTtsBlocks(text).join(' ');
-
-/**
- * Extracts raw sentence strings from text without preprocessing or block grouping.
- * Useful for text matching and highlighting.
- * 
- * @param {string} text - The text to extract sentences from
- * @returns {string[]} Array of raw sentences
- */
-export const extractRawSentences = (text: string): string[] => {
-  if (!text || text.length < 1) {
-    return [];
-  }
-  
-  return nlp(text).sentences().out('array') as string[];
-};
-
-/**
- * Enhanced sentence processing that returns both processed sentences and raw sentences
- * This allows for better mapping between the two for click-to-highlight functionality
- * 
- * @param {string} text - The text to process
- * @returns {Object} Object containing processed sentences and raw sentences with mapping
- */
-export const processTextWithMapping = (text: string): {
-  processedSentences: string[];
-  rawSentences: string[];
-  sentenceMapping: Array<{ processedIndex: number; rawIndices: number[] }>;
-} => {
-  const rawSentences = extractRawSentences(text);
-  const processedSentences = splitTextToTtsBlocks(text);
-  
-  // Create a mapping between processed sentences and raw sentences
-  const sentenceMapping: Array<{ processedIndex: number; rawIndices: number[] }> = [];
-  
-  // For simple mapping, we'll track which raw sentences contributed to each processed sentence
-  let rawIndex = 0;
-  
-  for (let processedIndex = 0; processedIndex < processedSentences.length; processedIndex++) {
-    const processedSentence = processedSentences[processedIndex];
-    const rawIndices: number[] = [];
-    
-    // Find which raw sentences are contained in this processed sentence
-    const remainingText = processedSentence;
-    
-    while (rawIndex < rawSentences.length && remainingText.length > 0) {
-      const rawSentence = rawSentences[rawIndex];
-      const cleanedRawSentence = preprocessSentenceForAudio(rawSentence);
-      
-      if (remainingText.includes(cleanedRawSentence) || cleanedRawSentence.includes(remainingText)) {
-        rawIndices.push(rawIndex);
-        rawIndex++;
-        break;
-      } else {
-        rawIndex++;
-      }
-    }
-    
-    sentenceMapping.push({ processedIndex, rawIndices });
-  }
-  
-  return {
-    processedSentences,
-    rawSentences,
-    sentenceMapping
-  };
-}; 
 
 // Helper functions to merge quoted dialogue across sentences
 const countDoubleQuotes = (s: string): number => {

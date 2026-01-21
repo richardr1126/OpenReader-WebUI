@@ -4,8 +4,6 @@ import {
   splitTextToTtsBlocks, 
   splitTextToTtsBlocksEPUB,
   normalizeTextForTts,
-  extractRawSentences,
-  processTextWithMapping,
   MAX_BLOCK_LENGTH
 } from '../../src/lib/nlp';
 
@@ -169,6 +167,14 @@ test.describe('splitTextToTtsBlocksEPUB (highlight-friendly)', () => {
     expect(result[0]).toBe('One.');
     expect(result[1]).toBe('Two.');
   });
+
+  test('splits oversized sentences to keep blocks bounded', () => {
+    const input = Array(1200).fill('word').join(' '); // no punctuation; guaranteed to exceed MAX_BLOCK_LENGTH
+    const result = splitTextToTtsBlocksEPUB(input);
+
+    expect(result.length).toBeGreaterThan(1);
+    expectNormalizedBlocks(result, MAX_BLOCK_LENGTH);
+  });
 });
 
 test.describe('normalizeTextForTts', () => {
@@ -178,38 +184,5 @@ test.describe('normalizeTextForTts', () => {
     expect(normalized).not.toMatch(/\n/);
     expect(normalized).not.toMatch(/\s{2,}/);
     expect(normalized.length).toBeGreaterThan(0);
-  });
-});
-
-test.describe('extractRawSentences', () => {
-  test('returns [] for empty input', () => {
-    expect(extractRawSentences('')).toEqual([]);
-  });
-
-  test('returns sentence-like strings without preprocessing', () => {
-    const input = 'First sentence. Second sentence.';
-    const result = extractRawSentences(input);
-    expect(result.length).toBeGreaterThanOrEqual(2);
-    expect(result[0]).toContain('First');
-  });
-});
-
-test.describe('processTextWithMapping', () => {
-  test('returns mapping entries with valid indices', () => {
-    const text = 'First (1). Second (2).';
-    const { processedSentences, rawSentences, sentenceMapping } = processTextWithMapping(text);
-
-    expect(processedSentences.length).toBeGreaterThan(0);
-    expect(rawSentences.length).toBeGreaterThan(0);
-    expect(sentenceMapping).toHaveLength(processedSentences.length);
-
-    for (let i = 0; i < sentenceMapping.length; i++) {
-      const entry = sentenceMapping[i];
-      expect(entry.processedIndex).toBe(i);
-      for (const rawIndex of entry.rawIndices) {
-        expect(rawIndex).toBeGreaterThanOrEqual(0);
-        expect(rawIndex).toBeLessThan(rawSentences.length);
-      }
-    }
   });
 });
