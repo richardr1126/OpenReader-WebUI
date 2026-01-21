@@ -37,7 +37,7 @@ import { useAudioContext } from '@/hooks/audio/useAudioContext';
 import { getLastDocumentLocation, setLastDocumentLocation } from '@/lib/dexie';
 import { useBackgroundState } from '@/hooks/audio/useBackgroundState';
 import { withRetry, generateTTS, alignAudio } from '@/lib/client';
-import { preprocessSentenceForAudio, processTextToSentences } from '@/lib/nlp';
+import { preprocessSentenceForAudio, splitTextToTtsBlocks } from '@/lib/nlp';
 import { isKokoroModel } from '@/utils/voice';
 import type {
   TTSLocation,
@@ -379,13 +379,13 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
    * @param {string} text - The text to be processed
    * @returns {Promise<string[]>} Array of processed sentences
    */
-  const processTextToSentencesLocal = useCallback(async (text: string): Promise<string[]> => {
+  const splitTextToTtsBlocksLocal = useCallback(async (text: string): Promise<string[]> => {
     if (text.length < 1) {
       return [];
     }
 
     // Use the shared utility directly instead of making an API call
-    return processTextToSentences(text);
+    return splitTextToTtsBlocks(text);
   }, []);
 
   /**
@@ -579,7 +579,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     abortAudio(true); // Clear pending requests since text is changing
     setIsProcessing(true); // Set processing state before text processing starts
 
-    processTextToSentencesLocal(workingText)
+    splitTextToTtsBlocksLocal(workingText)
       .then(newSentences => {
         if (newSentences.length === 0) {
           console.warn('No sentences found in text');
@@ -658,7 +658,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
           duration: 3000,
         });
       });
-  }, [isPlaying, handleBlankSection, abortAudio, processTextToSentencesLocal, pendingRestoreIndex, isEPUB, smartSentenceSplitting]);
+  }, [isPlaying, handleBlankSection, abortAudio, splitTextToTtsBlocksLocal, pendingRestoreIndex, isEPUB, smartSentenceSplitting]);
 
   /**
    * Toggles the playback state between playing and paused

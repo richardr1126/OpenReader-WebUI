@@ -30,7 +30,7 @@ import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { getPdfDocument } from '@/lib/dexie';
 import { useTTS } from '@/contexts/TTSContext';
 import { useConfig } from '@/contexts/ConfigContext';
-import { processTextToSentences } from '@/lib/nlp';
+import { normalizeTextForTts } from '@/lib/nlp';
 import { withRetry, getAudiobookStatus, generateTTS, createAudiobookChapter } from '@/lib/client';
 import {
   extractTextFromPDF,
@@ -312,9 +312,7 @@ export function PDFProvider({ children }: { children: ReactNode }) {
         });
         const trimmedText = rawText.trim();
         if (trimmedText) {
-          const processedText = smartSentenceSplitting
-            ? processTextToSentences(trimmedText).join(' ')
-            : trimmedText;
+          const processedText = smartSentenceSplitting ? normalizeTextForTts(trimmedText) : trimmedText;
 
           textPerPage.push(processedText);
           totalLength += processedText.length;
@@ -532,7 +530,7 @@ export function PDFProvider({ children }: { children: ReactNode }) {
       }
 
       const textForTTS = smartSentenceSplitting
-        ? processTextToSentences(trimmedText).join(' ')
+        ? normalizeTextForTts(trimmedText)
         : trimmedText;
 
       // Use logical chapter numbering (index + 1) to match original generation titles

@@ -9,6 +9,113 @@ import nlp from 'compromise';
 
 const MAX_BLOCK_LENGTH = 450;
 
+const splitOversizedText = (text: string, maxLen: number): string[] => {
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  if (!normalized) return [];
+  if (normalized.length <= maxLen) return [normalized];
+
+  const parts: string[] = [];
+  const MAX_OVERFLOW = maxLen; // allow finishing the sentence up to +maxLen chars
+  const CLOSERS = new Set(['"', "'", '”', '’', ')', ']', '}']);
+  const BREAK_CHARS = new Set(['.', '!', '?']);
+  const SOFT_BREAK_CHARS = new Set([';', ':']);
+
+  const findPunctuationCut = (s: string, limit: number): number | null => {
+    for (let i = limit; i >= 0; i--) {
+      const ch = s[i];
+      if (!BREAK_CHARS.has(ch)) continue;
+
+      const prev = i > 0 ? s[i - 1] : '';
+      const next = i + 1 < s.length ? s[i + 1] : '';
+
+      // Avoid splitting inside decimals like 3.14
+      if (ch === '.' && /\d/.test(prev) && /\d/.test(next)) continue;
+
+      let end = i + 1;
+      while (end < s.length && CLOSERS.has(s[end])) end++;
+      const after = end < s.length ? s[end] : '';
+
+      // Allow a boundary at end/whitespace, or common PDF artifact where
+      // the next sentence starts immediately with an uppercase letter.
+      if (!after || /\s/.test(after) || /[A-Z]/.test(after)) return end;
+    }
+    return null;
+  };
+
+  const findForwardPunctuationCut = (
+    s: string,
+    startIndex: number,
+    endIndex: number,
+    chars: Set<string>
+  ): number | null => {
+    const start = Math.max(0, startIndex);
+    const end = Math.min(endIndex, s.length - 1);
+    for (let i = start; i <= end; i++) {
+      const ch = s[i];
+      if (!chars.has(ch)) continue;
+
+      const prev = i > 0 ? s[i - 1] : '';
+      const next = i + 1 < s.length ? s[i + 1] : '';
+
+      if (ch === '.' && /\d/.test(prev) && /\d/.test(next)) continue;
+
+      let cut = i + 1;
+      while (cut < s.length && CLOSERS.has(s[cut])) cut++;
+      const after = cut < s.length ? s[cut] : '';
+
+      if (!after || /\s/.test(after) || /[A-Z]/.test(after)) return cut;
+    }
+    return null;
+  };
+
+  const findSoftPunctuationCut = (s: string, limit: number): number | null => {
+    for (let i = limit; i >= 0; i--) {
+      const ch = s[i];
+      if (!SOFT_BREAK_CHARS.has(ch)) continue;
+
+      let end = i + 1;
+      while (end < s.length && CLOSERS.has(s[end])) end++;
+      const after = end < s.length ? s[end] : '';
+      if (!after || /\s/.test(after) || /[A-Z]/.test(after)) return end;
+    }
+    return null;
+  };
+
+  let remaining = normalized;
+  while (remaining.length > maxLen) {
+    const backwardLimit = Math.min(maxLen, remaining.length - 1);
+    const forwardLimit = Math.min(maxLen + MAX_OVERFLOW, remaining.length - 1);
+
+    let cut =
+      findPunctuationCut(remaining, backwardLimit) ??
+      findForwardPunctuationCut(remaining, maxLen, forwardLimit, BREAK_CHARS) ??
+      findSoftPunctuationCut(remaining, backwardLimit) ??
+      findForwardPunctuationCut(remaining, maxLen, forwardLimit, SOFT_BREAK_CHARS) ??
+      remaining.lastIndexOf(' ', maxLen);
+
+    if (cut === 0 || cut === -1) {
+      // No whitespace or punctuation; hard-cut for extremely long tokens.
+      cut = maxLen;
+    }
+
+    const chunk = remaining.slice(0, cut).trim();
+    if (chunk) parts.push(chunk);
+    remaining = remaining.slice(cut).trim();
+  }
+
+  if (remaining) parts.push(remaining);
+  return parts;
+};
+
+const normalizeSentenceBoundariesForNlp = (text: string): string => {
+  // PDF extraction sometimes yields "...end.Next..." with no whitespace.
+  // Insert a space only when it looks like a sentence boundary (lower/digit before,
+  // uppercase after) to avoid breaking abbreviations like "U.S.A".
+  return text
+    .replace(/([a-z0-9])([.!?])(?=[A-Z])/g, '$1$2 ')
+    .replace(/([a-z0-9][.!?][\"”’)\]])(?=[A-Z])/g, '$1 ');
+};
+
 /**
  * Preprocesses text for audio generation by cleaning up various text artifacts
  * 
@@ -31,14 +138,18 @@ export const preprocessSentenceForAudio = (text: string): string => {
  * @param {string} text - The text to split into sentences
  * @returns {string[]} Array of sentence blocks
  */
-export const splitIntoSentences = (text: string): string[] => {
-  const paragraphs = text.split(/\n+/);
+export const splitTextToTtsBlocks = (text: string): string[] => {
+  // Treat double-newlines as paragraph boundaries; single newlines are usually
+  // just PDF line wrapping and should not force sentence/block boundaries.
+  const paragraphs = text.split(/\n{2,}/);
   const blocks: string[] = [];
 
   for (const paragraph of paragraphs) {
     if (!paragraph.trim()) continue;
 
-    const cleanedText = preprocessSentenceForAudio(paragraph);
+    const cleanedText = normalizeSentenceBoundariesForNlp(
+      preprocessSentenceForAudio(paragraph)
+    );
     const doc = nlp(cleanedText);
     const rawSentences = doc.sentences().out('array') as string[];
     
@@ -49,14 +160,17 @@ export const splitIntoSentences = (text: string): string[] => {
 
     for (const sentence of mergedSentences) {
       const trimmedSentence = sentence.trim();
+      const sentenceParts = splitOversizedText(trimmedSentence, MAX_BLOCK_LENGTH);
 
-      if (currentBlock && (currentBlock.length + trimmedSentence.length + 1) > MAX_BLOCK_LENGTH) {
-        blocks.push(currentBlock.trim());
-        currentBlock = trimmedSentence;
-      } else {
-        currentBlock = currentBlock 
-          ? `${currentBlock} ${trimmedSentence}`
-          : trimmedSentence;
+      for (const sentencePart of sentenceParts) {
+        if (currentBlock && (currentBlock.length + sentencePart.length + 1) > MAX_BLOCK_LENGTH) {
+          blocks.push(currentBlock.trim());
+          currentBlock = sentencePart;
+        } else {
+          currentBlock = currentBlock 
+            ? `${currentBlock} ${sentencePart}`
+            : sentencePart;
+        }
       }
     }
 
@@ -69,29 +183,23 @@ export const splitIntoSentences = (text: string): string[] => {
 };
 
 /**
- * Main sentence processing function that handles both short and long texts
+ * Normalizes text for single-shot TTS generation (e.g., a whole PDF page).
+ * Uses the same logic as `splitTextToTtsBlocks`, but returns a single string.
  * 
  * @param {string} text - The text to process
- * @returns {string[]} Array of processed sentences/blocks
+ * @returns {string} Normalized text
  */
-export const processTextToSentences = (text: string): string[] => {
-  if (!text || text.length < 1) {
-    return [];
-  }
-
-  // Always use the full splitting logic so we consistently respect
-  // sentence boundaries and quoted dialogue, even for shorter texts.
-  return splitIntoSentences(text);
-};
+export const normalizeTextForTts = (text: string): string =>
+  splitTextToTtsBlocks(text).join(' ');
 
 /**
- * Gets raw sentences from text without preprocessing or grouping
- * This is useful for text matching and highlighting
+ * Extracts raw sentence strings from text without preprocessing or block grouping.
+ * Useful for text matching and highlighting.
  * 
  * @param {string} text - The text to extract sentences from
  * @returns {string[]} Array of raw sentences
  */
-export const getRawSentences = (text: string): string[] => {
+export const extractRawSentences = (text: string): string[] => {
   if (!text || text.length < 1) {
     return [];
   }
@@ -111,8 +219,8 @@ export const processTextWithMapping = (text: string): {
   rawSentences: string[];
   sentenceMapping: Array<{ processedIndex: number; rawIndices: number[] }>;
 } => {
-  const rawSentences = getRawSentences(text);
-  const processedSentences = processTextToSentences(text);
+  const rawSentences = extractRawSentences(text);
+  const processedSentences = splitTextToTtsBlocks(text);
   
   // Create a mapping between processed sentences and raw sentences
   const sentenceMapping: Array<{ processedIndex: number; rawIndices: number[] }> = [];
@@ -149,6 +257,7 @@ export const processTextWithMapping = (text: string): {
     sentenceMapping
   };
 }; 
+
 // Helper functions to merge quoted dialogue across sentences
 const countDoubleQuotes = (s: string): number => {
   const matches = s.match(/["“”]/g);

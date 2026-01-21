@@ -24,6 +24,12 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const scaleRef = useRef<number>(1);
   const { containerWidth } = usePDFResize(containerRef);
+  const sentenceHighlightSeqRef = useRef(0);
+  const wordHighlightSeqRef = useRef(0);
+  const sentenceHighlightTimeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const wordHighlightTimeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const lastSentenceLayoutKeyRef = useRef<string>('');
+  const lastWordLayoutKeyRef = useRef<string>('');
 
   // Config context
   const { viewType, pdfHighlightEnabled, pdfWordHighlightEnabled } = useConfig();
@@ -49,6 +55,28 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
     currDocPage,
   } = usePDF();
 
+  const layoutKey = `${zoomLevel}:${containerWidth}:${viewType}:${currDocPage}`;
+
+  const clearSentenceHighlightTimeouts = useCallback(() => {
+    for (const t of sentenceHighlightTimeoutsRef.current) clearTimeout(t);
+    sentenceHighlightTimeoutsRef.current = [];
+  }, []);
+
+  const clearWordHighlightTimeouts = useCallback(() => {
+    for (const t of wordHighlightTimeoutsRef.current) clearTimeout(t);
+    wordHighlightTimeoutsRef.current = [];
+  }, []);
+
+  const scheduleSentenceTimeout = useCallback((fn: () => void, ms: number) => {
+    const t = setTimeout(fn, ms);
+    sentenceHighlightTimeoutsRef.current.push(t);
+  }, []);
+
+  const scheduleWordTimeout = useCallback((fn: () => void, ms: number) => {
+    const t = setTimeout(fn, ms);
+    wordHighlightTimeoutsRef.current.push(t);
+  }, []);
+
   useEffect(() => {
     /*
      * Handles highlighting the current sentence being read by TTS.
@@ -66,17 +94,47 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
       return;
     }
 
-    const highlightTimeout = setTimeout(() => {
-      if (containerRef.current) {
-        highlightPattern(currDocText, currentSentence || '', containerRef as RefObject<HTMLDivElement>);
+    clearSentenceHighlightTimeouts();
+
+    const seq = ++sentenceHighlightSeqRef.current;
+    const isLayoutChange = layoutKey !== lastSentenceLayoutKeyRef.current;
+    lastSentenceLayoutKeyRef.current = layoutKey;
+
+    if (isLayoutChange) {
+      clearHighlights();
+    }
+
+    const tryApply = (attempt: number) => {
+      if (seq !== sentenceHighlightSeqRef.current) return;
+      const container = containerRef.current;
+      if (!container) return;
+      if (!currentSentence) return;
+
+      const spans = container.querySelectorAll('.react-pdf__Page__textContent span');
+      if (!spans.length) {
+        if (attempt < 10) scheduleSentenceTimeout(() => tryApply(attempt + 1), 75);
+        return;
       }
-    }, 200);
+
+      highlightPattern(currDocText, currentSentence, containerRef as RefObject<HTMLDivElement>);
+    };
+
+    scheduleSentenceTimeout(() => tryApply(0), 200);
 
     return () => {
-      clearTimeout(highlightTimeout);
+      clearSentenceHighlightTimeouts();
       clearHighlights();
     };
-  }, [currDocText, currentSentence, highlightPattern, clearHighlights, pdfHighlightEnabled]);
+  }, [
+    currDocText,
+    currentSentence,
+    highlightPattern,
+    clearHighlights,
+    pdfHighlightEnabled,
+    layoutKey,
+    clearSentenceHighlightTimeouts,
+    scheduleSentenceTimeout
+  ]);
 
   // Word-level highlight layered on top of the block highlight
   useEffect(() => {
@@ -102,12 +160,41 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
       return;
     }
 
-    highlightWordIndex(
-      currentSentenceAlignment,
-      currentWordIndex,
-      currentSentence || '',
-      containerRef as RefObject<HTMLDivElement>
-    );
+    clearWordHighlightTimeouts();
+
+    const seq = ++wordHighlightSeqRef.current;
+    const isLayoutChange = layoutKey !== lastWordLayoutKeyRef.current;
+    lastWordLayoutKeyRef.current = layoutKey;
+
+    const tryApplyWord = (attempt: number) => {
+      if (seq !== wordHighlightSeqRef.current) return;
+      const container = containerRef.current;
+      if (!container) return;
+
+      highlightWordIndex(
+        currentSentenceAlignment,
+        currentWordIndex,
+        currentSentence || '',
+        containerRef as RefObject<HTMLDivElement>
+      );
+
+      if (isLayoutChange) {
+        // If we don't see a word overlay yet, the sentence highlight worker may not
+        // have produced `lastSentenceTokenWindow` (or the text layer isn't ready).
+        const overlayCount = container.querySelectorAll('.pdf-word-highlight-overlay').length;
+        if (overlayCount === 0 && attempt < 12) {
+          scheduleWordTimeout(() => tryApplyWord(attempt + 1), 75);
+        }
+      }
+    };
+
+    if (isLayoutChange) {
+      clearWordHighlights();
+      scheduleWordTimeout(() => tryApplyWord(0), 250);
+      return;
+    }
+
+    tryApplyWord(0);
   }, [
     currentWordIndex,
     currentSentence,
@@ -115,7 +202,10 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
     pdfHighlightEnabled,
     pdfWordHighlightEnabled,
     clearWordHighlights,
-    highlightWordIndex
+    highlightWordIndex,
+    layoutKey,
+    clearWordHighlightTimeouts,
+    scheduleWordTimeout
   ]);
 
   // Add page dimensions state
