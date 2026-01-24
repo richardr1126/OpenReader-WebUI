@@ -1007,7 +1007,7 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
           'highlight',
           wordCfi,
           {},
-          () => {},
+          () => { },
           '',
           {
             fill: 'var(--accent)',

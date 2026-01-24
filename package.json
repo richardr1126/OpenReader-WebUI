@@ -14,16 +14,16 @@
     "@types/howler": "^2.2.12",
     "@types/uuid": "^10.0.0",
     "@vercel/analytics": "^1.6.1",
-    "cmpstr": "^3.1.1",
+    "cmpstr": "^3.2.0",
     "compromise": "^14.14.5",
-    "core-js": "^3.47.0",
+    "core-js": "^3.48.0",
     "dexie": "^4.2.1",
     "dexie-react-hooks": "^4.2.0",
     "epubjs": "^0.3.93",
     "howler": "^2.2.4",
     "lru-cache": "^11.2.4",
     "next": "^15.5.9",
-    "openai": "^4.104.0",
+    "openai": "^6.16.0",
     "pdfjs-dist": "4.8.69",
     "react": "^19.2.3",
     "react-dnd": "^16.0.1",
@@ -39,15 +39,22 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.3",
-    "@playwright/test": "^1.57.0",
+    "@playwright/test": "^1.58.0",
     "@tailwindcss/typography": "^0.5.19",
     "@types/node": "^20.19.30",
-    "@types/react": "^19.2.8",
+    "@types/react": "^19.2.9",
     "@types/react-dom": "^19.2.3",
     "eslint": "^9.39.2",
     "eslint-config-next": "^15.5.9",
     "postcss": "^8.5.6",
     "tailwindcss": "^3.4.19",
     "typescript": "^5.9.3"
+  },
+  "pnpm": {
+    "overrides": {
+      "lodash": "^4.17.23",
+      "@xmldom/xmldom": "^0.9.8",
+      "@types/localforage": "npm:empty-module@0.0.2"
+    }
   }
 }
