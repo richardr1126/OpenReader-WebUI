@@ -170,7 +170,7 @@ export function PrivacyPopup({ onAccept, authEnabled = false }: PrivacyPopupProp
         </TransitionChild>
 
         <div className="fixed inset-0 overflow-y-auto">
-          <div className="flex min-h-full items-center justify-center p-4 text-center">
+          <div className="flex min-h-full items-start justify-center p-4 pt-6 text-center sm:items-center sm:pt-4">
             <TransitionChild
               as={Fragment}
               enter="ease-out duration-300"
@@ -234,16 +234,18 @@ export function showPrivacyPopup(options?: { authEnabled?: boolean }): void {
 
         const handleClose = () => {
           setShow(false);
-          setTimeout(() => {
-            root.unmount();
-            container.remove();
-          }, 300);
         };
 
-        if (!show) return null;
-
         return (
-          <Transition appear show={show} as={Fragment}>
+          <Transition
+            appear
+            show={show}
+            as={Fragment}
+            afterLeave={() => {
+              root.unmount();
+              container.remove();
+            }}
+          >
             <Dialog as="div" className="relative z-50" onClose={handleClose}>
               <TransitionChild
                 as={Fragment}
@@ -258,7 +260,7 @@ export function showPrivacyPopup(options?: { authEnabled?: boolean }): void {
               </TransitionChild>
 
               <div className="fixed inset-0 overflow-y-auto">
-                <div className="flex min-h-full items-center justify-center p-4 text-center">
+                <div className="flex min-h-full items-start justify-center p-4 pt-6 text-center sm:items-center sm:pt-4">
                   <TransitionChild
                     as={Fragment}
                     enter="ease-out duration-300"
