@@ -6,6 +6,10 @@ import { LRUCache } from 'lru-cache';
 import { createHash } from 'crypto';
 import type { TTSRequestPayload } from '@/types/client';
 import type { TTSError, TTSAudioBuffer } from '@/types/tts';
+import { headers } from 'next/headers';
+import { auth } from '@/lib/server/auth';
+import { rateLimiter, RATE_LIMITS } from '@/lib/server/rate-limiter';
+import { isAuthEnabled } from '@/lib/server/auth-config';
 
 type CustomVoice = string;
 type ExtendedSpeechParams = Omit<SpeechCreateParams, 'voice'> & {
@@ -47,7 +51,7 @@ async function fetchTTSBufferWithRetry(
   const backoff = Number(process.env.TTS_RETRY_BACKOFF ?? 2);
 
   // Retry on 429 and 5xx only; never retry aborts
-  for (;;) {
+  for (; ;) {
     try {
       const response = await openai.audio.speech.create(createParams as SpeechCreateParams, { signal });
       return await response.arrayBuffer();
@@ -98,13 +102,9 @@ function makeCacheKey(input: {
 
 export async function POST(req: NextRequest) {
   try {
-    // Get API credentials from headers or fall back to environment variables
-    const openApiKey = req.headers.get('x-openai-key') || process.env.API_KEY || 'none';
-    const openApiBaseUrl = req.headers.get('x-openai-base-url') || process.env.API_BASE;
-    const provider = req.headers.get('x-tts-provider') || 'openai';
+    // Parse body first to get text for rate limiting
     const body = (await req.json()) as TTSRequestPayload;
     const { text, voice, speed, format, model: req_model, instructions } = body;
-    console.log('Received TTS request:', { provider, req_model, voice, speed, format, hasInstructions: Boolean(instructions) });
 
     if (!text || !voice || !speed) {
       const errorBody: TTSError = {
@@ -113,6 +113,53 @@ export async function POST(req: NextRequest) {
       };
       return NextResponse.json(errorBody, { status: 400 });
     }
+
+    // Auth and rate limiting check (only when auth is enabled)
+    if (isAuthEnabled() && auth) {
+      const session = await auth.api.getSession({
+        headers: await headers()
+      });
+
+      if (!session?.user) {
+        return NextResponse.json(
+          { code: 'UNAUTHORIZED', message: 'Authentication required' },
+          { status: 401 }
+        );
+      }
+
+      const isAnonymous = !session.user.email || session.user.email === '';
+      const charCount = text.length;
+
+      // Check rate limit
+      const rateLimitResult = await rateLimiter.checkAndIncrementLimit(
+        { id: session.user.id, isAnonymous },
+        charCount
+      );
+
+      if (!rateLimitResult.allowed) {
+        return NextResponse.json(
+          {
+            code: 'RATE_LIMIT_EXCEEDED',
+            message: 'Daily character limit exceeded',
+            currentCount: rateLimitResult.currentCount,
+            limit: rateLimitResult.limit,
+            remainingChars: rateLimitResult.remainingChars,
+            resetTime: rateLimitResult.resetTime.toISOString(),
+            userType: isAnonymous ? 'anonymous' : 'authenticated',
+            upgradeHint: isAnonymous
+              ? `Sign up to increase your limit from ${(RATE_LIMITS.ANONYMOUS / 1000).toFixed(0)}K to ${(RATE_LIMITS.AUTHENTICATED / 1_000_000).toFixed(0)}M characters per day`
+              : undefined
+          },
+          { status: 429 }
+        );
+      }
+    }
+
+    // Get API credentials from headers or fall back to environment variables
+    const openApiKey = req.headers.get('x-openai-key') || process.env.API_KEY || 'none';
+    const openApiBaseUrl = req.headers.get('x-openai-base-url') || process.env.API_BASE;
+    const provider = req.headers.get('x-tts-provider') || 'openai';
+    console.log('Received TTS request:', { provider, req_model, voice, speed, format, hasInstructions: Boolean(instructions) });
     // Use default Kokoro model for Deepinfra if none specified, then fall back to a safe default
     const rawModel = provider === 'deepinfra' && !req_model ? 'hexgrad/Kokoro-82M' : req_model;
     const model: SpeechCreateParams['model'] = (rawModel ?? 'gpt-4o-mini-tts') as SpeechCreateParams['model'];
@@ -125,10 +172,10 @@ export async function POST(req: NextRequest) {
 
     const normalizedVoice = (
       !isKokoroModel(model as string) && voice.includes('+')
-      ? (voice.split('+')[0].trim())
-      : voice
+        ? (voice.split('+')[0].trim())
+        : voice
     ) as SpeechCreateParams['voice'];
-    
+
     const createParams: ExtendedSpeechParams = {
       model: model,
       voice: normalizedVoice,
@@ -214,7 +261,7 @@ export async function POST(req: NextRequest) {
           }
         });
       } finally {
-        try { req.signal.removeEventListener('abort', onAbort); } catch {}
+        try { req.signal.removeEventListener('abort', onAbort); } catch { }
       }
     }
 
@@ -248,7 +295,7 @@ export async function POST(req: NextRequest) {
     try {
       buffer = await entry.promise;
     } finally {
-      try { req.signal.removeEventListener('abort', onAbort); } catch {}
+      try { req.signal.removeEventListener('abort', onAbort); } catch { }
     }
 
     return new NextResponse(buffer, {

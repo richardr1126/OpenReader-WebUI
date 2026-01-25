@@ -5,6 +5,7 @@ import { Metadata } from "next";
 import { Footer } from "@/components/Footer";
 import { Toaster } from 'react-hot-toast';
 import { Analytics } from "@vercel/analytics/next";
+import { isAuthEnabled, getAuthBaseUrl } from '@/lib/server/auth-config';
 
 export const metadata: Metadata = {
   title: "OpenReader WebUI",
@@ -45,17 +46,23 @@ export const metadata: Metadata = {
   },
 };
 
+// Force dynamic rendering so env vars are read at runtime, not build time
+export const dynamic = 'force-dynamic';
+
 const isDev = process.env.NEXT_PUBLIC_NODE_ENV !== 'production' || process.env.NODE_ENV == null;
-//const isDev = false;
 
 export default function RootLayout({ children }: { children: ReactNode }) {
+  // Read auth config inside the component to ensure runtime evaluation
+  const authEnabled = isAuthEnabled();
+  const authBaseUrl = getAuthBaseUrl();
+
   return (
     <html lang="en">
       <head>
         <meta name="color-scheme" content="light dark" />
       </head>
       <body className="antialiased">
-        <Providers>
+        <Providers authEnabled={authEnabled} authBaseUrl={authBaseUrl}>
           <div className="app-shell min-h-screen flex flex-col bg-background">
             <main className="flex-1 flex flex-col">
               {children}

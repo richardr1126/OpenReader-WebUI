@@ -9,9 +9,18 @@ import { TTSProvider } from '@/contexts/TTSContext';
 import { ThemeProvider } from '@/contexts/ThemeContext';
 import { ConfigProvider } from '@/contexts/ConfigContext';
 import { HTMLProvider } from '@/contexts/HTMLContext';
+import { RateLimitProvider } from '@/components/rate-limit-provider';
+import { PrivacyPopup } from '@/components/privacy-popup';
+import { AuthConfigProvider } from '@/contexts/AuthConfigContext';
 
-export function Providers({ children }: { children: ReactNode }) {
-  return (
+interface ProvidersProps {
+  children: ReactNode;
+  authEnabled: boolean;
+  authBaseUrl: string | null;
+}
+
+export function Providers({ children, authEnabled, authBaseUrl }: ProvidersProps) {
+  const content = (
     <ThemeProvider>
       <ConfigProvider>
         <DocumentProvider>
@@ -20,6 +29,7 @@ export function Providers({ children }: { children: ReactNode }) {
               <EPUBProvider>
                 <HTMLProvider>
                   {children}
+                  <PrivacyPopup />
                 </HTMLProvider>
               </EPUBProvider>
             </PDFProvider>
@@ -27,5 +37,16 @@ export function Providers({ children }: { children: ReactNode }) {
         </DocumentProvider>
       </ConfigProvider>
     </ThemeProvider>
+  );
+
+  // Wrap with RateLimitProvider only when auth is enabled
+  const wrappedContent = authEnabled ? (
+    <RateLimitProvider>{content}</RateLimitProvider>
+  ) : content;
+
+  return (
+    <AuthConfigProvider authEnabled={authEnabled} baseUrl={authBaseUrl}>
+      {wrappedContent}
+    </AuthConfigProvider>
   );
 }

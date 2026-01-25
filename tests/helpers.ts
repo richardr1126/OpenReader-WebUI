@@ -45,7 +45,7 @@ export async function uploadAndDisplay(page: Page, fileName: string) {
   await uploadFile(page, fileName);
 
   const lower = fileName.toLowerCase();
-  
+
   if (lower.endsWith('.docx')) {
     await expect(page.getByText('Converting DOCX to PDF...')).toBeVisible();
     const pdfName = fileName.replace(/\.docx$/i, '.pdf');
@@ -94,7 +94,7 @@ export async function playTTSAndWaitForASecond(page: Page, fileName: string) {
 export async function pauseTTSAndVerify(page: Page) {
   // Click pause to stop playback
   await page.getByRole('button', { name: 'Pause' }).click();
-  
+
   // Check for play button to be visible
   await expect(page.getByRole('button', { name: 'Play' })).toBeVisible({ timeout: 10000 });
 }
@@ -118,6 +118,8 @@ export async function setupTest(page: Page) {
 
   // Click the "done" button to dismiss the welcome message
   await page.getByRole('button', { name: 'Save' }).click();
+
+  await page.getByRole('button', { name: 'I Understand' }).click();
 }
 
 
@@ -303,8 +305,8 @@ export async function expectMediaState(page: Page, state: 'playing' | 'paused') 
           // Consider playing if not paused AND time has advanced at least a tiny amount
           if (!audio.paused && curr > 0 && curr > last) return true;
         } else {
-            // paused target
-            if (audio.paused) return true;
+          // paused target
+          if (audio.paused) return true;
         }
       }
       return false;

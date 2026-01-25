@@ -241,7 +241,12 @@ Optionally required for different features:
    ```
    > Note: The base URL for the TTS API should be accessible and relative to the Next.js server
 
-4. Start the development server:
+4. Run SQLite creation:
+   ```bash
+   npx @better-auth/cli migrate -y
+   ```
+
+5. Start the development server:
    
    With pnpm (recommended):
    ```bash

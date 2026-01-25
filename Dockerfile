@@ -65,4 +65,9 @@ ENV LD_LIBRARY_PATH=/opt/whisper.cpp/build
 EXPOSE 3003
 
 # Start the application
+# Copy entrypoint script
+COPY docker-entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["pnpm", "start"]

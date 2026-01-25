@@ -1,6 +1,6 @@
 {
   "name": "openreader-webui",
-  "version": "v1.2.1",
+  "version": "v1.3.0",
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack -p 3003",
@@ -10,10 +10,13 @@
     "test": "playwright test"
   },
   "dependencies": {
+    "@better-auth/cli": "1.4.17",
     "@headlessui/react": "^2.2.9",
     "@types/howler": "^2.2.12",
     "@types/uuid": "^10.0.0",
     "@vercel/analytics": "^1.6.1",
+    "better-auth": "^1.4.17",
+    "better-sqlite3": "^12.6.2",
     "cmpstr": "^3.2.0",
     "compromise": "^14.14.5",
     "core-js": "^3.48.0",
@@ -25,6 +28,7 @@
     "next": "^15.5.9",
     "openai": "^6.16.0",
     "pdfjs-dist": "4.8.69",
+    "pg": "^8.17.2",
     "react": "^19.2.3",
     "react-dnd": "^16.0.1",
     "react-dnd-html5-backend": "^16.0.1",
@@ -41,7 +45,9 @@
     "@eslint/eslintrc": "^3.3.3",
     "@playwright/test": "^1.58.0",
     "@tailwindcss/typography": "^0.5.19",
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20.19.30",
+    "@types/pg": "^8.16.0",
     "@types/react": "^19.2.9",
     "@types/react-dom": "^19.2.3",
     "eslint": "^9.39.2",
@@ -51,6 +57,9 @@
     "typescript": "^5.9.3"
   },
   "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3"
+    ],
     "overrides": {
       "lodash": "^4.17.23",
       "@xmldom/xmldom": "^0.9.8",

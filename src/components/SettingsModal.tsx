@@ -19,6 +19,7 @@ import {
   TabPanels,
   TabPanel,
 } from '@headlessui/react';
+import Link from 'next/link';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useConfig } from '@/contexts/ConfigContext';
 import { ChevronUpDownIcon, CheckIcon, SettingsIcon } from '@/components/icons/Icons';
@@ -31,6 +32,10 @@ import { THEMES } from '@/contexts/ThemeContext';
 import { deleteServerDocuments } from '@/lib/client';
 import { DocumentSelectionModal } from '@/components/DocumentSelectionModal';
 import { BaseDocument } from '@/types/documents';
+import { getAuthClient } from '@/lib/auth-client';
+import { useAuthSession } from '@/hooks/useAuth';
+import { markSignedOut, clearSignedOut } from '@/lib/session-utils';
+import { useAuthConfig } from '@/contexts/AuthConfigContext';
 
 const isDev = process.env.NEXT_PUBLIC_NODE_ENV !== 'production' || process.env.NODE_ENV == null;
 
@@ -56,17 +61,17 @@ export function SettingsModal() {
   const [isImportingLibrary, setIsImportingLibrary] = useState(false);
   const [isSelectionModalOpen, setIsSelectionModalOpen] = useState(false);
   const [selectionModalProps, setSelectionModalProps] = useState<{
-      title: string;
-      confirmLabel: string;
-      mode: 'library' | 'load' | 'save';
-      defaultSelected: boolean;
-      initialFiles?: BaseDocument[];
-      fetcher?: () => Promise<BaseDocument[]>;
+    title: string;
+    confirmLabel: string;
+    mode: 'library' | 'load' | 'save';
+    defaultSelected: boolean;
+    initialFiles?: BaseDocument[];
+    fetcher?: () => Promise<BaseDocument[]>;
   }>({
-      title: '',
-      confirmLabel: '',
-      mode: 'library',
-      defaultSelected: false
+    title: '',
+    confirmLabel: '',
+    mode: 'library',
+    defaultSelected: false
   });
 
   const [showProgress, setShowProgress] = useState(false);
@@ -76,7 +81,10 @@ export function SettingsModal() {
   const selectedTheme = themes.find(t => t.id === theme) || themes[0];
   const [showClearLocalConfirm, setShowClearLocalConfirm] = useState(false);
   const [showClearServerConfirm, setShowClearServerConfirm] = useState(false);
+  const [showDeleteAccountConfirm, setShowDeleteAccountConfirm] = useState(false);
   const { progress, setProgress, estimatedTimeRemaining } = useTimeEstimation();
+  const { authEnabled, baseUrl: authBaseUrl } = useAuthConfig();
+  const { data: session } = useAuthSession();
 
   const ttsProviders = useMemo(() => [
     { id: 'custom-openai', name: 'Custom OpenAI-Like' },
@@ -171,53 +179,53 @@ export function SettingsModal() {
     const pdfs = await getAllPdfDocuments();
     const epubs = await getAllEpubDocuments();
     const htmls = await getAllHtmlDocuments();
-    
+
     const allDocs: BaseDocument[] = [
-        ...pdfs.map(d => ({ ...d, type: 'pdf' as const })),
-        ...epubs.map(d => ({ ...d, type: 'epub' as const })),
-        ...htmls.map(d => ({ ...d, type: 'html' as const }))
+      ...pdfs.map(d => ({ ...d, type: 'pdf' as const })),
+      ...epubs.map(d => ({ ...d, type: 'epub' as const })),
+      ...htmls.map(d => ({ ...d, type: 'html' as const }))
     ];
 
     setSelectionModalProps({
-        title: 'Save to Server',
-        confirmLabel: 'Save',
-        mode: 'save',
-        defaultSelected: true,
-        initialFiles: allDocs
+      title: 'Save to Server',
+      confirmLabel: 'Save',
+      mode: 'save',
+      defaultSelected: true,
+      initialFiles: allDocs
     });
     setIsSelectionModalOpen(true);
   };
 
   const handleLoad = async () => {
     setSelectionModalProps({
-        title: 'Load from Server',
-        confirmLabel: 'Load',
-        mode: 'load',
-        defaultSelected: true,
-        fetcher: async () => {
-            const res = await fetch('/api/documents?list=true');
-            if (!res.ok) throw new Error('Failed to list server documents');
-            const data = await res.json();
-            // Handle case where API might return error object
-            if (data.error) throw new Error(data.error);
-            return data.documents || [];
-        }
+      title: 'Load from Server',
+      confirmLabel: 'Load',
+      mode: 'load',
+      defaultSelected: true,
+      fetcher: async () => {
+        const res = await fetch('/api/documents?list=true');
+        if (!res.ok) throw new Error('Failed to list server documents');
+        const data = await res.json();
+        // Handle case where API might return error object
+        if (data.error) throw new Error(data.error);
+        return data.documents || [];
+      }
     });
     setIsSelectionModalOpen(true);
   };
 
   const handleImportLibrary = async () => {
     setSelectionModalProps({
-        title: 'Import from Library',
-        confirmLabel: 'Import',
-        mode: 'library',
-        defaultSelected: false,
-        fetcher: async () => {
-            const res = await fetch('/api/documents/library?limit=10000');
-            if (!res.ok) throw new Error('Failed to list library documents');
-            const data = await res.json();
-            return data.documents || [];
-        }
+      title: 'Import from Library',
+      confirmLabel: 'Import',
+      mode: 'library',
+      defaultSelected: false,
+      fetcher: async () => {
+        const res = await fetch('/api/documents/library?limit=10000');
+        if (!res.ok) throw new Error('Failed to list library documents');
+        const data = await res.json();
+        return data.documents || [];
+      }
     });
     setIsSelectionModalOpen(true);
   };
@@ -225,9 +233,9 @@ export function SettingsModal() {
   const handleModalConfirm = async (selectedFiles: BaseDocument[]) => {
     const controller = new AbortController();
     setAbortController(controller);
-    
+
     const mode = selectionModalProps.mode;
-    
+
     // Close modal? Maybe keep open until started?
     // Let's close it here, process starts.
     // Actually we keep it open if we want to show loading state INSIDE modal?
@@ -236,57 +244,57 @@ export function SettingsModal() {
     setIsSelectionModalOpen(false);
 
     try {
-        setShowProgress(true);
-        setProgress(0);
-        
-        if (mode === 'save') {
-            setIsSyncing(true);
-            setOperationType('sync');
-            setStatusMessage('Preparing documents...');
-            await syncSelectedDocumentsToServer(selectedFiles, (progress, status) => {
-                if (controller.signal.aborted) return;
-                setProgress(progress);
-                if (status) setStatusMessage(status);
-            }, controller.signal);
-        } else if (mode === 'load') {
-            setIsLoading(true);
-            setOperationType('load');
-            setStatusMessage('Downloading documents...');
-            // Need ids
-            const ids = selectedFiles.map(f => f.id);
-            await loadSelectedDocumentsFromServer(ids, (progress, status) => {
-                if (controller.signal.aborted) return;
-                setProgress(progress);
-                if (status) setStatusMessage(status);
-            }, controller.signal);
-            if (!controller.signal.aborted) setStatusMessage('Documents loaded');
-        } else if (mode === 'library') {
-            setIsImportingLibrary(true);
-            setOperationType('library');
-            setStatusMessage('Importing selected documents...');
-            await importSelectedDocuments(selectedFiles, (progress, status) => {
-                if (controller.signal.aborted) return;
-                setProgress(progress);
-                if (status) setStatusMessage(status);
-            }, controller.signal);
-        }
+      setShowProgress(true);
+      setProgress(0);
+
+      if (mode === 'save') {
+        setIsSyncing(true);
+        setOperationType('sync');
+        setStatusMessage('Preparing documents...');
+        await syncSelectedDocumentsToServer(selectedFiles, (progress, status) => {
+          if (controller.signal.aborted) return;
+          setProgress(progress);
+          if (status) setStatusMessage(status);
+        }, controller.signal);
+      } else if (mode === 'load') {
+        setIsLoading(true);
+        setOperationType('load');
+        setStatusMessage('Downloading documents...');
+        // Need ids
+        const ids = selectedFiles.map(f => f.id);
+        await loadSelectedDocumentsFromServer(ids, (progress, status) => {
+          if (controller.signal.aborted) return;
+          setProgress(progress);
+          if (status) setStatusMessage(status);
+        }, controller.signal);
+        if (!controller.signal.aborted) setStatusMessage('Documents loaded');
+      } else if (mode === 'library') {
+        setIsImportingLibrary(true);
+        setOperationType('library');
+        setStatusMessage('Importing selected documents...');
+        await importSelectedDocuments(selectedFiles, (progress, status) => {
+          if (controller.signal.aborted) return;
+          setProgress(progress);
+          if (status) setStatusMessage(status);
+        }, controller.signal);
+      }
 
     } catch (error) {
-         if (controller.signal.aborted) {
-            console.log(`${mode} operation cancelled`);
-            setStatusMessage('Operation cancelled');
-         } else {
-            console.error(`${mode} failed:`, error);
-            setStatusMessage(`${mode} failed. Please try again.`);
-         }
+      if (controller.signal.aborted) {
+        console.log(`${mode} operation cancelled`);
+        setStatusMessage('Operation cancelled');
+      } else {
+        console.error(`${mode} failed:`, error);
+        setStatusMessage(`${mode} failed. Please try again.`);
+      }
     } finally {
-        setIsSyncing(false);
-        setIsLoading(false);
-        setIsImportingLibrary(false);
-        setShowProgress(false);
-        setProgress(0);
-        setStatusMessage('');
-        setAbortController(null);
+      setIsSyncing(false);
+      setIsLoading(false);
+      setIsImportingLibrary(false);
+      setShowProgress(false);
+      setProgress(0);
+      setStatusMessage('');
+      setAbortController(null);
     }
   };
 
@@ -304,6 +312,32 @@ export function SettingsModal() {
       console.error('Delete failed:', error);
     }
     setShowClearServerConfirm(false);
+  };
+
+
+
+  const handleSignOut = async () => {
+    await markSignedOut();
+    const client = getAuthClient(authBaseUrl);
+    await client.signOut();
+    window.location.reload();
+  };
+
+  const handleDeleteAccount = async () => {
+    try {
+      const res = await fetch('/api/account/delete', { method: 'DELETE' });
+      if (!res.ok) throw new Error('Failed to delete account');
+
+      // Sign out locally
+      const client = getAuthClient(authBaseUrl);
+      await client.signOut();
+      // Clear the "signed out" flag so AuthLoader triggers auto-anon-login
+      clearSignedOut();
+      window.location.href = '/';
+    } catch (error) {
+      console.error('Failed to delete account:', error);
+    }
+    setShowDeleteAccountConfirm(false);
   };
 
   const handleInputChange = (type: 'apiKey' | 'baseUrl', value: string) => {
@@ -330,8 +364,9 @@ export function SettingsModal() {
 
   const tabs = [
     { name: 'API', icon: '🔑' },
-    { name: 'Appearance', icon: '✨' },
-    { name: 'Documents', icon: '📄' }
+    { name: 'Theme', icon: '✨' },
+    { name: 'Docs', icon: '📄' },
+    ...(authEnabled ? [{ name: 'User', icon: '👤' }] : [])
   ];
 
   return (
@@ -441,8 +476,7 @@ export function SettingsModal() {
                                   <ListboxOption
                                     key={provider.id}
                                     className={({ active }) =>
-                                      `relative cursor-pointer select-none py-1.5 pl-10 pr-4 ${
-                                        active ? 'bg-offbase text-accent' : 'text-foreground'
+                                      `relative cursor-pointer select-none py-1.5 pl-10 pr-4 ${active ? 'bg-offbase text-accent' : 'text-foreground'
                                       }`
                                     }
                                     value={provider}
@@ -516,8 +550,7 @@ export function SettingsModal() {
                                     <ListboxOption
                                       key={model.id}
                                       className={({ active }) =>
-                                        `relative cursor-pointer select-none py-1.5 pl-10 pr-4 ${
-                                          active ? 'bg-offbase text-accent' : 'text-foreground'
+                                        `relative cursor-pointer select-none py-1.5 pl-10 pr-4 ${active ? 'bg-offbase text-accent' : 'text-foreground'
                                         }`
                                       }
                                       value={model}
@@ -599,13 +632,14 @@ export function SettingsModal() {
                               setModelValue('kokoro');
                               setCustomModelInput('');
                               setLocalTTSInstructions('');
+                              setLocalTTSInstructions('');
                             }}
                           >
                             Reset
                           </Button>
                           <Button
                             type="button"
-                             className="inline-flex justify-center rounded-lg bg-accent px-3 py-1.5 text-sm 
+                            className="inline-flex justify-center rounded-lg bg-accent px-3 py-1.5 text-sm 
                                font-medium text-background hover:bg-secondary-accent focus:outline-none 
                                focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2
                                transform transition-transform duration-200 ease-in-out hover:scale-[1.04] hover:text-background"
@@ -745,6 +779,74 @@ export function SettingsModal() {
                           </div>
                         </div>
                       </TabPanel>
+
+                      {authEnabled && (
+                        <TabPanel className="space-y-4">
+                          <div className="space-y-4">
+                            <div className="rounded-lg bg-offbase p-4 space-y-3">
+                              <h4 className="font-medium text-foreground">Current Session</h4>
+                              <div className="text-sm space-y-1">
+                                <p className="text-muted">Logged in as:</p>
+                                <p className="font-medium text-foreground">{session?.user?.name || 'Guest'}</p>
+                                <p className="text-xs text-muted font-mono">{session?.user?.email}</p>
+                                {session?.user?.isAnonymous && (
+                                  <p className="text-xs text-accent mt-1">Anonymous / Guest Account</p>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="space-y-3 pt-2">
+                              {!session?.user?.isAnonymous ? (
+                                <>
+                                  <Button
+                                    onClick={handleSignOut}
+                                    className="w-full justify-center rounded-lg bg-background border border-offbase px-3 py-2 text-sm 
+                                             font-medium text-foreground hover:bg-offbase focus:outline-none 
+                                             focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2
+                                             transform transition-transform duration-200 ease-in-out hover:scale-[1.02]"
+                                  >
+                                    Sign Out
+                                  </Button>
+
+                                  <div className="pt-4 border-t border-offbase">
+                                    <h4 className="text-sm font-medium text-red-500 mb-2">Danger Zone</h4>
+                                    <Button
+                                      onClick={() => setShowDeleteAccountConfirm(true)}
+                                      className="w-full justify-center rounded-lg bg-red-500/10 border border-red-500/20 px-3 py-2 text-sm 
+                                               font-medium text-red-600 dark:text-red-400 hover:bg-red-500/20 focus:outline-none 
+                                               focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2
+                                               transform transition-transform duration-200 ease-in-out hover:scale-[1.02]"
+                                    >
+                                      Delete Account
+                                    </Button>
+                                    <p className="text-xs text-muted mt-2 text-center">
+                                      This will permanently delete your account and data. You will be returned to a fresh guest session.
+                                    </p>
+                                  </div>
+                                </>
+                              ) : (
+                                <div className="pt-2 border-t border-offbase">
+                                  <p className="text-sm text-muted mb-3">
+                                    You are using a temporary guest account. Sign up to save your progress permanently.
+                                  </p>
+                                  <div className="grid grid-cols-2 gap-3">
+                                    <Link href="/signin" className="w-full">
+                                      <Button className="w-full justify-center rounded-lg bg-background border border-offbase px-3 py-2 text-sm font-medium text-foreground hover:bg-offbase">
+                                        Log In
+                                      </Button>
+                                    </Link>
+                                    <Link href="/signup" className="w-full">
+                                      <Button className="w-full justify-center rounded-lg bg-accent px-3 py-2 text-sm font-medium text-background hover:bg-secondary-accent">
+                                        Sign Up
+                                      </Button>
+                                    </Link>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </TabPanel>
+                      )}
                     </TabPanels>
                   </TabGroup>
                 </DialogPanel>
@@ -752,7 +854,7 @@ export function SettingsModal() {
             </div>
           </div>
         </Dialog>
-      </Transition>
+      </Transition >
 
       <ConfirmDialog
         isOpen={showClearLocalConfirm}
@@ -773,8 +875,18 @@ export function SettingsModal() {
         confirmText="Delete"
         isDangerous={true}
       />
-      
-      <ProgressPopup 
+
+      <ConfirmDialog
+        isOpen={showDeleteAccountConfirm}
+        onClose={() => setShowDeleteAccountConfirm(false)}
+        onConfirm={handleDeleteAccount}
+        title="Delete Account"
+        message="Are you sure you want to delete your account? This action cannot be undone and all your data will be lost."
+        confirmText="Delete Account"
+        isDangerous={true}
+      />
+
+      <ProgressPopup
         isOpen={showProgress}
         progress={progress}
         estimatedTimeRemaining={estimatedTimeRemaining || undefined}
@@ -795,7 +907,7 @@ export function SettingsModal() {
         operationType={operationType}
         cancelText="Cancel"
       />
-      <DocumentSelectionModal 
+      <DocumentSelectionModal
         isOpen={isSelectionModalOpen}
         onClose={() => !isImportingLibrary && !isSyncing && !isLoading && setIsSelectionModalOpen(false)}
         onConfirm={handleModalConfirm}

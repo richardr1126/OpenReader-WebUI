@@ -30,6 +30,8 @@ export interface AppConfigValues {
   epubWordHighlightEnabled: boolean;
   firstVisit: boolean;
   documentListState: DocumentListState;
+  signedOut: boolean;
+  privacyAccepted: boolean;
 }
 
 export const APP_CONFIG_DEFAULTS: AppConfigValues = {
@@ -63,6 +65,8 @@ export const APP_CONFIG_DEFAULTS: AppConfigValues = {
     showHint: true,
     viewMode: 'grid',
   },
+  signedOut: false,
+  privacyAccepted: false,
 };
 
 export interface AppConfigRow extends AppConfigValues {
