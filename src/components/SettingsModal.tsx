@@ -37,6 +37,7 @@ import { useAuthSession } from '@/hooks/useAuth';
 import { markSignedOut, clearSignedOut } from '@/lib/session-utils';
 import { useAuthConfig, useAutoRateLimit } from '@/contexts/AutoRateLimitContext';
 import { useRouter } from 'next/navigation';
+import { showPrivacyPopup } from '@/components/privacy-popup';
 
 const isDev = process.env.NEXT_PUBLIC_NODE_ENV !== 'production' || process.env.NODE_ENV == null;
 
@@ -45,7 +46,7 @@ const themes = THEMES.map(id => ({
   name: id.charAt(0).toUpperCase() + id.slice(1)
 }));
 
-export function SettingsModal() {
+export function SettingsModal({ className = '' }: { className?: string }) {
   const [isOpen, setIsOpen] = useState(false);
 
   const { theme, setTheme } = useTheme();
@@ -393,11 +394,11 @@ export function SettingsModal() {
     <>
       <Button
         onClick={() => setIsOpen(true)}
-        className="rounded-full p-2 text-foreground hover:bg-offbase transform transition-transform duration-200 ease-in-out hover:scale-[1.09] hover:text-accent absolute top-2 right-2 sm:top-4 sm:right-4"
+        className={`inline-flex items-center py-1 px-2 rounded-md border border-offbase bg-base text-foreground text-xs hover:bg-offbase transition-all duration-200 ease-in-out hover:scale-[1.09] hover:text-accent ${className}`}
         aria-label="Settings"
         tabIndex={0}
       >
-        <SettingsIcon className="w-4 h-4 sm:w-5 sm:h-5 transform transition-transform duration-200 ease-in-out hover:rotate-45" />
+        <SettingsIcon className="w-4 h-4 transform transition-transform duration-200 ease-in-out hover:scale-[1.09] hover:rotate-45 hover:text-accent" />
       </Button>
 
       <Transition appear show={isOpen} as={Fragment}>
@@ -426,12 +427,21 @@ export function SettingsModal() {
                 leaveTo="opacity-0 scale-95"
               >
                 <DialogPanel className="w-full max-w-md transform rounded-2xl bg-base p-6 text-left align-middle shadow-xl transition-all">
-                  <DialogTitle
-                    as="h3"
-                    className="text-lg font-semibold leading-6 text-foreground mb-4"
-                  >
-                    Settings
-                  </DialogTitle>
+                  <div className="flex items-center justify-between gap-3 mb-4">
+                    <DialogTitle
+                      as="h3"
+                      className="text-lg font-semibold leading-6 text-foreground"
+                    >
+                      Settings
+                    </DialogTitle>
+
+                    <Button
+                      onClick={() => showPrivacyPopup({ authEnabled })}
+                      className="text-sm font-medium text-muted hover:text-accent"
+                    >
+                      Privacy
+                    </Button>
+                  </div>
 
                   <TabGroup>
                     <TabList className="flex flex-col sm:flex-col-none sm:flex-row gap-1 rounded-xl bg-background p-1 mb-4">
@@ -519,6 +529,24 @@ export function SettingsModal() {
                             </Transition>
                           </Listbox>
                         </div>
+
+                        {(localTTSProvider === 'custom-openai' || !localBaseUrl || localBaseUrl === '') && (
+                          <div className="space-y-1">
+                            <label className="block text-sm font-medium text-foreground">
+                              API Base URL
+                              {localBaseUrl && <span className="ml-2 text-xs text-accent">(Overriding env)</span>}
+                            </label>
+                            <div className="flex gap-2">
+                              <Input
+                                type="text"
+                                value={localBaseUrl}
+                                onChange={(e) => handleInputChange('baseUrl', e.target.value)}
+                                placeholder="Using environment variable"
+                                className="w-full rounded-lg bg-background py-1.5 px-3 text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                              />
+                            </div>
+                          </div>
+                        )}
 
                         <div className="space-y-1">
                           <label className="block text-sm font-medium text-foreground">
@@ -617,24 +645,6 @@ export function SettingsModal() {
                               placeholder="Enter instructions for the TTS model"
                               className="w-full h-24 rounded-lg bg-background py-1.5 px-3 text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-accent"
                             />
-                          </div>
-                        )}
-
-                        {(localTTSProvider === 'custom-openai' || !localBaseUrl || localBaseUrl === '') && (
-                          <div className="space-y-1">
-                            <label className="block text-sm font-medium text-foreground">
-                              API Base URL
-                              {localBaseUrl && <span className="ml-2 text-xs text-accent">(Overriding env)</span>}
-                            </label>
-                            <div className="flex gap-2">
-                              <Input
-                                type="text"
-                                value={localBaseUrl}
-                                onChange={(e) => handleInputChange('baseUrl', e.target.value)}
-                                placeholder="Using environment variable"
-                                className="w-full rounded-lg bg-background py-1.5 px-3 text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-accent"
-                              />
-                            </div>
                           </div>
                         )}
 
@@ -863,12 +873,12 @@ export function SettingsModal() {
                                   </p>
                                   <div className="grid grid-cols-2 gap-3">
                                     <Link href="/signin" className="w-full">
-                                      <Button className="w-full justify-center rounded-lg bg-background border border-offbase px-3 py-2 text-sm font-medium text-foreground hover:bg-offbase">
+                                      <Button className="w-full justify-center rounded-lg bg-background border border-offbase px-3 py-2 text-sm font-medium text-foreground hover:bg-offbase focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-base transform transition-transform duration-200 ease-in-out hover:scale-[1.02]">
                                         Log In
                                       </Button>
                                     </Link>
                                     <Link href="/signup" className="w-full">
-                                      <Button className="w-full justify-center rounded-lg bg-accent px-3 py-2 text-sm font-medium text-background hover:bg-secondary-accent">
+                                      <Button className="w-full justify-center rounded-lg bg-accent px-3 py-2 text-sm font-medium text-background hover:bg-secondary-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-base transform transition-transform duration-200 ease-in-out hover:scale-[1.02]">
                                         Sign Up
                                       </Button>
                                     </Link>

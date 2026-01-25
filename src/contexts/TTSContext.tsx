@@ -754,7 +754,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
    * @param {string} sentence - The sentence to generate audio for
    * @returns {Promise<TTSAudioBuffer | undefined>} The generated audio buffer
    */
-  const getAudio = useCallback(async (sentence: string): Promise<TTSAudioBuffer | undefined> => {
+  const getAudio = useCallback(async (sentence: string, preload = false): Promise<TTSAudioBuffer | undefined> => {
     const alignmentEnabledForCurrentDoc =
       (!isEPUB && pdfHighlightEnabled && pdfWordHighlightEnabled) ||
       (isEPUB && epubHighlightEnabled && epubWordHighlightEnabled);
@@ -897,7 +897,12 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
         return;
       }
 
-      setIsPlaying(false);
+      // If a preload request fails, we should not flip the global playback state.
+      // Otherwise the UI can lose the pause button while the current sentence
+      // continues playing.
+      if (!preload) {
+        setIsPlaying(false);
+      }
 
       // Handle daily quota exceeded (429 + Problem Details code)
       if (status === 429 && code === 'USER_DAILY_QUOTA_EXCEEDED') {
@@ -973,7 +978,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     // Create the audio processing promise
     const processPromise = (async () => {
       try {
-        const audioBuffer = await getAudio(sentence);
+        const audioBuffer = await getAudio(sentence, preload);
         if (!audioBuffer) {
           // If quota or other handled error returns undefined, ensure we don't throw "No audio data"
           // Just return empty string to signal graceful failure/skip

@@ -298,8 +298,22 @@ export async function extractTextFromPDF(
 
     return pageText.replace(/\s+/g, ' ').trim();
   } catch (error) {
+    // During Next.js fast refresh / route transitions, react-pdf can tear down the
+    // underlying worker and pdf.js may throw a TypeError like:
+    // "null is not an object (evaluating 'this.messageHandler.sendWithPromise')".
+    // Treat this as a cancellation so the app can ignore it.
+    if (
+      error instanceof TypeError &&
+      typeof error.message === 'string' &&
+      error.message.includes('messageHandler') &&
+      error.message.includes('sendWithPromise')
+    ) {
+      throw new DOMException('PDF worker torn down', 'AbortError');
+    }
+
     console.error('Error extracting text from PDF:', error);
-    throw new Error('Failed to extract text from PDF');
+    // Preserve the original error so callers can decide whether to retry/ignore.
+    throw error;
   }
 }
 

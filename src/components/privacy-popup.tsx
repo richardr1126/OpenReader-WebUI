@@ -11,12 +11,123 @@ import {
 } from '@headlessui/react';
 import { updateAppConfig, getAppConfig } from '@/lib/dexie';
 
+const isDev = process.env.NEXT_PUBLIC_NODE_ENV !== 'production' || process.env.NODE_ENV == null;
+
 interface PrivacyPopupProps {
   onAccept?: () => void;
+  authEnabled?: boolean;
 }
 
-export function PrivacyPopup({ onAccept }: PrivacyPopupProps) {
+function PrivacyPopupBody({
+  origin,
+  authEnabled,
+}: {
+  origin: string;
+  authEnabled: boolean;
+}) {
+  if (!isDev) {
+    return (
+      <div className="mt-4 space-y-4 text-sm text-foreground/90">
+        <div className="rounded-lg border border-offbase bg-offbase/40 p-3">
+          <div className="text-xs font-semibold uppercase tracking-wide text-muted">Service operator visibility</div>
+          <div className="mt-2">
+            This OpenReader instance is hosted at <span className="font-bold">{origin || 'this server'}</span>. The operator
+            of this service can access data that reaches the service.
+          </div>
+        </div>
+
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-wide text-muted">Stored in your browser (IndexedDB)</div>
+          <ul className="mt-2 list-disc space-y-1 pl-5">
+            <li>Uploaded documents (local library)</li>
+            <li>Reading progress (last location)</li>
+            <li>App settings (voice/speed/provider/base URL)</li>
+            <li>Privacy notice acceptance</li>
+          </ul>
+        </div>
+
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-wide text-muted">Sent to this service</div>
+          <ul className="mt-2 list-disc space-y-1 pl-5">
+            <li>Text for audio generation and associated metadata</li>
+            <li>Standard request metadata (e.g. IP address, user agent)</li>
+            <li>Text is forwarded to a TTS provider (Deepinfra) to generate audio</li>
+            <li>Some generated audio may be cached server-side to reduce cost/latency</li>
+          </ul>
+        </div>
+
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-wide text-muted">Stored on this service</div>
+          <ul className="mt-2 list-disc space-y-1 pl-5">
+            {authEnabled ? (
+              <li>Auth users data and IP rate limiting data are stored in the service database</li>
+            ) : (
+              <li>Authentication is disabled, so no user/session database is used</li>
+            )}
+          </ul>
+        </div>
+
+        <div className="text-xs text-muted">
+          This site uses Vercel Analytics to collect anonymous usage data. For maximum privacy, use self-hosted mode.
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-4 space-y-4 text-sm text-foreground/90">
+      <div className="rounded-lg border border-offbase bg-offbase/40 p-3">
+        <div className="text-xs font-semibold uppercase tracking-wide text-muted">Server owner visibility</div>
+        <div className="mt-2">
+          This OpenReader instance is hosted at <span className="font-bold">{origin || 'this server'}</span>. The operator
+          of this server can access data that reaches the server.
+        </div>
+      </div>
+
+      <div>
+        <div className="text-xs font-semibold uppercase tracking-wide text-muted">Stored in your browser (IndexedDB)</div>
+        <ul className="mt-2 list-disc space-y-1 pl-5">
+          <li>Uploaded documents (local library)</li>
+          <li>Reading progress (last location)</li>
+          <li>App settings (voice/speed/provider/base URL)</li>
+          <li>Privacy notice acceptance</li>
+        </ul>
+      </div>
+
+      <div>
+        <div className="text-xs font-semibold uppercase tracking-wide text-muted">Sent to this server</div>
+        <ul className="mt-2 list-disc space-y-1 pl-5">
+          <li>Text for audio generation and associated metadata</li>
+          <li>DOCX document upload and conversion only</li>
+          <li>Your IP address and device ID cookie used for rate limiting</li>
+          <li>(Optionally) Generated audio for word-by-word timestamps</li>
+          <li>(Optionally) Your TTS API key so the server can call your TTS provider</li>
+        </ul>
+      </div>
+
+      <div>
+        <div className="text-xs font-semibold uppercase tracking-wide text-muted">Stored on this server</div>
+        <ul className="mt-2 list-disc space-y-1 pl-5">
+          <li>Documents synced between your browser and this server</li>
+          <li>Generated audiobooks</li>
+          {authEnabled ? (
+            <li>Auth users data and IP rate limiting data are stored in the server's database</li>
+          ) : (
+            <li>Authentication is disabled on this server, so no server-side user/session database is used</li>
+          )}
+        </ul>
+      </div>
+
+      <div className="text-xs text-muted">
+        Tip: If you are behind a reverse proxy, the proxy operator may also have access to request logs.
+      </div>
+    </div>
+  );
+}
+
+export function PrivacyPopup({ onAccept, authEnabled = false }: PrivacyPopupProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const [origin, setOrigin] = useState('');
 
   const checkPrivacyAccepted = useCallback(async () => {
     const config = await getAppConfig();
@@ -28,6 +139,11 @@ export function PrivacyPopup({ onAccept }: PrivacyPopupProps) {
   useEffect(() => {
     checkPrivacyAccepted();
   }, [checkPrivacyAccepted]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    setOrigin(window.location.origin);
+  }, []);
 
   const handleAccept = async () => {
     await updateAppConfig({ privacyAccepted: true });
@@ -72,21 +188,7 @@ export function PrivacyPopup({ onAccept }: PrivacyPopupProps) {
                   Privacy & Data Usage
                 </DialogTitle>
 
-                <div className="mt-4 space-y-3 text-sm text-foreground/90">
-                  <p>Documents are uploaded to your local browser cache.</p>
-                  <p>
-                    Each paragraph of the document you are viewing is sent to Deepinfra
-                    for audio generation through a Vercel backend proxy, containing a
-                    shared caching pool.
-                  </p>
-                  <p>The audio is streamed back to your browser and played in real-time.</p>
-                  <p className="font-semibold italic">
-                    Self-hosting is the recommended way to use this app for a truly secure experience.
-                  </p>
-                  <p className="text-xs text-muted">
-                    This site uses Vercel Analytics to collect anonymous usage data to help improve the service.
-                  </p>
-                </div>
+                <PrivacyPopupBody origin={origin} authEnabled={authEnabled} />
 
                 <div className="mt-6 flex justify-end">
                   <Button
@@ -113,11 +215,14 @@ export function PrivacyPopup({ onAccept }: PrivacyPopupProps) {
  * Function to programmatically show the privacy popup
  * This can be called from signin/signup components
  */
-export function showPrivacyPopup(): void {
+export function showPrivacyPopup(options?: { authEnabled?: boolean }): void {
   // Create a temporary container for the popup
   const container = document.createElement('div');
   container.id = 'privacy-popup-container';
   document.body.appendChild(container);
+
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  const authEnabled = Boolean(options?.authEnabled);
 
   // Import React and render the popup
   import('react-dom/client').then(({ createRoot }) => {
@@ -171,21 +276,7 @@ export function showPrivacyPopup(): void {
                         Privacy & Data Usage
                       </DialogTitle>
 
-                      <div className="mt-4 space-y-3 text-sm text-foreground/90">
-                        <p>Documents are uploaded to your local browser cache.</p>
-                        <p>
-                          Each paragraph of the document you are viewing is sent to Deepinfra
-                          for audio generation through a Vercel backend proxy, containing a
-                          shared caching pool.
-                        </p>
-                        <p>The audio is streamed back to your browser and played in real-time.</p>
-                        <p className="font-semibold italic">
-                          Self-hosting is the recommended way to use this app for a truly secure experience.
-                        </p>
-                        <p className="text-xs text-muted">
-                          This site uses Vercel Analytics to collect anonymous usage data.
-                        </p>
-                      </div>
+                      <PrivacyPopupBody origin={origin} authEnabled={authEnabled} />
 
                       <div className="mt-6 flex justify-end">
                         <Button

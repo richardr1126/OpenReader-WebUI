@@ -8,9 +8,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { DocumentSkeleton } from '@/components/DocumentSkeleton';
 import { useTTS } from '@/contexts/TTSContext';
 import { DocumentSettings } from '@/components/DocumentSettings';
-import { SettingsIcon, DownloadIcon } from '@/components/icons/Icons';
+import { DocumentHeaderMenu } from '@/components/DocumentHeaderMenu';
 import { Header } from '@/components/Header';
-import { ZoomControl } from '@/components/ZoomControl';
 import { AudiobookExportModal } from '@/components/AudiobookExportModal';
 import type { TTSAudiobookChapter } from '@/types/tts';
 import type { AudiobookGenerationSettings } from '@/types/client';
@@ -19,6 +18,7 @@ import { RateLimitPauseButton } from '@/components/player/RateLimitPauseButton';
 import { resolveDocumentId } from '@/lib/dexie';
 import { RateLimitBanner } from '@/components/rate-limit-banner';
 import { useAutoRateLimit } from '@/contexts/AutoRateLimitContext';
+import { UserMenu } from '@/components/auth/UserMenu';
 
 const isDev = process.env.NEXT_PUBLIC_NODE_ENV !== 'production' || process.env.NODE_ENV == null;
 
@@ -60,7 +60,7 @@ export default function PDFViewerPage() {
         router.replace(`/pdf/${resolved}`);
         return;
       }
-      setCurrentDocument(resolved);
+      await setCurrentDocument(resolved);
     } catch (err) {
       console.error('Error loading document:', err);
       setError('Failed to load document');
@@ -149,24 +149,16 @@ export default function PDFViewerPage() {
         title={isLoading ? 'Loading…' : (currDocName || '')}
         right={
           <div className="flex items-center gap-2">
-            <ZoomControl value={zoomLevel} onIncrease={handleZoomIn} onDecrease={handleZoomOut} />
-            {isDev && (
-              <button
-                onClick={() => setIsAudiobookModalOpen(true)}
-                className="inline-flex items-center py-1 px-2 rounded-md border border-offbase bg-base text-foreground text-xs hover:bg-offbase transition-all duration-200 ease-in-out hover:scale-[1.09] hover:text-accent"
-                aria-label="Open audiobook export"
-                title="Export Audiobook"
-              >
-                <DownloadIcon className="w-4 h-4 transform transition-transform duration-200 ease-in-out hover:scale-[1.09] hover:text-accent" />
-              </button>
-            )}
-            <button
-              onClick={() => setIsSettingsOpen(true)}
-              className="inline-flex items-center py-1 px-2 rounded-md border border-offbase bg-base text-foreground text-xs hover:bg-offbase transition-all duration-200 ease-in-out hover:scale-[1.09] hover:text-accent"
-              aria-label="Open settings"
-            >
-              <SettingsIcon className="w-4 h-4 transform transition-transform duration-200 ease-in-out hover:scale-[1.09] hover:rotate-45 hover:text-accent" />
-            </button>
+            <DocumentHeaderMenu
+              zoomLevel={zoomLevel}
+              onZoomIncrease={handleZoomIn}
+              onZoomDecrease={handleZoomOut}
+              onOpenSettings={() => setIsSettingsOpen(true)}
+              onOpenAudiobook={() => setIsAudiobookModalOpen(true)}
+              isDev={isDev}
+              minZoom={50}
+              maxZoom={300}
+            />
           </div>
         }
       />

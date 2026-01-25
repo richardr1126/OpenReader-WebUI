@@ -40,6 +40,7 @@ OpenReader WebUI is an open source text to speech document reader web app built 
 > **Note:** If you have good hardware, you can run [Kokoro-FastAPI with Docker locally](#🗣️-local-kokoro-fastapi-quick-start-cpu-or-gpu) (see below).
 
 ### 1. 🐳 Start the Docker container:
+  Minimal (no persistence, auth disabled unless you set auth env vars):
   ```bash
   docker run --name openreader-webui \
     --restart unless-stopped \
@@ -47,19 +48,59 @@ OpenReader WebUI is an open source text to speech document reader web app built 
     ghcr.io/richardr1126/openreader-webui:latest
   ```
 
-  (Optionally): Set the TTS `API_BASE` URL and/or `API_KEY` to be default for all devices
+  Fully featured (persistent storage + server library import + KokoroFastAPI in Docker + optional auth):
   ```bash
   docker run --name openreader-webui \
     --restart unless-stopped \
-    -e API_KEY=none \
-    -e API_BASE=http://host.docker.internal:8880/v1 \
     -p 3003:3003 \
+    -v openreader_docstore:/app/docstore \
+    -v /path/to/your/library:/app/docstore/library:ro \
+    -e API_BASE=http://host.docker.internal:8880/v1 \
+    -e API_KEY=none \
+    -e BETTER_AUTH_URL=http://localhost:3003 \
+    -e BETTER_AUTH_SECRET=<paste_the_output_of_openssl_here> \
     ghcr.io/richardr1126/openreader-webui:latest
   ```
+
+  You can remove the `/app/docstore/library` mount if you don't need server library import.
+  You can remove both `BETTER_AUTH_*` env vars to keep auth disabled.
+
+  > **Notes:**
+  > - `API_BASE` should point to your TTS API server's base URL (if running Kokoro-FastAPI locally in Docker, use `http://host.docker.internal:8880/v1`).
+  > - `BETTER_AUTH_URL` should be your externally-facing URL for this app (for example `https://reader.example.com` or `http://localhost:3003`).
+  > - To enable auth, set **both** `BETTER_AUTH_URL` and `BETTER_AUTH_SECRET` generated with `openssl rand -base64 32`.
+  > - If you set `POSTGRES_URL`, the container will not auto-run migrations for you; run `npx @better-auth/cli migrate -y` against your Postgres database.
+
+  <details>
+  <summary><strong>Docker environment variables</strong> (Click to expand)</summary>
+
+  | Variable | Purpose | Example / Notes |
+  | --- | --- | --- |
+  | `API_BASE` | Default TTS API base URL (server-side) | `http://host.docker.internal:8880/v1` |
+  | `API_KEY` | Default TTS API key | `none` or your provider key |
+  | `BETTER_AUTH_URL` | Enables auth when set with `BETTER_AUTH_SECRET` | External URL for this app, e.g. `http://localhost:3003` or `https://reader.example.com` |
+  | `BETTER_AUTH_SECRET` | Enables auth when set with `BETTER_AUTH_URL` | Generate with `openssl rand -base64 32` |
+  | `POSTGRES_URL` | Use Postgres for auth storage instead of SQLite | If set, run migrations manually (see note above) |
+  | `GITHUB_CLIENT_ID` | Optional GitHub OAuth sign-in | Requires `GITHUB_CLIENT_SECRET` |
+  | `GITHUB_CLIENT_SECRET` | Optional GitHub OAuth sign-in | Requires `GITHUB_CLIENT_ID` |
+
+  </details>
+
+  <details>
+  <summary><strong>Docker volume mounts</strong> (Click to expand)</summary>
+
+  | Mount | Type | Recommended | Purpose | Example |
+  | --- | --- | --- | --- | --- |
+  | `/app/docstore` | Docker named volume | Yes | Persists server-side storage (documents, audiobook exports, settings, SQLite DB if used) | `-v openreader_docstore:/app/docstore` |
+  | `/app/docstore/library` | Bind mount (host folder) | Optional + `:ro` | Exposes an existing folder of documents for **Server Library Import** | `-v /path/to/your/library:/app/docstore/library:ro` |
+
+  To import from the mounted library: **Settings → Documents → Server Library Import**
+
+  > **Note:** Every file in the mounted library is imported into the client browser's storage. Keep the library reasonably sized to avoid performance issues.
+
+  </details>
 
   Visit [http://localhost:3003](http://localhost:3003) to run the app and set your settings.
-
-  > **Note:** Requesting audio from the TTS API happens on the Next.js server not the client. So the base URL for the TTS API should be accessible and relative to the Next.js server. If it is in a Docker you may need to use `host.docker.internal` to access the host machine, instead of `localhost`.
 
 ### 2. ⚙️ Configure the app settings in the UI:
   - Set the TTS Provider and Model in the Settings modal
@@ -72,60 +113,6 @@ docker stop openreader-webui && \
 docker rm openreader-webui && \
 docker pull ghcr.io/richardr1126/openreader-webui:latest
 ```
-
-### 📦 Volume mounts and Library import
-
-By default (no volume mounts), OpenReader will store its server-side files inside the container filesystem (which is lost if you remove the container).
-
-<details>
-<summary>
-
-**Persist server-side storage (`/app/docstore`)**
-
-</summary>
-
-Run the container with the volume mounted:
-```bash
-docker run --name openreader-webui \
-  --restart unless-stopped \
-  -p 3003:3003 \
-  -v openreader_docstore:/app/docstore \
-  ghcr.io/richardr1126/openreader-webui:latest
-```
-This will create a Docker named volume `openreader_docstore` to persist all server-side files, including:
-
-- **Documents:** Stored under `/app/docstore/documents_v1`
-- **Audiobook exports:** Stored under `/app/docstore/audiobooks_v1`
-  - Per-audiobook settings: `/app/docstore/audiobooks_v1/<bookId>-audiobook/audiobook.meta.json`
-  - Chapters: `0001__<title>.m4b` or `0001__<title>.mp3` (no per-chapter `.meta.json` files)
-- **Settings**
-
-This ensures that your documents, exported audiobooks, and server-side settings are retained even if the container is removed or recreated.
-
-</details>
-
-<details open>
-<summary>
-
-**Mount an external library folder (read-only recommended)**
-
-</summary>
-
-```bash
-docker run --name openreader-webui \
-  --restart unless-stopped \
-  -p 3003:3003 \
-  -v openreader_docstore:/app/docstore \
-  -v /path/to/your/library:/app/docstore/library:ro \
-  ghcr.io/richardr1126/openreader-webui:latest
-```
-Separate from the main docstore volume, this mounts an external folder into the container at `/app/docstore/library` (read-only recommended) so OpenReader can use an existing library of documents.
-
-To import from the mounted library: **Settings → Documents → Server Library Import**
-
-> **Note:** Every file in the mounted volume is imported to the client browser's storage. Please ensure that the mounted library is not too large to avoid performance issues.
-
-</details>
 
 ### 🗣️ Local Kokoro-FastAPI Quick-start (CPU or GPU)
 
@@ -239,12 +226,23 @@ Optionally required for different features:
    cp template.env .env
    # Edit .env with your configuration settings
    ```
+   Auth is recommended for contributors and is enabled when **both** values are set:
+
+   - Set `BETTER_AUTH_URL` to your local URL (default: `http://localhost:3003`)
+   - Generate a `BETTER_AUTH_SECRET` and paste it into `.env`:
+     ```bash
+     openssl rand -base64 32
+     ```
+
+   > Note: To disable auth, remove either `BETTER_AUTH_URL` or `BETTER_AUTH_SECRET`.
+   >
    > Note: The base URL for the TTS API should be accessible and relative to the Next.js server
 
-4. Run SQLite creation:
+4. Run auth DB migrations (required when auth is enabled):
    ```bash
    npx @better-auth/cli migrate -y
    ```
+  > Note: If you set `POSTGRES_URL` in `.env`, migrations will target Postgres instead of local SQLite.
 
 5. Start the development server:
    

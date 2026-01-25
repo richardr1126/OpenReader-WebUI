@@ -27,7 +27,7 @@ export function Providers({ children, authEnabled, authBaseUrl }: ProvidersProps
                 <EPUBProvider>
                   <HTMLProvider>
                     {children}
-                    <PrivacyPopup />
+                    <PrivacyPopup authEnabled={authEnabled} />
                   </HTMLProvider>
                 </EPUBProvider>
               </PDFProvider>

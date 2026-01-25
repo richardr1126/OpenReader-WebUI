@@ -8,12 +8,11 @@ import { DocumentSkeleton } from '@/components/DocumentSkeleton';
 import { HTMLViewer } from '@/components/HTMLViewer';
 import { DocumentSettings } from '@/components/DocumentSettings';
 import { RateLimitPauseButton } from '@/components/player/RateLimitPauseButton';
-import { SettingsIcon } from '@/components/icons/Icons';
 import { Header } from '@/components/Header';
 import { useTTS } from "@/contexts/TTSContext";
 import TTSPlayer from '@/components/player/TTSPlayer';
-import { ZoomControl } from '@/components/ZoomControl';
 import { resolveDocumentId } from '@/lib/dexie';
+import { DocumentHeaderMenu } from '@/components/DocumentHeaderMenu';
 import { RateLimitBanner } from '@/components/rate-limit-banner';
 import { useAutoRateLimit } from '@/contexts/AutoRateLimitContext';
 
@@ -62,7 +61,6 @@ export default function HTMLPage() {
   }, [loadDocument]);
 
   // Compute available height = viewport - (header height + tts bar height)
-            <RateLimitPauseButton />
   useEffect(() => {
     const compute = () => {
       const header = document.querySelector('[data-app-header]') as HTMLElement | null;
@@ -122,20 +120,14 @@ export default function HTMLPage() {
         title={isLoading ? 'Loading…' : (currDocName || '')}
         right={
           <div className="flex items-center gap-3">
-            <ZoomControl
-              value={padPct}
-              onIncrease={() => setPadPct(p => Math.min(p + 10, 100))} // Increase = less padding
-              onDecrease={() => setPadPct(p => Math.max(p - 10, 0))}   // Decrease = add padding
-              min={0}
-              max={100}
+            <DocumentHeaderMenu
+              zoomLevel={padPct}
+              onZoomIncrease={() => setPadPct(p => Math.min(p + 10, 100))}
+              onZoomDecrease={() => setPadPct(p => Math.max(p - 10, 0))}
+              onOpenSettings={() => setIsSettingsOpen(true)}
+              minZoom={0}
+              maxZoom={100}
             />
-            <button
-              onClick={() => setIsSettingsOpen(true)}
-              className="inline-flex items-center h-8 px-2.5 rounded-md border border-offbase bg-base text-foreground text-xs md:text-sm hover:bg-offbase transition-all duration-200 ease-in-out hover:scale-[1.09] hover:text-accent"
-              aria-label="Open settings"
-            >
-              <SettingsIcon className="w-4 h-4 transform transition-transform duration-200 ease-in-out hover:scale-[1.09] hover:rotate-45 hover:text-accent" />
-            </button>
           </div>
         }
       />
@@ -153,6 +145,7 @@ export default function HTMLPage() {
       {isAtLimit ? (
         <div className="sticky bottom-0 z-30 w-full border-t border-offbase bg-base" data-app-ttsbar>
           <div className="px-2 md:px-3 pt-1 pb-1.5 flex items-center justify-center gap-1 min-h-10">
+            <RateLimitPauseButton />
             <RateLimitBanner />
           </div>
         </div>

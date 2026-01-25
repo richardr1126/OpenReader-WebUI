@@ -49,11 +49,29 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
     clearWordHighlights,
     highlightWordIndex,
     onDocumentLoadSuccess,
+    currDocId,
     currDocData,
     currDocPages,
     currDocText,
     currDocPage,
   } = usePDF();
+
+  // IMPORTANT:
+  // - pdf.js may transfer/detach ArrayBuffers when sending them to its worker, so we must clone.
+  // - react-pdf warns if `file` changes by reference but is deep-equal to the previous value.
+  // Cache a stable `{ data: Uint8Array }` by `currDocId` so reloading the same PDF with
+  // identical bytes doesn't create a new `file` object and trigger the warning.
+  const fileCacheRef = useRef<Map<string, { data: Uint8Array }>>(new Map());
+
+  if (currDocId && currDocData && !fileCacheRef.current.has(currDocId)) {
+    try {
+      fileCacheRef.current.set(currDocId, { data: new Uint8Array(currDocData.slice(0)) });
+    } catch (e) {
+      console.error('Failed to prepare PDF data for viewer:', e);
+    }
+  }
+
+  const documentFile = currDocId ? fileCacheRef.current.get(currDocId) : undefined;
 
   const layoutKey = `${zoomLevel}:${containerWidth}:${containerHeight}:${viewType}:${currDocPage}`;
 
@@ -266,9 +284,10 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
   return (
     <div ref={containerRef} className="flex flex-col items-center overflow-auto w-full px-6 h-full">
       <Document
+        key={currDocId || 'pdf'}
         loading={<DocumentSkeleton />}
         noData={<DocumentSkeleton />}
-        file={currDocData}
+        file={documentFile}
         onLoadSuccess={(pdf) => {
           onDocumentLoadSuccess(pdf);
         }}

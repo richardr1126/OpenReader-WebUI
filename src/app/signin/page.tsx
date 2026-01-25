@@ -266,7 +266,7 @@ function SignInContent() {
           <p className="text-xs text-muted">
             By signing in, you agree to our{' '}
             <button
-              onClick={() => showPrivacyPopup()}
+              onClick={() => showPrivacyPopup({ authEnabled })}
               className="underline hover:text-foreground"
             >
               Privacy Policy

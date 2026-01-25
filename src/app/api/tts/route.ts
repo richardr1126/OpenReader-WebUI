@@ -10,6 +10,8 @@ import { headers } from 'next/headers';
 import { auth } from '@/lib/server/auth';
 import { rateLimiter, RATE_LIMITS } from '@/lib/server/rate-limiter';
 import { isAuthEnabled } from '@/lib/server/auth-config';
+import { getClientIp } from '@/lib/server/request-ip';
+import { getOrCreateDeviceId, setDeviceIdCookie } from '@/lib/server/device-id';
 
 type CustomVoice = string;
 type ExtendedSpeechParams = Omit<SpeechCreateParams, 'voice'> & {
@@ -141,6 +143,9 @@ export async function POST(req: NextRequest) {
     }
 
     // Auth and rate limiting check (only when auth is enabled)
+    let didCreateDeviceIdCookie = false;
+    let deviceIdToSet: string | null = null;
+
     if (isAuthEnabled() && auth) {
       const session = await auth.api.getSession({
         headers: await headers()
@@ -156,10 +161,21 @@ export async function POST(req: NextRequest) {
       const isAnonymous = Boolean(session.user.isAnonymous);
       const charCount = text.length;
 
+      const ip = getClientIp(req);
+      const device = isAnonymous ? getOrCreateDeviceId(req) : null;
+      if (device?.didCreate) {
+        didCreateDeviceIdCookie = true;
+        deviceIdToSet = device.deviceId;
+      }
+
       // Check rate limit
       const rateLimitResult = await rateLimiter.checkAndIncrementLimit(
         { id: session.user.id, isAnonymous },
-        charCount
+        charCount,
+        {
+          deviceId: device?.deviceId ?? null,
+          ip,
+        }
       );
 
       if (!rateLimitResult.allowed) {
@@ -186,13 +202,19 @@ export async function POST(req: NextRequest) {
           instance: req.nextUrl.pathname,
         };
 
-        return new NextResponse(JSON.stringify(problem), {
+        const response = new NextResponse(JSON.stringify(problem), {
           status: 429,
           headers: {
             'Content-Type': 'application/problem+json',
             'Retry-After': String(retryAfterSeconds),
           },
         });
+
+        if (didCreateDeviceIdCookie && deviceIdToSet) {
+          setDeviceIdCookie(response, deviceIdToSet);
+        }
+
+        return response;
       }
     }
 
@@ -254,7 +276,7 @@ export async function POST(req: NextRequest) {
     const cachedBuffer = ttsAudioCache.get(cacheKey);
     if (cachedBuffer) {
       if (ifNoneMatch && (ifNoneMatch.includes(cacheKey) || ifNoneMatch.includes(etag))) {
-        return new NextResponse(null, {
+        const response = new NextResponse(null, {
           status: 304,
           headers: {
             'ETag': etag,
@@ -262,9 +284,15 @@ export async function POST(req: NextRequest) {
             'Vary': 'x-tts-provider, x-openai-key, x-openai-base-url'
           }
         });
+
+        if (didCreateDeviceIdCookie && deviceIdToSet) {
+          setDeviceIdCookie(response, deviceIdToSet);
+        }
+
+        return response;
       }
       console.log('TTS cache HIT for key:', cacheKey.slice(0, 8));
-      return new NextResponse(cachedBuffer, {
+      const response = new NextResponse(cachedBuffer, {
         headers: {
           'Content-Type': contentType,
           'X-Cache': 'HIT',
@@ -274,6 +302,12 @@ export async function POST(req: NextRequest) {
           'Vary': 'x-tts-provider, x-openai-key, x-openai-base-url'
         }
       });
+
+      if (didCreateDeviceIdCookie && deviceIdToSet) {
+        setDeviceIdCookie(response, deviceIdToSet);
+      }
+
+      return response;
     }
 
     // De-duplicate identical in-flight requests
@@ -292,7 +326,7 @@ export async function POST(req: NextRequest) {
 
       try {
         const buffer = await existing.promise;
-        return new NextResponse(buffer, {
+        const response = new NextResponse(buffer, {
           headers: {
             'Content-Type': contentType,
             'X-Cache': 'INFLIGHT',
@@ -302,6 +336,12 @@ export async function POST(req: NextRequest) {
             'Vary': 'x-tts-provider, x-openai-key, x-openai-base-url'
           }
         });
+
+        if (didCreateDeviceIdCookie && deviceIdToSet) {
+          setDeviceIdCookie(response, deviceIdToSet);
+        }
+
+        return response;
       } finally {
         try { req.signal.removeEventListener('abort', onAbort); } catch { }
       }
@@ -340,7 +380,7 @@ export async function POST(req: NextRequest) {
       try { req.signal.removeEventListener('abort', onAbort); } catch { }
     }
 
-    return new NextResponse(buffer, {
+    const response = new NextResponse(buffer, {
       headers: {
         'Content-Type': contentType,
         'X-Cache': 'MISS',
@@ -350,6 +390,12 @@ export async function POST(req: NextRequest) {
         'Vary': 'x-tts-provider, x-openai-key, x-openai-base-url'
       }
     });
+
+    if (didCreateDeviceIdCookie && deviceIdToSet) {
+      setDeviceIdCookie(response, deviceIdToSet);
+    }
+
+    return response;
   } catch (error) {
     // Check if this was an abort error
     if (error instanceof Error && error.name === 'AbortError') {

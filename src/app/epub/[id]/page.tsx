@@ -12,14 +12,14 @@ import { Header } from '@/components/Header';
 import { useTTS } from "@/contexts/TTSContext";
 import TTSPlayer from '@/components/player/TTSPlayer';
 import { RateLimitPauseButton } from '@/components/player/RateLimitPauseButton';
-import { ZoomControl } from '@/components/ZoomControl';
+import { DocumentHeaderMenu } from '@/components/DocumentHeaderMenu';
 import { AudiobookExportModal } from '@/components/AudiobookExportModal';
-import { DownloadIcon } from '@/components/icons/Icons';
 import type { TTSAudiobookChapter } from '@/types/tts';
 import type { AudiobookGenerationSettings } from '@/types/client';
 import { resolveDocumentId } from '@/lib/dexie';
 import { RateLimitBanner } from '@/components/rate-limit-banner';
 import { useAutoRateLimit } from '@/contexts/AutoRateLimitContext';
+import { UserMenu } from '@/components/auth/UserMenu';
 
 const isDev = process.env.NEXT_PUBLIC_NODE_ENV !== 'production' || process.env.NODE_ENV == null;
 
@@ -154,30 +154,16 @@ export default function EPUBPage() {
         title={isLoading ? 'Loading…' : (currDocName || '')}
         right={
           <div className="flex items-center gap-3">
-            <ZoomControl
-              value={padPct}
-              onIncrease={() => setPadPct(p => Math.min(p + 10, 100))} // Increase = less padding
-              onDecrease={() => setPadPct(p => Math.max(p - 10, 0))}   // Decrease = add padding
-              min={0}
-              max={100}
+            <DocumentHeaderMenu
+              zoomLevel={padPct}
+              onZoomIncrease={() => setPadPct(p => Math.min(p + 10, 100))}
+              onZoomDecrease={() => setPadPct(p => Math.max(p - 10, 0))}
+              onOpenSettings={() => setIsSettingsOpen(true)}
+              onOpenAudiobook={() => setIsAudiobookModalOpen(true)}
+              isDev={isDev}
+              minZoom={0}
+              maxZoom={100}
             />
-            {isDev && (
-              <button
-                onClick={() => setIsAudiobookModalOpen(true)}
-                className="inline-flex items-center py-1 px-2 rounded-md border border-offbase bg-base text-foreground text-xs hover:bg-offbase transition-all duration-200 ease-in-out hover:scale-[1.09] hover:text-accent"
-                aria-label="Open audiobook export"
-                title="Export Audiobook"
-              >
-                <DownloadIcon className="w-4 h-4 transform transition-transform duration-200 ease-in-out hover:scale-[1.09] hover:text-accent" />
-              </button>
-            )}
-            <button
-              onClick={() => setIsSettingsOpen(true)}
-              className="inline-flex items-center py-1 px-2 rounded-md border border-offbase bg-base text-foreground text-xs hover:bg-offbase transition-all duration-200 ease-in-out hover:scale-[1.09] hover:text-accent"
-              aria-label="Open settings"
-            >
-              <SettingsIcon className="w-4 h-4 transform transition-transform duration-200 ease-in-out hover:scale-[1.09] hover:rotate-45 hover:text-accent" />
-            </button>
           </div>
         }
       />

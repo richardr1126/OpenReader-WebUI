@@ -229,7 +229,7 @@ export default function SignUpPage() {
           <p className="text-xs text-muted">
             By creating an account, you agree to our{' '}
             <button
-              onClick={() => showPrivacyPopup()}
+              onClick={() => showPrivacyPopup({ authEnabled })}
               className="underline hover:text-foreground"
             >
               Privacy Policy

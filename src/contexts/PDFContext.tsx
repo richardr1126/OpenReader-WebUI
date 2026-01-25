@@ -58,6 +58,7 @@ import type {
  */
 interface PDFContextType {
   // Current document state
+  currDocId: string | undefined;
   currDocData: ArrayBuffer | undefined;
   currDocName: string | undefined;
   currDocPages: number | undefined;
@@ -111,16 +112,16 @@ const CONTINUATION_PREVIEW_CHARS = 600;
  * @param {ReactNode} props.children - Child components to be wrapped by the provider
  */
 export function PDFProvider({ children }: { children: ReactNode }) {
-  const { 
-    setText: setTTSText, 
-    stop, 
+  const {
+    setText: setTTSText,
+    stop,
     currDocPageNumber,
-    currDocPages, 
+    currDocPages,
     setCurrDocPages,
     setIsEPUB,
     registerVisualPageChangeHandler,
   } = useTTS();
-  const { 
+  const {
     headerMargin,
     footerMargin,
     leftMargin,
@@ -136,6 +137,7 @@ export function PDFProvider({ children }: { children: ReactNode }) {
   } = useConfig();
 
   // Current document state
+  const [currDocId, setCurrDocId] = useState<string>();
   const [currDocData, setCurrDocData] = useState<ArrayBuffer>();
   const [currDocName, setCurrDocName] = useState<string>();
   const [currDocText, setCurrDocText] = useState<string>();
@@ -143,6 +145,15 @@ export function PDFProvider({ children }: { children: ReactNode }) {
   const [isAudioCombining] = useState(false);
   const pageTextCacheRef = useRef<Map<number, string>>(new Map());
   const [currDocPage, setCurrDocPage] = useState<number>(currDocPageNumber);
+
+  // Used to cancel/ignore in-flight text extraction when the document changes
+  // or when react-pdf tears down and recreates its internal worker.
+  const pdfDocGenerationRef = useRef(0);
+  const pdfDocumentRef = useRef<PDFDocumentProxy | undefined>(undefined);
+
+  useEffect(() => {
+    pdfDocumentRef.current = pdfDocument;
+  }, [pdfDocument]);
 
   useEffect(() => {
     setCurrDocPage(currDocPageNumber);
@@ -155,9 +166,11 @@ export function PDFProvider({ children }: { children: ReactNode }) {
    */
   const onDocumentLoadSuccess = useCallback((pdf: PDFDocumentProxy) => {
     console.log('Document loaded:', pdf.numPages);
+    pdfDocGenerationRef.current += 1;
+    pdfDocumentRef.current = pdf;
     setCurrDocPages(pdf.numPages);
     setPdfDocument(pdf);
-  }, [setCurrDocPages]);
+  }, [setCurrDocPages, setPdfDocument]);
 
   /**
    * Loads and processes text from the current document page
@@ -167,7 +180,9 @@ export function PDFProvider({ children }: { children: ReactNode }) {
    */
   const loadCurrDocText = useCallback(async () => {
     try {
-      if (!pdfDocument) return;
+      const generation = pdfDocGenerationRef.current;
+      const currentPdf = pdfDocumentRef.current;
+      if (!currentPdf) return;
 
       const margins = {
         header: headerMargin,
@@ -177,6 +192,11 @@ export function PDFProvider({ children }: { children: ReactNode }) {
       };
 
       const getPageText = async (pageNumber: number, shouldCache = false): Promise<string> => {
+        // Ignore stale/in-flight work if the document or worker changed.
+        if (generation !== pdfDocGenerationRef.current || pdfDocumentRef.current !== currentPdf) {
+          throw new DOMException('Stale PDF extraction', 'AbortError');
+        }
+
         if (pageTextCacheRef.current.has(pageNumber)) {
           const cached = pageTextCacheRef.current.get(pageNumber)!;
           if (!shouldCache) {
@@ -185,20 +205,29 @@ export function PDFProvider({ children }: { children: ReactNode }) {
           return cached;
         }
 
-        const extracted = await extractTextFromPDF(pdfDocument, pageNumber, margins);
+        const extracted = await extractTextFromPDF(currentPdf, pageNumber, margins);
+
+        if (generation !== pdfDocGenerationRef.current || pdfDocumentRef.current !== currentPdf) {
+          throw new DOMException('Stale PDF extraction', 'AbortError');
+        }
+
         if (shouldCache) {
           pageTextCacheRef.current.set(pageNumber, extracted);
         }
         return extracted;
       };
 
-      const totalPages = currDocPages ?? pdfDocument.numPages;
+      const totalPages = currDocPages ?? currentPdf.numPages;
       const nextPageNumber = currDocPageNumber < totalPages ? currDocPageNumber + 1 : undefined;
 
       const [text, nextText] = await Promise.all([
         getPageText(currDocPageNumber),
         nextPageNumber ? getPageText(nextPageNumber, true) : Promise.resolve<string | undefined>(undefined),
       ]);
+
+      if (generation !== pdfDocGenerationRef.current || pdfDocumentRef.current !== currentPdf) {
+        return;
+      }
 
       if (text !== currDocText || text === '') {
         setCurrDocText(text);
@@ -209,10 +238,12 @@ export function PDFProvider({ children }: { children: ReactNode }) {
         });
       }
     } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        return;
+      }
       console.error('Error loading PDF text:', error);
     }
   }, [
-    pdfDocument,
     currDocPageNumber,
     currDocPages,
     setTTSText,
@@ -228,10 +259,10 @@ export function PDFProvider({ children }: { children: ReactNode }) {
    * Triggers text extraction and processing when either the document URL or page changes
    */
   useEffect(() => {
-    if (currDocData) {
+    if (currDocData && pdfDocument) {
       loadCurrDocText();
     }
-  }, [currDocPageNumber, currDocData, loadCurrDocText]);
+  }, [currDocPageNumber, currDocData, pdfDocument, loadCurrDocText]);
 
   /**
    * Sets the current document based on its ID
@@ -242,21 +273,38 @@ export function PDFProvider({ children }: { children: ReactNode }) {
    */
   const setCurrentDocument = useCallback(async (id: string): Promise<void> => {
     try {
+      // Reset any state tied to the previously loaded PDF. This prevents calling
+      // `getPage()` on a stale/destroyed PDFDocumentProxy after login redirects
+      // or fast refresh.
+      pdfDocGenerationRef.current += 1;
+      pageTextCacheRef.current.clear();
+      setPdfDocument(undefined);
+      setCurrDocPages(undefined);
+      setCurrDocText(undefined);
+      setCurrDocId(id);
+      setCurrDocName(undefined);
+      setCurrDocData(undefined);
+
       const doc = await getPdfDocument(id);
       if (doc) {
         setCurrDocName(doc.name);
-        setCurrDocData(doc.data);
+        // IMPORTANT: keep an immutable copy. pdf.js may transfer/detach the
+        // buffer passed into the worker; we always pass clones to react-pdf.
+        setCurrDocData(doc.data.slice(0));
       }
     } catch (error) {
       console.error('Failed to get document:', error);
     }
-  }, []);
+  }, [setCurrDocId, setCurrDocName, setCurrDocData, setCurrDocPages, setCurrDocText, setPdfDocument]);
 
   /**
    * Clears the current document state
    * Resets all document-related states and stops any ongoing TTS playback
    */
   const clearCurrDoc = useCallback(() => {
+    pdfDocGenerationRef.current += 1;
+    pdfDocumentRef.current = undefined;
+    setCurrDocId(undefined);
     setCurrDocName(undefined);
     setCurrDocData(undefined);
     setCurrDocText(undefined);
@@ -264,7 +312,7 @@ export function PDFProvider({ children }: { children: ReactNode }) {
     setPdfDocument(undefined);
     pageTextCacheRef.current.clear();
     stop();
-  }, [setCurrDocPages, stop]);
+  }, [setCurrDocId, setCurrDocName, setCurrDocData, setCurrDocPages, setCurrDocText, setPdfDocument, stop]);
 
   /**
    * Creates a complete audiobook by processing all PDF pages through NLP and TTS
@@ -302,7 +350,7 @@ export function PDFProvider({ children }: { children: ReactNode }) {
       // First pass: extract and measure all text
       const textPerPage: string[] = [];
       let totalLength = 0;
-      
+
       for (let pageNum = 1; pageNum <= pdfDocument.numPages; pageNum++) {
         const rawText = await extractTextFromPDF(pdfDocument, pageNum, {
           header: headerMargin,
@@ -356,7 +404,7 @@ export function PDFProvider({ children }: { children: ReactNode }) {
         }
 
         const text = textPerPage[i];
-        
+
         // Skip pages that already exist on disk (supports non-contiguous indices)
         if (existingIndices.has(i)) {
           processedLength += text.length;
@@ -420,7 +468,7 @@ export function PDFProvider({ children }: { children: ReactNode }) {
             chapterIndex: i,
             settings
           }, signal);
-          
+
           if (!bookId) {
             bookId = chapter.bookId!;
           }
@@ -442,7 +490,7 @@ export function PDFProvider({ children }: { children: ReactNode }) {
             throw new Error('Audiobook generation cancelled');
           }
           console.error('Error processing page:', error);
-          
+
           // Notify about error
           if (onChapterComplete) {
             onChapterComplete({
@@ -618,6 +666,7 @@ export function PDFProvider({ children }: { children: ReactNode }) {
     () => ({
       onDocumentLoadSuccess,
       setCurrentDocument,
+      currDocId,
       currDocData,
       currDocName,
       currDocPages,
@@ -636,6 +685,7 @@ export function PDFProvider({ children }: { children: ReactNode }) {
     [
       onDocumentLoadSuccess,
       setCurrentDocument,
+      currDocId,
       currDocData,
       currDocName,
       currDocPages,

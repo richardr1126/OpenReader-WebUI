@@ -1,8 +1,10 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, type NextRequest } from 'next/server';
 import { auth } from '@/lib/server/auth';
 import { rateLimiter, RATE_LIMITS } from '@/lib/server/rate-limiter';
 import { headers } from 'next/headers';
 import { isAuthEnabled } from '@/lib/server/auth-config';
+import { getClientIp } from '@/lib/server/request-ip';
+import { getOrCreateDeviceId, setDeviceIdCookie } from '@/lib/server/device-id';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,7 +16,7 @@ function getUtcResetTimeIso(): string {
   return tomorrow.toISOString();
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
     // If auth is not enabled, return unlimited status
     if (!isAuthEnabled() || !auth) {
@@ -53,12 +55,21 @@ export async function GET() {
 
     const isAnonymous = Boolean(session.user.isAnonymous);
 
-    const result = await rateLimiter.getCurrentUsage({
-      id: session.user.id,
-      isAnonymous
-    });
+    const ip = getClientIp(req);
+    const device = isAnonymous ? getOrCreateDeviceId(req) : null;
 
-    return NextResponse.json({
+    const result = await rateLimiter.getCurrentUsage(
+      {
+        id: session.user.id,
+        isAnonymous,
+      },
+      {
+        deviceId: device?.deviceId ?? null,
+        ip,
+      }
+    );
+
+    const response = NextResponse.json({
       allowed: result.allowed,
       currentCount: result.currentCount,
       limit: result.limit,
@@ -67,6 +78,12 @@ export async function GET() {
       userType: isAnonymous ? 'anonymous' : 'authenticated',
       authEnabled: true
     });
+
+    if (device?.didCreate) {
+      setDeviceIdCookie(response, device.deviceId);
+    }
+
+    return response;
   } catch (error) {
     console.error('Error getting rate limit status:', error);
     return NextResponse.json(
