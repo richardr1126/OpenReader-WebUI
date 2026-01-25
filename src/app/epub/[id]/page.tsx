@@ -7,7 +7,6 @@ import { useEPUB } from '@/contexts/EPUBContext';
 import { DocumentSkeleton } from '@/components/DocumentSkeleton';
 import { EPUBViewer } from '@/components/EPUBViewer';
 import { DocumentSettings } from '@/components/DocumentSettings';
-import { SettingsIcon } from '@/components/icons/Icons';
 import { Header } from '@/components/Header';
 import { useTTS } from "@/contexts/TTSContext";
 import TTSPlayer from '@/components/player/TTSPlayer';
@@ -19,7 +18,6 @@ import type { AudiobookGenerationSettings } from '@/types/client';
 import { resolveDocumentId } from '@/lib/dexie';
 import { RateLimitBanner } from '@/components/rate-limit-banner';
 import { useAutoRateLimit } from '@/contexts/AutoRateLimitContext';
-import { UserMenu } from '@/components/auth/UserMenu';
 
 const isDev = process.env.NEXT_PUBLIC_NODE_ENV !== 'production' || process.env.NODE_ENV == null;
 

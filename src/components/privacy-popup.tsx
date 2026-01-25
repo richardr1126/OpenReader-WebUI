@@ -111,7 +111,7 @@ function PrivacyPopupBody({
           <li>Documents synced between your browser and this server</li>
           <li>Generated audiobooks</li>
           {authEnabled ? (
-            <li>Auth users data and IP rate limiting data are stored in the server's database</li>
+            <li>Auth users data and IP rate limiting data are stored in the server&apos;s database</li>
           ) : (
             <li>Authentication is disabled on this server, so no server-side user/session database is used</li>
           )}

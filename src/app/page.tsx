@@ -5,8 +5,6 @@ import { UserMenu } from '@/components/auth/UserMenu';
 import { AuthLoader } from '@/components/auth/AuthLoader';
 import { RateLimitBanner } from '@/components/rate-limit-banner';
 
-const isDev = process.env.NEXT_PUBLIC_NODE_ENV !== 'production' || process.env.NODE_ENV == null;
-
 export default function Home() {
   return (
     <div className="flex flex-col h-full w-full">

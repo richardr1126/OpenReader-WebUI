@@ -18,7 +18,6 @@ import { RateLimitPauseButton } from '@/components/player/RateLimitPauseButton';
 import { resolveDocumentId } from '@/lib/dexie';
 import { RateLimitBanner } from '@/components/rate-limit-banner';
 import { useAutoRateLimit } from '@/contexts/AutoRateLimitContext';
-import { UserMenu } from '@/components/auth/UserMenu';
 
 const isDev = process.env.NEXT_PUBLIC_NODE_ENV !== 'production' || process.env.NODE_ENV == null;
 

@@ -34,7 +34,7 @@ import { DocumentSelectionModal } from '@/components/DocumentSelectionModal';
 import { BaseDocument } from '@/types/documents';
 import { getAuthClient } from '@/lib/auth-client';
 import { useAuthSession } from '@/hooks/useAuth';
-import { markSignedOut, clearSignedOut } from '@/lib/session-utils';
+import { clearSignedOut } from '@/lib/session-utils';
 import { useAuthConfig, useAutoRateLimit } from '@/contexts/AutoRateLimitContext';
 import { useRouter } from 'next/navigation';
 import { showPrivacyPopup } from '@/components/privacy-popup';
