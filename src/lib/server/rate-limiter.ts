@@ -3,32 +3,44 @@ import { isAuthEnabled } from '@/lib/server/auth-config';
 
 // Rate limits configuration - character counts per day
 export const RATE_LIMITS = {
-  ANONYMOUS: 250_000,    // 250K characters per day for anonymous users
-  AUTHENTICATED: 1_000_000 // 1M characters per day for authenticated users
+  ANONYMOUS: 50_000,    // 50K characters per day for anonymous users
+  AUTHENTICATED: 500_000 // 500K characters per day for authenticated users
 } as const;
 
-// Initialize rate limiting table
-export async function initializeRateLimitTable() {
-  // Use transaction to ensure safe initialization
-  await db.transaction(async (client) => {
-    // Check if table exists first to avoid errors on some DBs
-    // Simple create table if not exists
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS user_tts_chars (
-        user_id VARCHAR(255) NOT NULL,
-        date DATE NOT NULL,
-        char_count BIGINT DEFAULT 0,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY (user_id, date)
-      )
-    `);
+// Singleton flag to ensure we only initialize the table once per process
+let tableInitialized: Promise<void> | null = null;
 
-    // Create index for faster queries
-    await client.query(`
-      CREATE INDEX IF NOT EXISTS idx_user_tts_chars_date ON user_tts_chars(date)
-    `);
-  });
+// Initialize rate limiting table (cached, runs only once per process)
+export async function initializeRateLimitTable() {
+  if (tableInitialized) {
+    return tableInitialized;
+  }
+
+  tableInitialized = (async () => {
+    // Use transaction to ensure safe initialization
+    await db.transaction(async (client) => {
+      // Check if table exists first to avoid errors on some DBs
+      // Simple create table if not exists
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS user_tts_chars (
+          user_id VARCHAR(255) NOT NULL,
+          date DATE NOT NULL,
+          char_count BIGINT DEFAULT 0,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (user_id, date)
+        )
+      `);
+
+      // Create index for faster queries
+      await client.query(`
+        CREATE INDEX IF NOT EXISTS idx_user_tts_chars_date ON user_tts_chars(date)
+      `);
+    });
+    console.log('Rate limit table initialized');
+  })();
+
+  return tableInitialized;
 }
 
 export interface RateLimitResult {
@@ -62,9 +74,9 @@ export class RateLimiter {
       return {
         allowed: true,
         currentCount: 0,
-        limit: Infinity,
+        limit: Number.MAX_SAFE_INTEGER,
         resetTime: this.getResetTime(),
-        remainingChars: Infinity
+        remainingChars: Number.MAX_SAFE_INTEGER
       };
     }
 
@@ -87,16 +99,24 @@ export class RateLimiter {
         DO UPDATE SET updated_at = CURRENT_TIMESTAMP
       `, [user.id, today]);
 
-      // Get current count
+      // Allow the request that crosses the limit, but block any requests once the user is
+      // already at/over the limit. Do this atomically to avoid concurrent over-limit requests.
+      const updateResult = await client.query(`
+        UPDATE user_tts_chars
+        SET char_count = char_count + $3, updated_at = CURRENT_TIMESTAMP
+        WHERE user_id = $1 AND date = $2 AND char_count < $4
+      `, [user.id, today, charCount, limit]);
+
+      // Get current count after the attempted update (works for both success and failure)
       const result = await client.query(`
-        SELECT char_count FROM user_tts_chars 
+        SELECT char_count FROM user_tts_chars
         WHERE user_id = $1 AND date = $2
       `, [user.id, today]);
 
       const currentCount = parseInt(((result.rows[0] as unknown) as DBCharCountRow)?.char_count?.toString() || '0', 10);
+      const updated = (updateResult.rowCount ?? 0) > 0;
 
-      // Check if adding these chars would exceed the limit
-      if (currentCount + charCount > limit) {
+      if (!updated) {
         return {
           allowed: false,
           currentCount,
@@ -106,21 +126,12 @@ export class RateLimiter {
         };
       }
 
-      // Increment the count
-      await client.query(`
-        UPDATE user_tts_chars 
-        SET char_count = char_count + $3, updated_at = CURRENT_TIMESTAMP
-        WHERE user_id = $1 AND date = $2
-      `, [user.id, today, charCount]);
-
-      const newCount = currentCount + charCount;
-
       return {
         allowed: true,
-        currentCount: newCount,
+        currentCount,
         limit,
         resetTime: this.getResetTime(),
-        remainingChars: Math.max(0, limit - newCount)
+        remainingChars: Math.max(0, limit - currentCount)
       };
     });
   }
@@ -134,9 +145,9 @@ export class RateLimiter {
       return {
         allowed: true,
         currentCount: 0,
-        limit: Infinity,
+        limit: Number.MAX_SAFE_INTEGER,
         resetTime: this.getResetTime(),
-        remainingChars: Infinity
+        remainingChars: Number.MAX_SAFE_INTEGER
       };
     }
 
@@ -219,9 +230,10 @@ export class RateLimiter {
   }
 
   private getResetTime(): Date {
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    tomorrow.setHours(0, 0, 0, 0); // Start of next day
+    const now = new Date();
+    const tomorrow = new Date(now);
+    tomorrow.setUTCDate(now.getUTCDate() + 1);
+    tomorrow.setUTCHours(0, 0, 0, 0); // Start of next day in UTC
     return tomorrow;
   }
 }

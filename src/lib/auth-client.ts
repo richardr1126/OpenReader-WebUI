@@ -12,24 +12,22 @@ function createAuthClientWithUrl(baseUrl: string) {
 // Cache for auth client instances by baseUrl
 const clientCache = new Map<string, ReturnType<typeof createAuthClientWithUrl>>();
 
+/**
+ * Factory function to get auth client with specific baseUrl.
+ * In most cases, you should use the useAuth() hook instead of calling this directly.
+ * @param baseUrl - The auth server base URL. If null, will throw an error.
+ */
 export function getAuthClient(baseUrl: string | null) {
-  const effectiveUrl = baseUrl || "http://localhost:3003";
-
-  if (!clientCache.has(effectiveUrl)) {
-    clientCache.set(effectiveUrl, createAuthClientWithUrl(effectiveUrl));
+  if (!baseUrl) {
+    throw new Error(
+      'Cannot create auth client without baseUrl. ' +
+      'Use the useAuth() hook in components to get the properly configured client.'
+    );
   }
 
-  return clientCache.get(effectiveUrl)!;
+  if (!clientCache.has(baseUrl)) {
+    clientCache.set(baseUrl, createAuthClientWithUrl(baseUrl));
+  }
+
+  return clientCache.get(baseUrl)!;
 }
-
-// Default client for backwards compatibility (will use localhost in dev)
-// Components should prefer useAuth() hook which gets baseUrl from context
-export const authClient = getAuthClient(null);
-
-export const {
-  signIn,
-  signUp,
-  signOut,
-  useSession,
-  getSession
-} = authClient;

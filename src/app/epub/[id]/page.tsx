@@ -11,12 +11,15 @@ import { SettingsIcon } from '@/components/icons/Icons';
 import { Header } from '@/components/Header';
 import { useTTS } from "@/contexts/TTSContext";
 import TTSPlayer from '@/components/player/TTSPlayer';
+import { RateLimitPauseButton } from '@/components/player/RateLimitPauseButton';
 import { ZoomControl } from '@/components/ZoomControl';
 import { AudiobookExportModal } from '@/components/AudiobookExportModal';
 import { DownloadIcon } from '@/components/icons/Icons';
 import type { TTSAudiobookChapter } from '@/types/tts';
 import type { AudiobookGenerationSettings } from '@/types/client';
 import { resolveDocumentId } from '@/lib/dexie';
+import { RateLimitBanner } from '@/components/rate-limit-banner';
+import { useAutoRateLimit } from '@/contexts/AutoRateLimitContext';
 
 const isDev = process.env.NEXT_PUBLIC_NODE_ENV !== 'production' || process.env.NODE_ENV == null;
 
@@ -25,6 +28,7 @@ export default function EPUBPage() {
   const router = useRouter();
   const { setCurrentDocument, currDocName, clearCurrDoc, createFullAudioBook: createEPUBAudioBook, regenerateChapter: regenerateEPUBChapter } = useEPUB();
   const { stop } = useTTS();
+  const { isAtLimit } = useAutoRateLimit();
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -178,12 +182,13 @@ export default function EPUBPage() {
         }
       />
       <div className="overflow-hidden" style={{ height: containerHeight }}>
+
         {isLoading ? (
           <div className="p-4">
             <DocumentSkeleton />
           </div>
         ) : (
-          <div className="h-full w-full" style={{ paddingLeft: `${Math.round(maxPadPx * ((100 - padPct)/100))}px`, paddingRight: `${Math.round(maxPadPx * ((100 - padPct)/100))}px` }}>
+          <div className="h-full w-full" style={{ paddingLeft: `${Math.round(maxPadPx * ((100 - padPct) / 100))}px`, paddingRight: `${Math.round(maxPadPx * ((100 - padPct) / 100))}px` }}>
             <EPUBViewer className="h-full" />
           </div>
         )}
@@ -198,7 +203,16 @@ export default function EPUBPage() {
           onRegenerateChapter={handleRegenerateChapter}
         />
       )}
-      <TTSPlayer />
+      {isAtLimit ? (
+        <div className="sticky bottom-0 z-30 w-full border-t border-offbase bg-base" data-app-ttsbar>
+          <div className="px-2 md:px-3 pt-1 pb-1.5 flex items-center justify-center gap-1 min-h-10">
+            <RateLimitPauseButton />
+            <RateLimitBanner />
+          </div>
+        </div>
+      ) : (
+        <TTSPlayer />
+      )}
       <DocumentSettings epub isOpen={isSettingsOpen} setIsOpen={setIsSettingsOpen} />
     </>
   );

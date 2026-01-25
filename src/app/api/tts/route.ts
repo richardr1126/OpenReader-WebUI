@@ -35,6 +35,21 @@ type InflightEntry = {
 
 const inflightRequests = new Map<string, InflightEntry>();
 
+const PROBLEM_TYPES = {
+  dailyQuotaExceeded: 'https://openreader.app/problems/daily-quota-exceeded',
+  upstreamRateLimited: 'https://openreader.app/problems/upstream-rate-limited',
+} as const;
+
+type ProblemDetails = {
+  type: string;
+  title: string;
+  status: number;
+  detail?: string;
+  instance?: string;
+  code?: string;
+  [key: string]: unknown;
+};
+
 function sleep(ms: number) {
   return new Promise((res) => setTimeout(res, ms));
 }
@@ -100,7 +115,18 @@ function makeCacheKey(input: {
   return createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
 }
 
+function formatLimitForHint(limit: number): string {
+  if (!Number.isFinite(limit) || limit <= 0) return String(limit);
+  if (limit >= 1_000_000) {
+    const m = limit / 1_000_000;
+    return `${m % 1 === 0 ? m.toFixed(0) : m.toFixed(1)}M`;
+  }
+  if (limit >= 1_000) return `${Math.round(limit / 1_000)}K`;
+  return String(limit);
+}
+
 export async function POST(req: NextRequest) {
+  let providerForError: string | null = null;
   try {
     // Parse body first to get text for rate limiting
     const body = (await req.json()) as TTSRequestPayload;
@@ -127,7 +153,7 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      const isAnonymous = !session.user.email || session.user.email === '';
+      const isAnonymous = Boolean(session.user.isAnonymous);
       const charCount = text.length;
 
       // Check rate limit
@@ -137,21 +163,36 @@ export async function POST(req: NextRequest) {
       );
 
       if (!rateLimitResult.allowed) {
-        return NextResponse.json(
-          {
-            code: 'RATE_LIMIT_EXCEEDED',
-            message: 'Daily character limit exceeded',
-            currentCount: rateLimitResult.currentCount,
-            limit: rateLimitResult.limit,
-            remainingChars: rateLimitResult.remainingChars,
-            resetTime: rateLimitResult.resetTime.toISOString(),
-            userType: isAnonymous ? 'anonymous' : 'authenticated',
-            upgradeHint: isAnonymous
-              ? `Sign up to increase your limit from ${(RATE_LIMITS.ANONYMOUS / 1000).toFixed(0)}K to ${(RATE_LIMITS.AUTHENTICATED / 1_000_000).toFixed(0)}M characters per day`
-              : undefined
-          },
-          { status: 429 }
+        const resetTime = rateLimitResult.resetTime.toISOString();
+        const retryAfterSeconds = Math.max(
+          0,
+          Math.ceil((rateLimitResult.resetTime.getTime() - Date.now()) / 1000)
         );
+
+        const problem: ProblemDetails = {
+          type: PROBLEM_TYPES.dailyQuotaExceeded,
+          title: 'Daily quota exceeded',
+          status: 429,
+          detail: 'Daily character limit exceeded',
+          code: 'USER_DAILY_QUOTA_EXCEEDED',
+          currentCount: rateLimitResult.currentCount,
+          limit: rateLimitResult.limit,
+          remainingChars: rateLimitResult.remainingChars,
+          resetTime,
+          userType: isAnonymous ? 'anonymous' : 'authenticated',
+          upgradeHint: isAnonymous
+            ? `Sign up to increase your limit from ${formatLimitForHint(RATE_LIMITS.ANONYMOUS)} to ${formatLimitForHint(RATE_LIMITS.AUTHENTICATED)} characters per day`
+            : undefined,
+          instance: req.nextUrl.pathname,
+        };
+
+        return new NextResponse(JSON.stringify(problem), {
+          status: 429,
+          headers: {
+            'Content-Type': 'application/problem+json',
+            'Retry-After': String(retryAfterSeconds),
+          },
+        });
       }
     }
 
@@ -159,6 +200,7 @@ export async function POST(req: NextRequest) {
     const openApiKey = req.headers.get('x-openai-key') || process.env.API_KEY || 'none';
     const openApiBaseUrl = req.headers.get('x-openai-base-url') || process.env.API_BASE;
     const provider = req.headers.get('x-tts-provider') || 'openai';
+    providerForError = provider;
     console.log('Received TTS request:', { provider, req_model, voice, speed, format, hasInstructions: Boolean(instructions) });
     // Use default Kokoro model for Deepinfra if none specified, then fall back to a safe default
     const rawModel = provider === 'deepinfra' && !req_model ? 'hexgrad/Kokoro-82M' : req_model;
@@ -313,6 +355,35 @@ export async function POST(req: NextRequest) {
     if (error instanceof Error && error.name === 'AbortError') {
       console.log('TTS request aborted by client');
       return new NextResponse(null, { status: 499 }); // Use 499 status for client closed request
+    }
+
+    const upstreamStatus = (() => {
+      if (typeof error === 'object' && error !== null) {
+        const rec = error as Record<string, unknown>;
+        if (typeof rec.status === 'number') return rec.status as number;
+        if (typeof rec.statusCode === 'number') return rec.statusCode as number;
+      }
+      return undefined;
+    })();
+
+    if (upstreamStatus === 429) {
+      const problem: ProblemDetails = {
+        type: PROBLEM_TYPES.upstreamRateLimited,
+        title: 'Upstream rate limited',
+        status: 429,
+        detail: 'The TTS provider is rate limiting requests. Please try again shortly.',
+        code: 'UPSTREAM_RATE_LIMIT',
+        provider: providerForError ?? undefined,
+        upstreamStatus,
+        instance: req.nextUrl.pathname,
+      };
+
+      return new NextResponse(JSON.stringify(problem), {
+        status: 429,
+        headers: {
+          'Content-Type': 'application/problem+json',
+        },
+      });
     }
 
     console.warn('Error generating TTS:', error);

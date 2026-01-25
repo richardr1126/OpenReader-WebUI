@@ -1,7 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
-import { useAuthConfig } from '@/contexts/AuthConfigContext';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from 'react';
 
 export interface RateLimitStatus {
   allowed: boolean;
@@ -13,7 +12,12 @@ export interface RateLimitStatus {
   authEnabled: boolean;
 }
 
-export interface RateLimitContextType {
+interface AutoRateLimitContextType {
+  // Auth Config
+  authEnabled: boolean;
+  authBaseUrl: string | null;
+
+  // Rate Limit
   status: RateLimitStatus | null;
   loading: boolean;
   error: string | null;
@@ -23,20 +27,27 @@ export interface RateLimitContextType {
   incrementCount: (charCount: number) => void;
   onTTSStart: () => void;
   onTTSComplete: () => void;
+  triggerRateLimit: () => void;
 }
 
-const RateLimitContext = createContext<RateLimitContextType | null>(null);
+const AutoRateLimitContext = createContext<AutoRateLimitContextType | null>(null);
 
-export function useRateLimit(): RateLimitContextType {
-  const context = useContext(RateLimitContext);
+export function useAutoRateLimit(): AutoRateLimitContextType {
+  const context = useContext(AutoRateLimitContext);
   if (!context) {
-    throw new Error('useRateLimit must be used within a RateLimitProvider');
+    throw new Error('useAutoRateLimit must be used within a AutoRateLimitProvider');
   }
   return context;
 }
 
-interface RateLimitProviderProps {
-  children: React.ReactNode;
+// Re-export specific hooks for backward compatibility or convenience if needed
+export function useAuthConfig() {
+  const { authEnabled, authBaseUrl } = useAutoRateLimit();
+  return { authEnabled, baseUrl: authBaseUrl };
+}
+
+export function useRateLimit() {
+  return useAutoRateLimit();
 }
 
 function calculateTimeUntilReset(resetTime: Date): string {
@@ -57,22 +68,30 @@ function calculateTimeUntilReset(resetTime: Date): string {
   }
 }
 
-function formatCharCount(count: number): string {
+export function formatCharCount(count: number): string {
   if (count >= 1_000_000) {
-    return `${(count / 1_000_000).toFixed(1)}M`;
+    const m = count / 1_000_000;
+    // Show up to 1 decimal place, stripping trailing zeros (1.0 -> 1)
+    return `${parseFloat(m.toFixed(1))}M`;
   } else if (count >= 1_000) {
-    return `${(count / 1_000).toFixed(0)}K`;
+    const k = Math.round(count / 1_000);
+    // Handle edge case where rounding up reaches 1M (e.g., 999,999 -> 1000K -> 1M)
+    if (k >= 1_000) return '1M';
+    return `${k}K`;
   }
   return count.toString();
 }
 
-export { formatCharCount };
+interface AutoRateLimitProviderProps {
+  children: ReactNode;
+  authEnabled: boolean;
+  authBaseUrl: string | null;
+}
 
-export function RateLimitProvider({ children }: RateLimitProviderProps) {
+export function AutoRateLimitProvider({ children, authEnabled, authBaseUrl }: AutoRateLimitProviderProps) {
   const [status, setStatus] = useState<RateLimitStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const { authEnabled } = useAuthConfig();
 
   // Track pending TTS operations to delay count updates
   const pendingTTSRef = useRef<number>(0);
@@ -81,15 +100,17 @@ export function RateLimitProvider({ children }: RateLimitProviderProps) {
   const fetchStatus = useCallback(async () => {
     // Skip if auth is not enabled
     if (!authEnabled) {
-      const tomorrow = new Date();
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      tomorrow.setHours(0, 0, 0, 0);
+      const now = new Date();
+      const tomorrow = new Date(now);
+      tomorrow.setUTCDate(now.getUTCDate() + 1);
+      tomorrow.setUTCHours(0, 0, 0, 0);
 
       setStatus({
         allowed: true,
         currentCount: 0,
-        limit: Infinity,
-        remainingChars: Infinity,
+        // Avoid Infinity to prevent JSON/serialization edge cases elsewhere.
+        limit: Number.MAX_SAFE_INTEGER,
+        remainingChars: Number.MAX_SAFE_INTEGER,
         resetTime: tomorrow,
         userType: 'unauthenticated',
         authEnabled: false
@@ -128,7 +149,9 @@ export function RateLimitProvider({ children }: RateLimitProviderProps) {
 
   // Calculate time until reset
   const timeUntilReset = status ? calculateTimeUntilReset(status.resetTime) : '';
-  const isAtLimit = status ? status.remainingChars <= 0 : false;
+  // Only treat the user as "at limit" when they are truly out of characters.
+  // The server allows the final request that may cross the limit, then blocks subsequent ones.
+  const isAtLimit = status ? (status.remainingChars <= 0 || !status.allowed) : false;
 
   // Increment count locally (for immediate UI feedback)
   const incrementCount = useCallback((charCount: number) => {
@@ -186,7 +209,9 @@ export function RateLimitProvider({ children }: RateLimitProviderProps) {
     };
   }, []);
 
-  const contextValue: RateLimitContextType = {
+  const contextValue: AutoRateLimitContextType = {
+    authEnabled,
+    authBaseUrl,
     status,
     loading,
     error,
@@ -195,12 +220,13 @@ export function RateLimitProvider({ children }: RateLimitProviderProps) {
     timeUntilReset,
     incrementCount,
     onTTSStart,
-    onTTSComplete
+    onTTSComplete,
+    triggerRateLimit: () => setStatus(prev => prev ? { ...prev, remainingChars: 0, allowed: false } : null)
   };
 
   return (
-    <RateLimitContext.Provider value={contextValue}>
+    <AutoRateLimitContext.Provider value={contextValue}>
       {children}
-    </RateLimitContext.Provider>
+    </AutoRateLimitContext.Provider>
   );
 }

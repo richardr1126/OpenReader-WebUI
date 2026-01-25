@@ -2,23 +2,26 @@
 
 import { Button } from '@headlessui/react';
 import Link from 'next/link';
-import { useAuthConfig } from '@/contexts/AuthConfigContext';
+import { useAuthConfig, useAutoRateLimit } from '@/contexts/AutoRateLimitContext';
 import { useAuthSession } from '@/hooks/useAuth';
 import { getAuthClient } from '@/lib/auth-client';
-import { markSignedOut } from '@/lib/session-utils';
+import { clearSignedOut } from '@/lib/session-utils';
 import { useRouter } from 'next/navigation';
 
 export function UserMenu() {
   const { authEnabled, baseUrl } = useAuthConfig();
+  const { refresh: refreshRateLimit } = useAutoRateLimit();
   const { data: session, isPending } = useAuthSession();
   const router = useRouter();
 
   if (!authEnabled || isPending) return null;
 
   const handleSignOut = async () => {
-    await markSignedOut();
     const client = getAuthClient(baseUrl);
     await client.signOut();
+    await clearSignedOut();
+    await client.signIn.anonymous();
+    await refreshRateLimit();
     router.refresh();
   };
 
@@ -43,7 +46,7 @@ export function UserMenu() {
     <div className="absolute top-2 right-14 sm:top-4 sm:right-16 flex items-center gap-3">
       <div className="hidden sm:flex flex-col items-end">
         <span className="text-xs font-medium text-foreground">
-          {session.user.name || 'Guest'}
+          {session.user.name || session.user.email || 'Account'}
         </span>
         <span className="text-[10px] text-muted truncate max-w-[120px]">
           {session.user.email}

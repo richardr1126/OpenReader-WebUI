@@ -15,14 +15,17 @@ import { AudiobookExportModal } from '@/components/AudiobookExportModal';
 import type { TTSAudiobookChapter } from '@/types/tts';
 import type { AudiobookGenerationSettings } from '@/types/client';
 import TTSPlayer from '@/components/player/TTSPlayer';
+import { RateLimitPauseButton } from '@/components/player/RateLimitPauseButton';
 import { resolveDocumentId } from '@/lib/dexie';
+import { RateLimitBanner } from '@/components/rate-limit-banner';
+import { useAutoRateLimit } from '@/contexts/AutoRateLimitContext';
 
 const isDev = process.env.NEXT_PUBLIC_NODE_ENV !== 'production' || process.env.NODE_ENV == null;
 
 // Dynamic import for client-side rendering only
 const PDFViewer = dynamic(
   () => import('@/components/PDFViewer').then((module) => module.PDFViewer),
-  { 
+  {
     ssr: false,
     loading: () => <DocumentSkeleton />
   }
@@ -33,6 +36,7 @@ export default function PDFViewerPage() {
   const router = useRouter();
   const { setCurrentDocument, currDocName, clearCurrDoc, currDocPage, currDocPages, createFullAudioBook: createPDFAudioBook, regenerateChapter: regeneratePDFChapter } = usePDF();
   const { stop } = useTTS();
+  const { isAtLimit } = useAutoRateLimit();
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [zoomLevel, setZoomLevel] = useState<number>(100);
@@ -114,7 +118,7 @@ export default function PDFViewerPage() {
         <p className="text-red-500 mb-4">{error}</p>
         <Link
           href="/"
-          onClick={() => {clearCurrDoc();}}
+          onClick={() => { clearCurrDoc(); }}
           className="inline-flex items-center px-3 py-1 bg-base text-foreground rounded-lg hover:bg-offbase transition-all duration-200 ease-in-out hover:scale-[1.04] hover:text-accent"
         >
           <svg className="w-4 h-4 mr-2 text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -167,6 +171,7 @@ export default function PDFViewerPage() {
         }
       />
       <div className="overflow-hidden" style={{ height: containerHeight }}>
+
         {isLoading ? (
           <div className="p-4">
             <DocumentSkeleton />
@@ -185,7 +190,16 @@ export default function PDFViewerPage() {
           onRegenerateChapter={handleRegenerateChapter}
         />
       )}
-      <TTSPlayer currentPage={currDocPage} numPages={currDocPages} />
+      {isAtLimit ? (
+        <div className="sticky bottom-0 z-30 w-full border-t border-offbase bg-base" data-app-ttsbar>
+          <div className="px-2 md:px-3 pt-1 pb-1.5 flex items-center justify-center gap-1 min-h-10">
+            <RateLimitPauseButton />
+            <RateLimitBanner />
+          </div>
+        </div>
+      ) : (
+        <TTSPlayer currentPage={currDocPage} numPages={currDocPages} />
+      )}
       <DocumentSettings isOpen={isSettingsOpen} setIsOpen={setIsSettingsOpen} />
     </>
   );

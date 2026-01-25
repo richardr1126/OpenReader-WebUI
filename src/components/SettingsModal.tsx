@@ -23,7 +23,7 @@ import Link from 'next/link';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useConfig } from '@/contexts/ConfigContext';
 import { ChevronUpDownIcon, CheckIcon, SettingsIcon } from '@/components/icons/Icons';
-import { syncSelectedDocumentsToServer, loadSelectedDocumentsFromServer, importSelectedDocuments, getFirstVisit, setFirstVisit, getAllPdfDocuments, getAllEpubDocuments, getAllHtmlDocuments } from '@/lib/dexie';
+import { syncSelectedDocumentsToServer, loadSelectedDocumentsFromServer, importSelectedDocuments, getAppConfig, getFirstVisit, setFirstVisit, getAllPdfDocuments, getAllEpubDocuments, getAllHtmlDocuments } from '@/lib/dexie';
 import { useDocuments } from '@/contexts/DocumentContext';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { ProgressPopup } from '@/components/ProgressPopup';
@@ -35,7 +35,8 @@ import { BaseDocument } from '@/types/documents';
 import { getAuthClient } from '@/lib/auth-client';
 import { useAuthSession } from '@/hooks/useAuth';
 import { markSignedOut, clearSignedOut } from '@/lib/session-utils';
-import { useAuthConfig } from '@/contexts/AuthConfigContext';
+import { useAuthConfig, useAutoRateLimit } from '@/contexts/AutoRateLimitContext';
+import { useRouter } from 'next/navigation';
 
 const isDev = process.env.NEXT_PUBLIC_NODE_ENV !== 'production' || process.env.NODE_ENV == null;
 
@@ -84,7 +85,9 @@ export function SettingsModal() {
   const [showDeleteAccountConfirm, setShowDeleteAccountConfirm] = useState(false);
   const { progress, setProgress, estimatedTimeRemaining } = useTimeEstimation();
   const { authEnabled, baseUrl: authBaseUrl } = useAuthConfig();
+  const { refresh: refreshRateLimit } = useAutoRateLimit();
   const { data: session } = useAuthSession();
+  const router = useRouter();
 
   const ttsProviders = useMemo(() => [
     { id: 'custom-openai', name: 'Custom OpenAI-Like' },
@@ -146,9 +149,12 @@ export function SettingsModal() {
     [selectedModelId, supportsCustom, customModelInput]
   );
 
-  // set firstVisit on initial load
+  // Open settings on first visit (stored in Dexie app config)
   const checkFirstVist = useCallback(async () => {
-    if (!isDev) return;
+    const appConfig = await getAppConfig();
+    if (!appConfig?.privacyAccepted) {
+      return;
+    }
     const firstVisit = await getFirstVisit();
     if (!firstVisit) {
       await setFirstVisit(true);
@@ -164,6 +170,16 @@ export function SettingsModal() {
     setModelValue(ttsModel);
     setLocalTTSInstructions(ttsInstructions);
   }, [apiKey, baseUrl, ttsProvider, ttsModel, ttsInstructions, checkFirstVist]);
+
+  useEffect(() => {
+    const onPrivacyAccepted = () => {
+      checkFirstVist();
+    };
+    window.addEventListener('openreader:privacyAccepted', onPrivacyAccepted);
+    return () => {
+      window.removeEventListener('openreader:privacyAccepted', onPrivacyAccepted);
+    };
+  }, [checkFirstVist]);
 
   // Detect if current model is custom (not in presets) and mirror it in the input field
   useEffect(() => {
@@ -317,10 +333,14 @@ export function SettingsModal() {
 
 
   const handleSignOut = async () => {
-    await markSignedOut();
     const client = getAuthClient(authBaseUrl);
+    // Sign out of the authenticated account, then immediately start a fresh anonymous session.
+    // This avoids landing in a "no session" state that can be misinterpreted as a "Guest" user.
     await client.signOut();
-    window.location.reload();
+    await clearSignedOut();
+    await client.signIn.anonymous();
+    await refreshRateLimit();
+    router.refresh();
   };
 
   const handleDeleteAccount = async () => {
@@ -787,16 +807,28 @@ export function SettingsModal() {
                               <h4 className="font-medium text-foreground">Current Session</h4>
                               <div className="text-sm space-y-1">
                                 <p className="text-muted">Logged in as:</p>
-                                <p className="font-medium text-foreground">{session?.user?.name || 'Guest'}</p>
-                                <p className="text-xs text-muted font-mono">{session?.user?.email}</p>
-                                {session?.user?.isAnonymous && (
-                                  <p className="text-xs text-accent mt-1">Anonymous / Guest Account</p>
+                                {session?.user ? (
+                                  <>
+                                    <p className="font-medium text-foreground">
+                                      {session.user.isAnonymous
+                                        ? 'Anonymous'
+                                        : (session.user.name || session.user.email || 'Account')}
+                                    </p>
+                                    {!session.user.isAnonymous && (
+                                      <p className="text-xs text-muted font-mono">{session.user.email}</p>
+                                    )}
+                                    {session.user.isAnonymous && (
+                                      <p className="text-xs text-accent mt-1">Anonymous session</p>
+                                    )}
+                                  </>
+                                ) : (
+                                  <p className="font-medium text-foreground">Not signed in</p>
                                 )}
                               </div>
                             </div>
 
                             <div className="space-y-3 pt-2">
-                              {!session?.user?.isAnonymous ? (
+                              {session?.user && !session.user.isAnonymous ? (
                                 <>
                                   <Button
                                     onClick={handleSignOut}
@@ -820,14 +852,14 @@ export function SettingsModal() {
                                       Delete Account
                                     </Button>
                                     <p className="text-xs text-muted mt-2 text-center">
-                                      This will permanently delete your account and data. You will be returned to a fresh guest session.
+                                      This will permanently delete your account and data. You will be returned to a fresh anonymous session.
                                     </p>
                                   </div>
                                 </>
                               ) : (
                                 <div className="pt-2 border-t border-offbase">
                                   <p className="text-sm text-muted mb-3">
-                                    You are using a temporary guest account. Sign up to save your progress permanently.
+                                    You are using an anonymous session. Sign up to save your progress permanently.
                                   </p>
                                   <div className="grid grid-cols-2 gap-3">
                                     <Link href="/signin" className="w-full">

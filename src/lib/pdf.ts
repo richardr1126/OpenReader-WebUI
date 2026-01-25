@@ -304,6 +304,8 @@ export async function extractTextFromPDF(
 }
 
 // Highlighting functions
+let highlightPatternSeq = 0;
+
 export function clearHighlights() {
   const textNodes = document.querySelectorAll('.react-pdf__Page__textContent span');
   textNodes.forEach((node) => {
@@ -343,6 +345,7 @@ export function highlightPattern(
   pattern: string,
   containerRef: React.RefObject<HTMLDivElement>
 ) {
+  const seq = ++highlightPatternSeq;
   clearHighlights();
 
   if (!pattern?.trim()) return;
@@ -531,6 +534,7 @@ export function highlightPattern(
   // Fire-and-forget async worker call; UI thread returns immediately
   runHighlightTokenMatch(cleanPattern, tokenTexts)
     .then((result) => {
+      if (seq !== highlightPatternSeq) return;
       if (!result || result.bestStart === -1) {
         // No worker result or no good match; nothing to highlight
         applyHighlightFromTokens(null);
@@ -544,6 +548,7 @@ export function highlightPattern(
       }
     })
     .catch((error) => {
+      if (seq !== highlightPatternSeq) return;
       console.error(
         'Error in PDF highlight worker; no highlights applied:',
         error

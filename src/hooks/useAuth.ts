@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo } from 'react';
-import { useAuthConfig } from '@/contexts/AuthConfigContext';
+import { useAuthConfig } from '@/contexts/AutoRateLimitContext';
 import { getAuthClient } from '@/lib/auth-client';
 
 /**

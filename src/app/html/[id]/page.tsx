@@ -7,18 +7,22 @@ import { useHTML } from '@/contexts/HTMLContext';
 import { DocumentSkeleton } from '@/components/DocumentSkeleton';
 import { HTMLViewer } from '@/components/HTMLViewer';
 import { DocumentSettings } from '@/components/DocumentSettings';
+import { RateLimitPauseButton } from '@/components/player/RateLimitPauseButton';
 import { SettingsIcon } from '@/components/icons/Icons';
 import { Header } from '@/components/Header';
 import { useTTS } from "@/contexts/TTSContext";
 import TTSPlayer from '@/components/player/TTSPlayer';
 import { ZoomControl } from '@/components/ZoomControl';
 import { resolveDocumentId } from '@/lib/dexie';
+import { RateLimitBanner } from '@/components/rate-limit-banner';
+import { useAutoRateLimit } from '@/contexts/AutoRateLimitContext';
 
 export default function HTMLPage() {
   const { id } = useParams();
   const router = useRouter();
   const { setCurrentDocument, currDocName, clearCurrDoc } = useHTML();
   const { stop } = useTTS();
+  const { isAtLimit } = useAutoRateLimit();
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -58,6 +62,7 @@ export default function HTMLPage() {
   }, [loadDocument]);
 
   // Compute available height = viewport - (header height + tts bar height)
+            <RateLimitPauseButton />
   useEffect(() => {
     const compute = () => {
       const header = document.querySelector('[data-app-header]') as HTMLElement | null;
@@ -86,7 +91,7 @@ export default function HTMLPage() {
         <p className="text-red-500 mb-4">{error}</p>
         <Link
           href="/"
-          onClick={() => {clearCurrDoc();}}
+          onClick={() => { clearCurrDoc(); }}
           className="inline-flex items-center px-3 py-1 bg-base text-foreground rounded-lg hover:bg-offbase transition-all duration-200 ease-in-out hover:scale-[1.04] hover:text-accent"
         >
           <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -140,12 +145,20 @@ export default function HTMLPage() {
             <DocumentSkeleton />
           </div>
         ) : (
-          <div className="h-full w-full" style={{ paddingLeft: `${Math.round(maxPadPx * ((100 - padPct)/100))}px`, paddingRight: `${Math.round(maxPadPx * ((100 - padPct)/100))}px` }}>
+          <div className="h-full w-full" style={{ paddingLeft: `${Math.round(maxPadPx * ((100 - padPct) / 100))}px`, paddingRight: `${Math.round(maxPadPx * ((100 - padPct) / 100))}px` }}>
             <HTMLViewer className="h-full" />
           </div>
         )}
       </div>
-      <TTSPlayer />
+      {isAtLimit ? (
+        <div className="sticky bottom-0 z-30 w-full border-t border-offbase bg-base" data-app-ttsbar>
+          <div className="px-2 md:px-3 pt-1 pb-1.5 flex items-center justify-center gap-1 min-h-10">
+            <RateLimitBanner />
+          </div>
+        </div>
+      ) : (
+        <TTSPlayer />
+      )}
       <DocumentSettings html isOpen={isSettingsOpen} setIsOpen={setIsSettingsOpen} />
     </>
   );

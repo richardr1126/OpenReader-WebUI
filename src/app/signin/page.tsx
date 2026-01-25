@@ -5,7 +5,7 @@ import { Button, Input } from '@headlessui/react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { getAuthClient } from '@/lib/auth-client';
-import { useAuthConfig } from '@/contexts/AuthConfigContext';
+import { useAuthConfig, useAutoRateLimit } from '@/contexts/AutoRateLimitContext';
 import { showPrivacyPopup } from '@/components/privacy-popup';
 import { wasSignedOut, clearSignedOut } from '@/lib/session-utils';
 import { GithubIcon } from '@/components/icons/Icons';
@@ -32,6 +32,7 @@ function SignInContent() {
   const [justSignedOut, setJustSignedOut] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { authEnabled, baseUrl } = useAuthConfig();
+  const { refresh: refreshRateLimit } = useAutoRateLimit();
 
   const isAnyLoading = loadingEmail || loadingGithub || loadingGuest;
 
@@ -87,6 +88,9 @@ function SignInContent() {
           setError(errorMessage);
         }
       } else {
+        // Immediately refresh rate-limit status so the banner clears without a full reload.
+        // This is especially important when an anonymous user upgrades to an account.
+        await refreshRateLimit();
         router.push('/');
       }
     } catch (err) {
@@ -116,6 +120,7 @@ function SignInContent() {
     try {
       const client = getAuthClient(baseUrl);
       await client.signIn.anonymous();
+      await refreshRateLimit();
       router.push('/');
     } catch (e) {
       console.error('Anonymous sign-in failed:', e);

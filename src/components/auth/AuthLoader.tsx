@@ -1,14 +1,14 @@
 'use client';
 
 import { useEffect, useState, ReactNode } from 'react';
-import { useAuthConfig } from '@/contexts/AuthConfigContext';
+import { useAuthConfig, useAutoRateLimit } from '@/contexts/AutoRateLimitContext';
 import { useAuthSession } from '@/hooks/useAuth';
 import { getAuthClient } from '@/lib/auth-client';
-import { wasSignedOut } from '@/lib/session-utils';
 import { LoadingSpinner } from '@/components/Spinner';
 
 export function AuthLoader({ children }: { children: ReactNode }) {
   const { authEnabled, baseUrl } = useAuthConfig();
+  const { refresh: refreshRateLimit } = useAutoRateLimit();
   const { data: session, isPending } = useAuthSession();
   const [isAutoLoggingIn, setIsAutoLoggingIn] = useState(false);
   const [isCheckingSignOut, setIsCheckingSignOut] = useState(true);
@@ -31,13 +31,6 @@ export function AuthLoader({ children }: { children: ReactNode }) {
         return;
       }
 
-      // No session, check if explicitly signed out
-      const userWasSignedOut = await wasSignedOut();
-      if (userWasSignedOut) {
-        setIsCheckingSignOut(false); // Render children unauthenticated
-        return;
-      }
-
       // Not signed out, start auto-login
       setIsAutoLoggingIn(true);
       setIsCheckingSignOut(false); // Stop checking sign-out, now in auto-login mode
@@ -45,6 +38,7 @@ export function AuthLoader({ children }: { children: ReactNode }) {
       try {
         const client = getAuthClient(baseUrl);
         await client.signIn.anonymous();
+        await refreshRateLimit();
       } catch (err) {
         console.error('Auto-login failed', err);
       } finally {
@@ -53,7 +47,7 @@ export function AuthLoader({ children }: { children: ReactNode }) {
     };
 
     checkStatus();
-  }, [session, isPending, authEnabled, baseUrl]);
+  }, [session, isPending, authEnabled, baseUrl, refreshRateLimit]);
 
   // Show loader if:
   // 1. Auth client is initializing (isPending) AND auth is enabled

@@ -39,6 +39,7 @@ import { useBackgroundState } from '@/hooks/audio/useBackgroundState';
 import { withRetry, generateTTS, alignAudio } from '@/lib/client';
 import { preprocessSentenceForAudio, splitTextToTtsBlocks, splitTextToTtsBlocksEPUB } from '@/lib/nlp';
 import { isKokoroModel } from '@/utils/voice';
+import { useAutoRateLimit } from '@/contexts/AutoRateLimitContext';
 import type {
   TTSLocation,
   TTSSmartMergeResult,
@@ -298,6 +299,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
   const audioContext = useAudioContext();
   const audioCache = useAudioCache(25);
   const { availableVoices, fetchVoices } = useVoiceManagement(openApiKey, openApiBaseUrl, configTTSProvider, configTTSModel);
+  const { onTTSStart, onTTSComplete, refresh: refreshRateLimit, triggerRateLimit } = useAutoRateLimit();
 
   // Add ref for location change handler
   const locationChangeHandlerRef = useRef<((location: TTSLocation) => void) | null>(null);
@@ -849,12 +851,18 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
         backoffFactor: 2
       };
 
-      const arrayBuffer = await withRetry(
-        async () => {
-          return await generateTTS(reqBody, reqHeaders, controller.signal);
-        },
-        retryOptions
-      );
+      onTTSStart();
+      let arrayBuffer: TTSAudioBuffer;
+      try {
+        arrayBuffer = await withRetry(
+          async () => {
+            return await generateTTS(reqBody, reqHeaders, controller.signal);
+          },
+          retryOptions
+        );
+      } finally {
+        onTTSComplete();
+      }
 
       // Remove the controller once the request is complete
       activeAbortControllers.current.delete(controller);
@@ -867,6 +875,22 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
 
       return arrayBuffer;
     } catch (error) {
+      const status = (() => {
+        if (typeof error === 'object' && error !== null && 'status' in error) {
+          const maybe = (error as { status?: unknown }).status;
+          return typeof maybe === 'number' ? maybe : undefined;
+        }
+        return undefined;
+      })();
+
+      const code = (() => {
+        if (typeof error === 'object' && error !== null && 'code' in error) {
+          const maybe = (error as { code?: unknown }).code;
+          return typeof maybe === 'string' ? maybe : undefined;
+        }
+        return undefined;
+      })();
+
       // Check if this was an abort error
       if (error instanceof Error && error.name === 'AbortError') {
         console.log('TTS request aborted:', sentence.substring(0, 20));
@@ -874,6 +898,23 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
       }
 
       setIsPlaying(false);
+
+      // Handle daily quota exceeded (429 + Problem Details code)
+      if (status === 429 && code === 'USER_DAILY_QUOTA_EXCEEDED') {
+        toast.error('Daily TTS limit reached.', {
+          id: 'tts-limit-error',
+          style: {
+            background: 'var(--background)',
+            color: 'var(--accent)',
+          },
+          duration: 5000,
+        });
+        triggerRateLimit();
+        refreshRateLimit().catch(console.error);
+        // Do NOT re-throw, just return undefined to stop playback gracefully
+        return undefined;
+      }
+
       toast.error('Failed to generate audio. Server not responding.', {
         id: 'tts-api-error',
         style: {
@@ -897,7 +938,11 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     pdfHighlightEnabled,
     pdfWordHighlightEnabled,
     epubHighlightEnabled,
-    epubWordHighlightEnabled
+    epubWordHighlightEnabled,
+    triggerRateLimit,
+    refreshRateLimit,
+    onTTSComplete,
+    onTTSStart
   ]);
 
   /**
@@ -929,7 +974,11 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     const processPromise = (async () => {
       try {
         const audioBuffer = await getAudio(sentence);
-        if (!audioBuffer) throw new Error('No audio data generated');
+        if (!audioBuffer) {
+          // If quota or other handled error returns undefined, ensure we don't throw "No audio data"
+          // Just return empty string to signal graceful failure/skip
+          return '';
+        }
 
         // Convert to base64 data URI
         const bytes = new Uint8Array(audioBuffer);
@@ -974,7 +1023,9 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
         // Get the processed audio data URI directly from processSentence
         const audioDataUri = await processSentence(sentence);
         if (!audioDataUri) {
-          throw new Error('No audio data generated');
+          // Graceful exit for rate limit or skipped sentence
+          console.log('Skipping playback for sentence (no audio generated)');
+          return null;
         }
 
         // Force unload any previous Howl instance to free up resources
@@ -1201,9 +1252,26 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
         );
 
         if (!audioCache.has(nextKey) && !preloadRequests.current.has(nextSentence)) {
-        // Start preloading but don't wait for it to complete
+          // Start preloading but don't wait for it to complete
           processSentence(nextSentence, true).catch(error => {
-            console.error('Error preloading next sentence:', error);
+            const status = (() => {
+              if (typeof error === 'object' && error !== null && 'status' in error) {
+                const maybe = (error as { status?: unknown }).status;
+                return typeof maybe === 'number' ? maybe : undefined;
+              }
+              return undefined;
+            })();
+            const code = (() => {
+              if (typeof error === 'object' && error !== null && 'code' in error) {
+                const maybe = (error as { code?: unknown }).code;
+                return typeof maybe === 'string' ? maybe : undefined;
+              }
+              return undefined;
+            })();
+            // Ignore quota errors during preload
+            if (!(status === 429 && code === 'USER_DAILY_QUOTA_EXCEEDED')) {
+              console.error('Error preloading next sentence:', error);
+            }
           });
         }
       }

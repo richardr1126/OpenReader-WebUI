@@ -1,5 +1,3 @@
-'use client';
-
 import { ReactNode } from 'react';
 
 import { DocumentProvider } from '@/contexts/DocumentContext';
@@ -9,9 +7,8 @@ import { TTSProvider } from '@/contexts/TTSContext';
 import { ThemeProvider } from '@/contexts/ThemeContext';
 import { ConfigProvider } from '@/contexts/ConfigContext';
 import { HTMLProvider } from '@/contexts/HTMLContext';
-import { RateLimitProvider } from '@/components/rate-limit-provider';
+import { AutoRateLimitProvider } from '@/contexts/AutoRateLimitContext';
 import { PrivacyPopup } from '@/components/privacy-popup';
-import { AuthConfigProvider } from '@/contexts/AuthConfigContext';
 
 interface ProvidersProps {
   children: ReactNode;
@@ -20,33 +17,24 @@ interface ProvidersProps {
 }
 
 export function Providers({ children, authEnabled, authBaseUrl }: ProvidersProps) {
-  const content = (
-    <ThemeProvider>
-      <ConfigProvider>
-        <DocumentProvider>
-          <TTSProvider>
-            <PDFProvider>
-              <EPUBProvider>
-                <HTMLProvider>
-                  {children}
-                  <PrivacyPopup />
-                </HTMLProvider>
-              </EPUBProvider>
-            </PDFProvider>
-          </TTSProvider>
-        </DocumentProvider>
-      </ConfigProvider>
-    </ThemeProvider>
-  );
-
-  // Wrap with RateLimitProvider only when auth is enabled
-  const wrappedContent = authEnabled ? (
-    <RateLimitProvider>{content}</RateLimitProvider>
-  ) : content;
-
   return (
-    <AuthConfigProvider authEnabled={authEnabled} baseUrl={authBaseUrl}>
-      {wrappedContent}
-    </AuthConfigProvider>
+    <AutoRateLimitProvider authEnabled={authEnabled} authBaseUrl={authBaseUrl}>
+      <ThemeProvider>
+        <ConfigProvider>
+          <DocumentProvider>
+            <TTSProvider>
+              <PDFProvider>
+                <EPUBProvider>
+                  <HTMLProvider>
+                    {children}
+                    <PrivacyPopup />
+                  </HTMLProvider>
+                </EPUBProvider>
+              </PDFProvider>
+            </TTSProvider>
+          </DocumentProvider>
+        </ConfigProvider>
+      </ThemeProvider>
+    </AutoRateLimitProvider>
   );
 }

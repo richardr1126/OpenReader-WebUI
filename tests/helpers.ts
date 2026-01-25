@@ -34,8 +34,21 @@ function escapeRegExp(input: string) {
  * Upload a sample epub or pdf
  */
 export async function uploadFile(page: Page, filePath: string) {
-  await page.waitForSelector('input[type=file]', { timeout: 10000 });
-  await page.setInputFiles('input[type=file]', `${DIR}${filePath}`);
+  const input = page.locator('input[type=file]').first();
+  await expect(input).toBeVisible({ timeout: 10000 });
+  await expect(input).toBeEnabled({ timeout: 10000 });
+
+  await input.setInputFiles(`${DIR}${filePath}`);
+
+  // Wait for the uploader to finish processing. The input is disabled while
+  // uploading/converting via react-dropzone's `disabled` prop.
+  // Tolerate extremely fast operations where the disabled state may be missed.
+  try {
+    await expect(input).toBeDisabled({ timeout: 2000 });
+  } catch {
+    // ignore
+  }
+  await expect(input).toBeEnabled({ timeout: 15000 });
 }
 
 /**
@@ -110,6 +123,19 @@ export async function setupTest(page: Page) {
   await page.goto('/');
   await page.waitForLoadState('networkidle');
 
+  // Privacy modal should come first in onboarding.
+  // Be tolerant if it's already accepted (e.g., reused context).
+  const privacyBtn = page.getByRole('button', { name: 'I Understand' });
+  try {
+    await expect(privacyBtn).toBeVisible({ timeout: 5000 });
+    await privacyBtn.click();
+  } catch {
+    // ignore
+  }
+
+  // Settings modal should appear after privacy acceptance on first visit.
+  await expect(page.getByRole('button', { name: 'Save' })).toBeVisible({ timeout: 10000 });
+
   // If running in CI, select the "Custom OpenAI-Like" model and "Deepinfra" provider
   if (process.env.CI) {
     await page.getByRole('button', { name: 'Custom OpenAI-Like' }).click();
@@ -118,8 +144,6 @@ export async function setupTest(page: Page) {
 
   // Click the "done" button to dismiss the welcome message
   await page.getByRole('button', { name: 'Save' }).click();
-
-  await page.getByRole('button', { name: 'I Understand' }).click();
 }
 
 

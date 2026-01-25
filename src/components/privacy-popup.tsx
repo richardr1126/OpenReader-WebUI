@@ -32,12 +32,15 @@ export function PrivacyPopup({ onAccept }: PrivacyPopupProps) {
   const handleAccept = async () => {
     await updateAppConfig({ privacyAccepted: true });
     setIsOpen(false);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('openreader:privacyAccepted'));
+    }
     onAccept?.();
   };
 
   return (
     <Transition appear show={isOpen} as={Fragment}>
-      <Dialog as="div" className="relative z-50" onClose={() => { }}>
+      <Dialog as="div" className="relative z-[60]" onClose={() => { }}>
         <TransitionChild
           as={Fragment}
           enter="ease-out duration-300"

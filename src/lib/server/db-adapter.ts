@@ -84,13 +84,31 @@ export class SqliteAdapter implements DBAdapter {
   }
 
   async query(text: string, params?: unknown[]) {
-    // simple heuristic to convert Postgres $n params to SQLite ?
-    // This assumes we aren't using $n inside string literals.
-    const convertedSql = text.replace(/\$\d+/g, "?");
+    // Convert Postgres $n params to SQLite placeholders.
+    // We separately reorder params to match placeholder order.
+    const convertedSql = text.replace(/\$(\d+)/g, "?");
+
+    // Reorder params array to match the order they appear in the SQL
+    // SQLite expects params in the order they appear, not by their $n number
+    const orderedParams: unknown[] = [];
+    if (params && params.length > 0) {
+      // Extract parameter numbers in order of appearance
+      const paramNumbers: number[] = [];
+      const regex = /\$(\d+)/g;
+      let match;
+      while ((match = regex.exec(text)) !== null) {
+        paramNumbers.push(parseInt(match[1], 10));
+      }
+
+      // Map to actual values
+      for (const num of paramNumbers) {
+        orderedParams.push(params[num - 1]); // $1 maps to params[0]
+      }
+    }
 
     try {
       const stmt = this.db.prepare(convertedSql);
-      const safeParams = params || [];
+      const safeParams = orderedParams.length > 0 ? orderedParams : [];
 
       const lowerSql = convertedSql.trim().toLowerCase();
 

@@ -23,7 +23,7 @@ interface PDFOnLinkClickArgs {
 export function PDFViewer({ zoomLevel }: PDFViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const scaleRef = useRef<number>(1);
-  const { containerWidth } = usePDFResize(containerRef);
+  const { containerWidth, containerHeight } = usePDFResize(containerRef);
   const sentenceHighlightSeqRef = useRef(0);
   const wordHighlightSeqRef = useRef(0);
   const sentenceHighlightTimeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
@@ -55,7 +55,7 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
     currDocPage,
   } = usePDF();
 
-  const layoutKey = `${zoomLevel}:${containerWidth}:${viewType}:${currDocPage}`;
+  const layoutKey = `${zoomLevel}:${containerWidth}:${containerHeight}:${viewType}:${currDocPage}`;
 
   const clearSentenceHighlightTimeouts = useCallback(() => {
     for (const t of sentenceHighlightTimeoutsRef.current) clearTimeout(t);
@@ -234,11 +234,11 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
   // Modify scale calculation to be more efficient
   const calculateScale = useCallback((width = pageWidth, height = pageHeight): number => {
     const margin = viewType === 'dual' ? 48 : 24; // adjust margin based on view type
-    const containerHeight = (containerRef.current?.clientHeight ?? window.innerHeight);
+    const effectiveContainerHeight = containerHeight || (containerRef.current?.clientHeight ?? window.innerHeight);
     const targetWidth = viewType === 'dual'
       ? (containerWidth - margin) / 2 // divide by 2 for dual pages
       : containerWidth - margin;
-    const targetHeight = containerHeight - margin;
+    const targetHeight = effectiveContainerHeight - margin;
 
     if (viewType === 'scroll') {
       // For scroll mode, use a more comfortable width-based scale
@@ -252,7 +252,7 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
 
     const baseScale = Math.min(scaleByWidth, scaleByHeight);
     return baseScale * (zoomLevel / 100);
-  }, [containerWidth, zoomLevel, pageWidth, pageHeight, viewType]);
+  }, [containerWidth, containerHeight, zoomLevel, pageWidth, pageHeight, viewType]);
 
   // Add memoized scale to prevent unnecessary recalculations
   const currentScale = useCallback(() => {
