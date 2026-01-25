@@ -1,12 +1,15 @@
 #!/bin/bash
 # OpenReader WebUI - TTS Document Reader
-# URL: https://reader.sunnymodi.com
+# URL: http://localhost:3003
 # Uses Groq Orpheus TTS via local proxy
 
 set -e
 
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # Load GROQ_API_KEY
-source /home/ec2-user/OpenReader-WebUI/scripts/.env
+source "$SCRIPT_DIR/.env"
 export GROQ_API_KEY
 
 # Stop existing services
@@ -16,7 +19,7 @@ docker rm openreader-webui 2>/dev/null || true
 sleep 1
 
 # Start Groq TTS proxy (adds /voices endpoint for OpenReader)
-nohup python3 /home/ec2-user/OpenReader-WebUI/scripts/groq-tts-proxy.py > /tmp/groq-proxy.log 2>&1 &
+nohup python3 "$SCRIPT_DIR/groq-tts-proxy.py" > /tmp/groq-proxy.log 2>&1 &
 sleep 2
 
 # Verify proxy is running
@@ -36,6 +39,6 @@ docker run --name openreader-webui \
   -d \
   ghcr.io/richardr1126/openreader-webui:latest
 
-echo "OpenReader WebUI started at https://reader.sunnymodi.com"
+echo "OpenReader WebUI started at http://localhost:3003"
 echo "Groq TTS proxy running on port 8880"
 echo "Available voices: troy, austin, daniel, autumn, diana, hannah"

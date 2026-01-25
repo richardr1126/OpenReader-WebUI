@@ -16,7 +16,7 @@ Scripts for running OpenReader WebUI with Groq Orpheus TTS.
 
 ## URL
 
-https://reader.sunnymodi.com
+http://localhost:3003
 
 ## Architecture
 

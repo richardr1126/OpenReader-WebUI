@@ -2,7 +2,7 @@
 
 Document reader with high-quality text-to-speech using Groq's Orpheus TTS.
 
-**URL:** https://reader.sunnymodi.com
+**URL:** http://localhost:3003
 
 ## Architecture
 
@@ -15,7 +15,7 @@ Document reader with high-quality text-to-speech using Groq's Orpheus TTS.
          ▼
 ┌─────────────────────┐
 │  nginx (SSL :443)   │
-│  reader.sunnymodi.com
+│  your-domain.com
 └─────────────────────┘
 ```
 
@@ -24,16 +24,16 @@ Document reader with high-quality text-to-speech using Groq's Orpheus TTS.
 | Component | Location | Port | Purpose |
 |-----------|----------|------|---------|
 | OpenReader WebUI | Docker container | 3003 | PDF/EPUB reader UI |
-| Groq TTS Proxy | `/home/ec2-user/groq-tts-proxy.py` | 8880 | Adds `/voices` endpoint, proxies to Groq |
+| Groq TTS Proxy | `scripts/groq-tts-proxy.py` | 8880 | Adds `/voices` endpoint, proxies to Groq |
 | nginx | `/etc/nginx/conf.d/openreader.conf` | 443 | SSL termination, reverse proxy |
 
 ## Files
 
 ```
-/home/ec2-user/
+scripts/
 ├── openreader-webui.sh      # Startup script (run this to start everything)
 ├── groq-tts-proxy.py        # Python proxy server for Groq TTS
-├── ENTERPRISE_AI_MAIN/.env  # Contains GROQ_API_KEY
+├── .env                     # Contains GROQ_API_KEY
 └── OPENREADER_SETUP.md      # This file
 ```
 
@@ -41,7 +41,7 @@ Document reader with high-quality text-to-speech using Groq's Orpheus TTS.
 
 ### Start Services
 ```bash
-/home/ec2-user/openreader-webui.sh
+./scripts/openreader-webui.sh
 ```
 
 ### Check Status
@@ -71,7 +71,7 @@ pkill -f groq-tts-proxy.py
 ## Configuration
 
 ### Environment Variable
-The `GROQ_API_KEY` is stored in `/home/ec2-user/ENTERPRISE_AI_MAIN/.env`:
+Create a `.env` file in the `scripts/` directory:
 ```
 GROQ_API_KEY=gsk_xxxxx
 ```
@@ -91,7 +91,7 @@ File: `/etc/nginx/conf.d/openreader.conf`
 
 ```nginx
 server {
-    server_name reader.sunnymodi.com;
+    server_name your-domain.com;
 
     location / {
         proxy_pass http://localhost:3003;
@@ -105,8 +105,8 @@ server {
     }
 
     listen 443 ssl; # managed by Certbot
-    ssl_certificate /etc/letsencrypt/live/reader.sunnymodi.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/reader.sunnymodi.com/privkey.pem;
+    ssl_certificate /etc/letsencrypt/live/your-domain.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/your-domain.com/privkey.pem;
     include /etc/letsencrypt/options-ssl-nginx.conf;
     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
 }
@@ -157,7 +157,7 @@ Documents are stored in Docker volume `openreader_docstore` mounted at `/app/doc
 curl http://localhost:8880/v1/audio/voices
 
 # If not running, restart
-/home/ec2-user/openreader-webui.sh
+./scripts/openreader-webui.sh
 ```
 
 ### TTS not working / Server not responding
