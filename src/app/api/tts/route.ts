@@ -135,7 +135,6 @@ export async function POST(req: NextRequest) {
 
     const body = (await req.json()) as TTSRequestPayload;
     const { text, voice, speed, format, model: req_model, instructions } = body;
-    console.log('Received TTS request:', { provider, req_model, voice, speed, format, hasInstructions: Boolean(instructions) });
 
     if (!text || !voice || !speed) {
       const errorBody: TTSError = {
@@ -222,7 +221,6 @@ export async function POST(req: NextRequest) {
           }
         });
       }
-      console.log('TTS cache HIT for key:', cacheKey.slice(0, 8));
       return new NextResponse(cachedBuffer, {
         headers: {
           'Content-Type': contentType,
