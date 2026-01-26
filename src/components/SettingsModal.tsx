@@ -22,13 +22,15 @@ import {
 import { useTheme } from '@/contexts/ThemeContext';
 import { useConfig } from '@/contexts/ConfigContext';
 import { ChevronUpDownIcon, CheckIcon, SettingsIcon } from '@/components/icons/Icons';
-import { syncDocumentsToServer, loadDocumentsFromServer, getFirstVisit, setFirstVisit } from '@/lib/dexie';
+import { syncSelectedDocumentsToServer, loadSelectedDocumentsFromServer, importSelectedDocuments, getFirstVisit, setFirstVisit, getAllPdfDocuments, getAllEpubDocuments, getAllHtmlDocuments } from '@/lib/dexie';
 import { useDocuments } from '@/contexts/DocumentContext';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { ProgressPopup } from '@/components/ProgressPopup';
 import { useTimeEstimation } from '@/hooks/useTimeEstimation';
 import { THEMES } from '@/contexts/ThemeContext';
 import { deleteServerDocuments } from '@/lib/client';
+import { DocumentSelectionModal } from '@/components/DocumentSelectionModal';
+import { BaseDocument } from '@/types/documents';
 
 const isDev = process.env.NEXT_PUBLIC_NODE_ENV !== 'production' || process.env.NODE_ENV == null;
 
@@ -68,9 +70,25 @@ export function SettingsModal() {
   ], []);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isImportingLibrary, setIsImportingLibrary] = useState(false);
+  const [isSelectionModalOpen, setIsSelectionModalOpen] = useState(false);
+  const [selectionModalProps, setSelectionModalProps] = useState<{
+      title: string;
+      confirmLabel: string;
+      mode: 'library' | 'load' | 'save';
+      defaultSelected: boolean;
+      initialFiles?: BaseDocument[];
+      fetcher?: () => Promise<BaseDocument[]>;
+  }>({
+      title: '',
+      confirmLabel: '',
+      mode: 'library',
+      defaultSelected: false
+  });
+
   const [showProgress, setShowProgress] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
-  const [operationType, setOperationType] = useState<'sync' | 'load'>('sync');
+  const [operationType, setOperationType] = useState<'sync' | 'load' | 'library'>('sync');
   const [abortController, setAbortController] = useState<AbortController | null>(null);
   const selectedTheme = themes.find(t => t.id === theme) || themes[0];
   const [showClearLocalConfirm, setShowClearLocalConfirm] = useState(false);
@@ -230,68 +248,126 @@ export function SettingsModal() {
   }, [modelValue, ttsModels]);
 
   const handleSync = async () => {
-    const controller = new AbortController();
-    setAbortController(controller);
+    // Collect local documents
+    const pdfs = await getAllPdfDocuments();
+    const epubs = await getAllEpubDocuments();
+    const htmls = await getAllHtmlDocuments();
     
-    try {
-      setIsSyncing(true);
-      setShowProgress(true);
-      setProgress(0);
-      setOperationType('sync');
-      setStatusMessage('Preparing documents...');
-      await syncDocumentsToServer((progress, status) => {
-        if (controller.signal.aborted) return;
-        setProgress(progress);
-        if (status) setStatusMessage(status);
-      }, controller.signal);
-    } catch (error) {
-      if (controller.signal.aborted) {
-        console.log('Sync operation cancelled');
-        setStatusMessage('Operation cancelled');
-      } else {
-        console.error('Sync failed:', error);
-        setStatusMessage('Sync failed. Please try again.');
-      }
-    } finally {
-      setIsSyncing(false);
-      setShowProgress(false);
-      setProgress(0);
-      setStatusMessage('');
-      setAbortController(null);
-    }
+    const allDocs: BaseDocument[] = [
+        ...pdfs.map(d => ({ ...d, type: 'pdf' as const })),
+        ...epubs.map(d => ({ ...d, type: 'epub' as const })),
+        ...htmls.map(d => ({ ...d, type: 'html' as const }))
+    ];
+
+    setSelectionModalProps({
+        title: 'Save to Server',
+        confirmLabel: 'Save',
+        mode: 'save',
+        defaultSelected: true,
+        initialFiles: allDocs
+    });
+    setIsSelectionModalOpen(true);
   };
 
   const handleLoad = async () => {
+    setSelectionModalProps({
+        title: 'Load from Server',
+        confirmLabel: 'Load',
+        mode: 'load',
+        defaultSelected: true,
+        fetcher: async () => {
+            const res = await fetch('/api/documents?list=true');
+            if (!res.ok) throw new Error('Failed to list server documents');
+            const data = await res.json();
+            // Handle case where API might return error object
+            if (data.error) throw new Error(data.error);
+            return data.documents || [];
+        }
+    });
+    setIsSelectionModalOpen(true);
+  };
+
+  const handleImportLibrary = async () => {
+    setSelectionModalProps({
+        title: 'Import from Library',
+        confirmLabel: 'Import',
+        mode: 'library',
+        defaultSelected: false,
+        fetcher: async () => {
+            const res = await fetch('/api/documents/library?limit=10000');
+            if (!res.ok) throw new Error('Failed to list library documents');
+            const data = await res.json();
+            return data.documents || [];
+        }
+    });
+    setIsSelectionModalOpen(true);
+  };
+
+  const handleModalConfirm = async (selectedFiles: BaseDocument[]) => {
     const controller = new AbortController();
     setAbortController(controller);
     
+    const mode = selectionModalProps.mode;
+    
+    // Close modal? Maybe keep open until started?
+    // Let's close it here, process starts.
+    // Actually we keep it open if we want to show loading state INSIDE modal?
+    // But existing UI uses a separate ProgressPopup.
+    // So close modal, show popup.
+    setIsSelectionModalOpen(false);
+
     try {
-      setIsLoading(true);
-      setShowProgress(true);
-      setProgress(0);
-      setOperationType('load');
-      setStatusMessage('Downloading documents from server...');
-      await loadDocumentsFromServer((progress, status) => {
-        if (controller.signal.aborted) return;
-        setProgress(progress);
-        if (status) setStatusMessage(status);
-      }, controller.signal);
-      if (controller.signal.aborted) return;
-      setStatusMessage('Documents loaded from server');
+        setShowProgress(true);
+        setProgress(0);
+        
+        if (mode === 'save') {
+            setIsSyncing(true);
+            setOperationType('sync');
+            setStatusMessage('Preparing documents...');
+            await syncSelectedDocumentsToServer(selectedFiles, (progress, status) => {
+                if (controller.signal.aborted) return;
+                setProgress(progress);
+                if (status) setStatusMessage(status);
+            }, controller.signal);
+        } else if (mode === 'load') {
+            setIsLoading(true);
+            setOperationType('load');
+            setStatusMessage('Downloading documents...');
+            // Need ids
+            const ids = selectedFiles.map(f => f.id);
+            await loadSelectedDocumentsFromServer(ids, (progress, status) => {
+                if (controller.signal.aborted) return;
+                setProgress(progress);
+                if (status) setStatusMessage(status);
+            }, controller.signal);
+            if (!controller.signal.aborted) setStatusMessage('Documents loaded');
+        } else if (mode === 'library') {
+            setIsImportingLibrary(true);
+            setOperationType('library');
+            setStatusMessage('Importing selected documents...');
+            await importSelectedDocuments(selectedFiles, (progress, status) => {
+                if (controller.signal.aborted) return;
+                setProgress(progress);
+                if (status) setStatusMessage(status);
+            }, controller.signal);
+        }
+
     } catch (error) {
-      if (controller.signal.aborted) {
-        console.log('Load operation cancelled');
-        setStatusMessage('Operation cancelled');
-      } else {
-        console.error('Load failed:', error);
-        setStatusMessage('Load failed. Please try again.');
-      }
+         if (controller.signal.aborted) {
+            console.log(`${mode} operation cancelled`);
+            setStatusMessage('Operation cancelled');
+         } else {
+            console.error(`${mode} failed:`, error);
+            setStatusMessage(`${mode} failed. Please try again.`);
+         }
     } finally {
-      setIsLoading(false);
-      setShowProgress(false);
-      setProgress(0);
-      setStatusMessage('');
-      setAbortController(null);
+        setIsSyncing(false);
+        setIsLoading(false);
+        setIsImportingLibrary(false);
+        setShowProgress(false);
+        setProgress(0);
+        setStatusMessage('');
+        setAbortController(null);
     }
   };
 
@@ -953,12 +1029,29 @@ export function SettingsModal() {
                       </TabPanel>
 
                       <TabPanel className="space-y-4">
+                        <div className="space-y-1">
+                          <label className="block text-sm font-medium text-foreground">Server Library Import</label>
+                          <div className="flex gap-2">
+                            <Button
+                              onClick={handleImportLibrary}
+                              disabled={isSyncing || isLoading || isImportingLibrary}
+                              className="justify-center rounded-lg bg-background px-3 py-1.5 text-sm 
+                                       font-medium text-foreground hover:bg-offbase focus:outline-none 
+                                       focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2
+                                       transform transition-transform duration-200 ease-in-out hover:scale-[1.04] hover:text-accent
+                                       disabled:opacity-50"
+                            >
+                              {isImportingLibrary ? `Importing... ${Math.round(progress)}%` : 'Import from library'}
+                            </Button>
+                          </div>
+                        </div>
+
                         {isDev && <div className="space-y-1">
                           <label className="block text-sm font-medium text-foreground">Server Document Sync</label>
                           <div className="flex gap-2">
                             <Button
                               onClick={handleLoad}
-                              disabled={isSyncing || isLoading}
+                              disabled={isSyncing || isLoading || isImportingLibrary}
                               className="justify-center rounded-lg bg-background px-3 py-1.5 text-sm 
                                        font-medium text-foreground hover:bg-offbase focus:outline-none 
                                        focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2
@@ -969,7 +1062,7 @@ export function SettingsModal() {
                             </Button>
                             <Button
                               onClick={handleSync}
-                              disabled={isSyncing || isLoading}
+                              disabled={isSyncing || isLoading || isImportingLibrary}
                               className="justify-center rounded-lg bg-background px-3 py-1.5 text-sm 
                                        font-medium text-foreground hover:bg-offbase focus:outline-none 
                                        focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2
@@ -986,6 +1079,7 @@ export function SettingsModal() {
                           <div className="flex gap-2">
                             <Button
                               onClick={() => setShowClearLocalConfirm(true)}
+                              disabled={isSyncing || isLoading || isImportingLibrary}
                               className="justify-center rounded-lg bg-red-500 px-3 py-1.5 text-sm 
                                          font-medium text-background hover:bg-red-500/90 focus:outline-none 
                                          focus-visible:ring-2 focus-visible:bg-red-500 focus-visible:ring-offset-2
@@ -995,6 +1089,7 @@ export function SettingsModal() {
                             </Button>
                             {isDev && <Button
                               onClick={() => setShowClearServerConfirm(true)}
+                              disabled={isSyncing || isLoading || isImportingLibrary}
                               className="justify-center rounded-lg bg-red-500 px-3 py-1.5 text-sm 
                                          font-medium text-background hover:bg-red-500/90 focus:outline-none 
                                          focus-visible:ring-2 focus-visible:bg-red-500 focus-visible:ring-offset-2
@@ -1046,6 +1141,7 @@ export function SettingsModal() {
           setProgress(0);
           setIsSyncing(false);
           setIsLoading(false);
+          setIsImportingLibrary(false);
           setStatusMessage('');
           setOperationType('sync');
           setAbortController(null);
@@ -1053,6 +1149,17 @@ export function SettingsModal() {
         statusMessage={statusMessage}
         operationType={operationType}
         cancelText="Cancel"
+      />
+      <DocumentSelectionModal 
+        isOpen={isSelectionModalOpen}
+        onClose={() => !isImportingLibrary && !isSyncing && !isLoading && setIsSelectionModalOpen(false)}
+        onConfirm={handleModalConfirm}
+        title={selectionModalProps.title}
+        confirmLabel={selectionModalProps.confirmLabel}
+        isProcessing={false} // Processing happens in ProgressPopup after closing
+        defaultSelected={selectionModalProps.defaultSelected}
+        initialFiles={selectionModalProps.initialFiles}
+        fetcher={selectionModalProps.fetcher}
       />
     </>
   );

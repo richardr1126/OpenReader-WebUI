@@ -1,81 +1,177 @@
-import { writeFile, readFile, readdir, mkdir, unlink } from 'fs/promises';
+import { createHash } from 'crypto';
+import { readdir, readFile, stat, unlink, utimes, writeFile } from 'fs/promises';
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
-import type { BaseDocument, SyncedDocument } from '@/types/documents';
+import { DOCUMENTS_V1_DIR, isDocumentsV1Ready } from '@/lib/server/docstore';
+import type { BaseDocument, DocumentType, SyncedDocument } from '@/types/documents';
 
-const DOCS_DIR = path.join(process.cwd(), 'docstore');
+export const dynamic = 'force-dynamic';
 
-// Ensure documents directory exists
-async function ensureDocsDir() {
+const SYNC_DIR = DOCUMENTS_V1_DIR;
+
+async function trySetFileMtime(filePath: string, lastModifiedMs: number): Promise<void> {
+  if (!Number.isFinite(lastModifiedMs)) return;
+  const mtime = new Date(lastModifiedMs);
+  if (Number.isNaN(mtime.getTime())) return;
+
   try {
-    await mkdir(DOCS_DIR, { recursive: true });
+    await utimes(filePath, mtime, mtime);
   } catch (error) {
-    console.error('Error creating documents directory:', error);
+    console.warn('Failed to set document mtime:', filePath, error);
   }
+}
+
+function toDocumentTypeFromName(name: string): DocumentType {
+  const ext = path.extname(name).toLowerCase();
+  if (ext === '.pdf') return 'pdf';
+  if (ext === '.epub') return 'epub';
+  if (ext === '.docx') return 'docx';
+  return 'html';
+}
+
+function parseSyncedFileName(fileName: string): { id: string; name: string } | null {
+  const match = /^([a-f0-9]{64})__(.+)$/i.exec(fileName);
+  if (!match) return null;
+  try {
+    return { id: match[1].toLowerCase(), name: decodeURIComponent(match[2]) };
+  } catch {
+    return null;
+  }
+}
+
+async function loadSyncedDocuments(includeData: boolean, targetIds?: Set<string>): Promise<(BaseDocument | SyncedDocument)[]> {
+  const results: (BaseDocument | SyncedDocument)[] = [];
+  let files: string[] = [];
+
+  try {
+    files = await readdir(SYNC_DIR);
+  } catch {
+    return results;
+  }
+
+  for (const file of files) {
+    const parsed = parseSyncedFileName(file);
+    if (!parsed) continue;
+
+    // Filter by ID if specific IDs are requested
+    if (targetIds && !targetIds.has(parsed.id)) continue;
+
+    const filePath = path.join(SYNC_DIR, file);
+    let fileStat: Awaited<ReturnType<typeof stat>>;
+    try {
+      fileStat = await stat(filePath);
+    } catch {
+      continue;
+    }
+
+    if (!fileStat.isFile()) continue;
+
+    const type = toDocumentTypeFromName(parsed.name);
+    const metadata: BaseDocument = {
+      id: parsed.id,
+      name: parsed.name,
+      size: fileStat.size,
+      lastModified: fileStat.mtimeMs,
+      type,
+    };
+
+    if (!includeData) {
+      results.push(metadata);
+      continue;
+    }
+
+    const content = await readFile(filePath);
+    results.push({
+      ...metadata,
+      data: Array.from(new Uint8Array(content)),
+    });
+  }
+
+  return results;
 }
 
 export async function POST(req: NextRequest) {
   try {
-    await ensureDocsDir();
+    if (!(await isDocumentsV1Ready())) {
+      return NextResponse.json(
+        { error: 'Documents storage is not migrated; run /api/migrations/v1 first.' },
+        { status: 409 },
+      );
+    }
     const data = await req.json();
     const documents = data.documents as SyncedDocument[];
-    
-    // Save document metadata and content
-    for (const doc of documents) {
-      const docPath = path.join(DOCS_DIR, `${doc.id}.json`);
-      const contentPath = path.join(DOCS_DIR, `${doc.id}.${doc.type}`);
-      
-      // Save metadata (excluding binary data)
-      const metadata = {
-        id: doc.id,
-        name: doc.name,
-        size: doc.size,
-        lastModified: doc.lastModified,
-        type: doc.type
-      };
-      
-      await writeFile(docPath, JSON.stringify(metadata));
 
-      // Save content as raw binary file with proper handling for both PDF and EPUB
-      const content = Buffer.from(new Uint8Array(doc.data));
-      await writeFile(contentPath, content);
+    let existingFiles: string[] = [];
+    try {
+      existingFiles = await readdir(SYNC_DIR);
+    } catch {
+      existingFiles = [];
     }
 
-    return NextResponse.json({ success: true });
+    const existingById = new Map<string, string>();
+    for (const file of existingFiles) {
+      const parsed = parseSyncedFileName(file);
+      if (!parsed) continue;
+      if (!existingById.has(parsed.id)) {
+        existingById.set(parsed.id, file);
+      }
+    }
+
+    const stored: Array<{ oldId: string; id: string; name: string }> = [];
+
+    for (const doc of documents) {
+      const content = Buffer.from(new Uint8Array(doc.data));
+      const id = createHash('sha256').update(content).digest('hex');
+
+      const baseName = path.basename(doc.name || `${id}.${doc.type}`);
+      const safeName = baseName.replaceAll('\u0000', '').slice(0, 240) || `${id}.${doc.type}`;
+
+      const existingFile = existingById.get(id);
+      const targetFileName = existingFile ?? `${id}__${encodeURIComponent(safeName)}`;
+      const targetPath = path.join(SYNC_DIR, targetFileName);
+
+      if (!existingFile) {
+        await writeFile(targetPath, content);
+        existingById.set(id, targetFileName);
+      }
+
+      await trySetFileMtime(targetPath, doc.lastModified);
+
+      stored.push({ oldId: doc.id, id, name: safeName });
+    }
+
+    return NextResponse.json({ success: true, stored });
   } catch (error) {
     console.error('Error saving documents:', error);
     return NextResponse.json({ error: 'Failed to save documents' }, { status: 500 });
   }
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
-    await ensureDocsDir();
-    const documents: SyncedDocument[] = [];
-    
-    const files = await readdir(DOCS_DIR);
-    const jsonFiles = files.filter(file => file.endsWith('.json'));
-    
-    for (const file of jsonFiles) {
-      const docPath = path.join(DOCS_DIR, file);
-      
-      try {
-        const metadata = JSON.parse(await readFile(docPath, 'utf8')) as BaseDocument;
-        const contentPath = path.join(DOCS_DIR, `${metadata.id}.${metadata.type}`);
-        const content = await readFile(contentPath);
-        
-        // Ensure consistent array format for both PDF and EPUB
-        const uint8Array = new Uint8Array(content);
-        
-        documents.push({
-          ...metadata,
-          data: Array.from(uint8Array)
-        });
-      } catch (error) {
-        console.error(`Error processing file ${file}:`, error);
-        continue;
-      }
+    if (!(await isDocumentsV1Ready())) {
+      return NextResponse.json(
+        { error: 'Documents storage is not migrated; run /api/migrations/v1 first.' },
+        { status: 409 },
+      );
     }
+
+    const url = new URL(req.url);
+    const list = url.searchParams.get('list') === 'true';
+    const format = url.searchParams.get('format');
+    const idsParam = url.searchParams.get('ids');
+
+    // If list=true, force metadata only.
+    // If format=metadata, force metadata only.
+    // Otherwise include data.
+    const includeData = !list && format !== 'metadata';
+    
+    let targetIds: Set<string> | undefined;
+    if (idsParam) {
+        targetIds = new Set(idsParam.split(',').filter(Boolean));
+    }
+
+    const documents = await loadSyncedDocuments(includeData, targetIds);
 
     return NextResponse.json({ documents });
   } catch (error) {
@@ -86,12 +182,31 @@ export async function GET() {
 
 export async function DELETE() {
   try {
-    await ensureDocsDir();
-    const files = await readdir(DOCS_DIR);
-    
-    for (const file of files) {
-      const filePath = path.join(DOCS_DIR, file);
-      await unlink(filePath);
+    if (!(await isDocumentsV1Ready())) {
+      return NextResponse.json(
+        { error: 'Documents storage is not migrated; run /api/migrations/v1 first.' },
+        { status: 409 },
+      );
+    }
+
+    // Delete synced docs (new format) safely without touching unrelated docstore data.
+    let syncFiles: string[] = [];
+    try {
+      syncFiles = await readdir(SYNC_DIR);
+    } catch {
+      syncFiles = [];
+    }
+
+    for (const file of syncFiles) {
+      const filePath = path.join(SYNC_DIR, file);
+      try {
+        const st = await stat(filePath);
+        if (st.isFile()) {
+          await unlink(filePath);
+        }
+      } catch {
+        continue;
+      }
     }
 
     return NextResponse.json({ success: true });

@@ -7,8 +7,6 @@ import { createHash } from 'crypto';
 import type { TTSRequestPayload } from '@/types/client';
 import type { TTSError, TTSAudioBuffer } from '@/types/tts';
 
-export const runtime = 'nodejs';
-
 type CustomVoice = string;
 type ExtendedSpeechParams = Omit<SpeechCreateParams, 'voice'> & {
   voice: SpeechCreateParams['voice'] | CustomVoice;

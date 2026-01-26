@@ -8,7 +8,8 @@ import { useEPUB } from '@/contexts/EPUBContext';
 import { usePDF } from '@/contexts/PDFContext';
 import { AudiobookExportModal } from '@/components/AudiobookExportModal';
 import { useParams } from 'next/navigation';
-import type { TTSAudiobookChapter, TTSAudiobookFormat } from '@/types/tts';
+import type { TTSAudiobookChapter } from '@/types/tts';
+import type { AudiobookGenerationSettings } from '@/types/client';
 
 const isDev = process.env.NEXT_PUBLIC_NODE_ENV !== 'production' || process.env.NODE_ENV == null;
 
@@ -82,25 +83,25 @@ export function DocumentSettings({ isOpen, setIsOpen, epub, html }: {
     onProgress: (progress: number) => void,
     signal: AbortSignal,
     onChapterComplete: (chapter: TTSAudiobookChapter) => void,
-    format: TTSAudiobookFormat
+    settings: AudiobookGenerationSettings
   ) => {
     if (epub) {
-      return createEPUBAudioBook(onProgress, signal, onChapterComplete, id as string, format);
+      return createEPUBAudioBook(onProgress, signal, onChapterComplete, id as string, settings.format, settings);
     } else {
-      return createPDFAudioBook(onProgress, signal, onChapterComplete, id as string, format);
+      return createPDFAudioBook(onProgress, signal, onChapterComplete, id as string, settings.format, settings);
     }
   }, [epub, createEPUBAudioBook, createPDFAudioBook, id]);
 
   const handleRegenerateChapter = useCallback(async (
     chapterIndex: number,
     bookId: string,
-    format: TTSAudiobookFormat,
+    settings: AudiobookGenerationSettings,
     signal: AbortSignal
   ) => {
     if (epub) {
-      return regenerateEPUBChapter(chapterIndex, bookId, format, signal);
+      return regenerateEPUBChapter(chapterIndex, bookId, settings.format, signal, settings);
     } else {
-      return regeneratePDFChapter(chapterIndex, bookId, format, signal);
+      return regeneratePDFChapter(chapterIndex, bookId, settings.format, signal, settings);
     }
   }, [epub, regenerateEPUBChapter, regeneratePDFChapter]);
 

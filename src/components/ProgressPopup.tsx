@@ -8,7 +8,7 @@ interface ProgressPopupProps {
   estimatedTimeRemaining?: string;
   onCancel: () => void;
   statusMessage?: string;
-  operationType?: 'sync' | 'load' | 'audiobook';
+  operationType?: 'sync' | 'load' | 'library' | 'audiobook';
   cancelText?: string;
   onClick?: () => void;
   currentChapter?: string;

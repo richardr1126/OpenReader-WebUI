@@ -116,8 +116,14 @@ export const createAudiobookChapter = async (
     throw new Error('cancelled');
   }
 
+  if (response.status === 409) {
+    const data = await response.json().catch(() => null) as { error?: string } | null;
+    throw new Error(data?.error || 'Audiobook settings mismatch');
+  }
+
   if (!response.ok) {
-    throw new Error('Failed to convert audio chapter');
+    const data = await response.json().catch(() => null) as { error?: string } | null;
+    throw new Error(data?.error || 'Failed to convert audio chapter');
   }
 
   return await response.json();

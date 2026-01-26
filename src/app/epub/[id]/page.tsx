@@ -1,6 +1,6 @@
 'use client';
 
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { useEPUB } from '@/contexts/EPUBContext';
@@ -14,15 +14,18 @@ import TTSPlayer from '@/components/player/TTSPlayer';
 import { ZoomControl } from '@/components/ZoomControl';
 import { AudiobookExportModal } from '@/components/AudiobookExportModal';
 import { DownloadIcon } from '@/components/icons/Icons';
-import type { TTSAudiobookChapter, TTSAudiobookFormat } from '@/types/tts';
+import type { TTSAudiobookChapter } from '@/types/tts';
+import type { AudiobookGenerationSettings } from '@/types/client';
 import { SummarizeButton } from '@/components/SummarizeButton';
 import { SummarizeModal } from '@/components/SummarizeModal';
 import type { SummarizeMode } from '@/types/summary';
+import { resolveDocumentId } from '@/lib/dexie';
 
 const isDev = process.env.NEXT_PUBLIC_NODE_ENV !== 'production' || process.env.NODE_ENV == null;
 
 export default function EPUBPage() {
   const { id } = useParams();
+  const router = useRouter();
   const { setCurrentDocument, currDocName, clearCurrDoc, createFullAudioBook: createEPUBAudioBook, regenerateChapter: regenerateEPUBChapter, bookRef, renditionRef, extractPageText, currDocPages } = useEPUB();
   const { stop } = useTTS();
   const [error, setError] = useState<string | null>(null);
@@ -37,20 +40,28 @@ export default function EPUBPage() {
   const loadDocument = useCallback(async () => {
     console.log('Loading new epub (from page.tsx)');
     stop(); // Reset TTS when loading new document
-
+    let didRedirect = false;
     try {
       if (!id) {
         setError('Document not found');
         return;
       }
-      await setCurrentDocument(id as string);
+      const resolved = await resolveDocumentId(id as string);
+      if (resolved !== (id as string)) {
+        didRedirect = true;
+        router.replace(`/epub/${resolved}`);
+        return;
+      }
+      await setCurrentDocument(resolved);
     } catch (err) {
       console.error('Error loading document:', err);
       setError('Failed to load document');
     } finally {
-      setIsLoading(false);
+      if (!didRedirect) {
+        setIsLoading(false);
+      }
     }
-  }, [id, setCurrentDocument, stop]);
+  }, [id, router, setCurrentDocument, stop]);
 
   useEffect(() => {
     if (!isLoading) return;
@@ -92,18 +103,18 @@ export default function EPUBPage() {
     onProgress: (progress: number) => void,
     signal: AbortSignal,
     onChapterComplete: (chapter: TTSAudiobookChapter) => void,
-    format: TTSAudiobookFormat
+    settings: AudiobookGenerationSettings
   ) => {
-    return createEPUBAudioBook(onProgress, signal, onChapterComplete, id as string, format);
+    return createEPUBAudioBook(onProgress, signal, onChapterComplete, id as string, settings.format, settings);
   }, [createEPUBAudioBook, id]);
 
   const handleRegenerateChapter = useCallback(async (
     chapterIndex: number,
     bookId: string,
-    format: TTSAudiobookFormat,
+    settings: AudiobookGenerationSettings,
     signal: AbortSignal
   ) => {
-    return regenerateEPUBChapter(chapterIndex, bookId, format, signal);
+    return regenerateEPUBChapter(chapterIndex, bookId, settings.format, signal, settings);
   }, [regenerateEPUBChapter]);
 
   const handleExtractTextForSummary = useCallback(async (mode: SummarizeMode): Promise<string> => {

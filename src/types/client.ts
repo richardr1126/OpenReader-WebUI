@@ -38,6 +38,16 @@ export interface AudiobookStatusResponse {
   chapters: TTSAudiobookChapter[];
   bookId: string | null;
   hasComplete: boolean;
+  settings?: AudiobookGenerationSettings | null;
+}
+
+export interface AudiobookGenerationSettings {
+  ttsProvider: string;
+  ttsModel: string;
+  voice: string;
+  nativeSpeed: number;
+  postSpeed: number;
+  format: TTSAudiobookFormat;
 }
 
 export interface CreateChapterPayload {
@@ -46,6 +56,7 @@ export interface CreateChapterPayload {
   bookId: string;
   format: TTSAudiobookFormat;
   chapterIndex: number;
+  settings?: AudiobookGenerationSettings;
 }
 
 

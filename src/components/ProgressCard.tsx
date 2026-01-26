@@ -2,7 +2,7 @@ interface ProgressCardProps {
   progress: number;
   estimatedTimeRemaining?: string;
   onCancel: (e?: React.MouseEvent) => void;
-  operationType?: 'sync' | 'load' | 'audiobook';
+  operationType?: 'sync' | 'load' | 'library' | 'audiobook';
   cancelText?: string;
   currentChapter?: string;
   completedChapters?: number;
@@ -22,6 +22,7 @@ export function ProgressCard({
   const getOperationLabel = () => {
     if (operationType === 'sync') return 'Saving to Server';
     if (operationType === 'load') return 'Loading from Server';
+    if (operationType === 'library') return 'Importing Library';
     if (operationType === 'audiobook') return 'Generating Audiobook';
     return null;
   };

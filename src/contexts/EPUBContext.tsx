@@ -32,6 +32,7 @@ import type {
   TTSRequestHeaders,
   TTSRequestPayload,
   TTSRetryOptions,
+  AudiobookGenerationSettings,
 } from '@/types/client';
 
 interface EPUBContextType {
@@ -43,8 +44,21 @@ interface EPUBContextType {
   setCurrentDocument: (id: string) => Promise<void>;
   clearCurrDoc: () => void;
   extractPageText: (book: Book, rendition: Rendition, shouldPause?: boolean) => Promise<string>;
-  createFullAudioBook: (onProgress: (progress: number) => void, signal?: AbortSignal, onChapterComplete?: (chapter: TTSAudiobookChapter) => void, bookId?: string, format?: TTSAudiobookFormat) => Promise<string>;
-  regenerateChapter: (chapterIndex: number, bookId: string, format: TTSAudiobookFormat, signal: AbortSignal) => Promise<TTSAudiobookChapter>;
+  createFullAudioBook: (
+    onProgress: (progress: number) => void,
+    signal?: AbortSignal,
+    onChapterComplete?: (chapter: TTSAudiobookChapter) => void,
+    bookId?: string,
+    format?: TTSAudiobookFormat,
+    settings?: AudiobookGenerationSettings
+  ) => Promise<string>;
+  regenerateChapter: (
+    chapterIndex: number,
+    bookId: string,
+    format: TTSAudiobookFormat,
+    signal: AbortSignal,
+    settings?: AudiobookGenerationSettings
+  ) => Promise<TTSAudiobookChapter>;
   bookRef: RefObject<Book | null>;
   renditionRef: RefObject<Rendition | undefined>;
   tocRef: RefObject<NavItem[]>;
@@ -325,11 +339,25 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
     signal?: AbortSignal,
     onChapterComplete?: (chapter: TTSAudiobookChapter) => void,
     providedBookId?: string,
-    format: TTSAudiobookFormat = 'mp3'
+    format: TTSAudiobookFormat = 'mp3',
+    settings?: AudiobookGenerationSettings
   ): Promise<string> => {
     try {
       const sections = await extractBookText();
       if (!sections.length) throw new Error('No text content found in book');
+
+      const effectiveProvider = settings?.ttsProvider ?? ttsProvider;
+      const effectiveModel = settings?.ttsModel ?? ttsModel;
+      const effectiveVoice =
+        settings?.voice ||
+        voice ||
+        (effectiveProvider === 'openai'
+          ? 'alloy'
+          : effectiveProvider === 'deepinfra'
+            ? 'af_bella'
+            : 'af_sarah');
+      const effectiveNativeSpeed = settings?.nativeSpeed ?? voiceSpeed;
+      const effectiveFormat = settings?.format ?? format;
 
       // Calculate total length for accurate progress tracking
       const totalLength = sections.reduce((sum, section) => sum + section.text.trim().length, 0);
@@ -406,16 +434,16 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
             'Content-Type': 'application/json',
             'x-openai-key': apiKey,
             'x-openai-base-url': baseUrl,
-            'x-tts-provider': ttsProvider,
+            'x-tts-provider': effectiveProvider,
           };
 
           const reqBody: TTSRequestPayload = {
             text: trimmedText,
-            voice: voice || (ttsProvider === 'openai' ? 'alloy' : (ttsProvider === 'deepinfra' ? 'af_bella' : 'af_sarah')),
-            speed: voiceSpeed,
+            voice: effectiveVoice,
+            speed: effectiveNativeSpeed,
             format: 'mp3',
-            model: ttsModel,
-            instructions: ttsModel === 'gpt-4o-mini-tts' ? ttsInstructions : undefined
+            model: effectiveModel,
+            instructions: effectiveModel === 'gpt-4o-mini-tts' ? ttsInstructions : undefined
           };
 
           const retryOptions: TTSRetryOptions = {
@@ -459,8 +487,9 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
             chapterTitle,
             buffer: Array.from(new Uint8Array(audioBuffer)),
             bookId,
-            format,
-            chapterIndex: i
+            format: effectiveFormat,
+            chapterIndex: i,
+            settings
           }, signal);
 
           if (!bookId) {
@@ -492,7 +521,7 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
               title: sectionTitleMap.get(section.href) || `Chapter ${i + 1}`,
               status: 'error',
               bookId,
-              format
+              format: effectiveFormat
             });
           }
         }
@@ -516,13 +545,27 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
     chapterIndex: number,
     bookId: string,
     format: TTSAudiobookFormat,
-    signal: AbortSignal
+    signal: AbortSignal,
+    settings?: AudiobookGenerationSettings
   ): Promise<TTSAudiobookChapter> => {
     try {
       const sections = await extractBookText();
       if (chapterIndex >= sections.length) {
         throw new Error('Invalid chapter index');
       }
+
+      const effectiveProvider = settings?.ttsProvider ?? ttsProvider;
+      const effectiveModel = settings?.ttsModel ?? ttsModel;
+      const effectiveVoice =
+        settings?.voice ||
+        voice ||
+        (effectiveProvider === 'openai'
+          ? 'alloy'
+          : effectiveProvider === 'deepinfra'
+            ? 'af_bella'
+            : 'af_sarah');
+      const effectiveNativeSpeed = settings?.nativeSpeed ?? voiceSpeed;
+      const effectiveFormat = settings?.format ?? format;
 
       const section = sections[chapterIndex];
       const trimmedText = section.text.trim();
@@ -557,16 +600,16 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
         'Content-Type': 'application/json',
         'x-openai-key': apiKey,
         'x-openai-base-url': baseUrl,
-        'x-tts-provider': ttsProvider,
+        'x-tts-provider': effectiveProvider,
       };
 
       const reqBody: TTSRequestPayload = {
         text: trimmedText,
-        voice: voice || (ttsProvider === 'openai' ? 'alloy' : (ttsProvider === 'deepinfra' ? 'af_bella' : 'af_sarah')),
-        speed: voiceSpeed,
+        voice: effectiveVoice,
+        speed: effectiveNativeSpeed,
         format: 'mp3',
-        model: ttsModel,
-        instructions: ttsModel === 'gpt-4o-mini-tts' ? ttsInstructions : undefined
+        model: effectiveModel,
+        instructions: effectiveModel === 'gpt-4o-mini-tts' ? ttsInstructions : undefined
       };
 
       const retryOptions: TTSRetryOptions = {
@@ -596,8 +639,9 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
         chapterTitle,
         buffer: Array.from(new Uint8Array(audioBuffer)),
         bookId,
-        format,
-        chapterIndex
+        format: effectiveFormat,
+        chapterIndex,
+        settings
       }, signal);
 
       return chapter;
@@ -963,7 +1007,7 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
           'highlight',
           wordCfi,
           {},
-          () => {},
+          () => { },
           '',
           {
             fill: 'var(--accent)',

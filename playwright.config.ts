@@ -36,17 +36,28 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      use: {
+        ...devices['Desktop Chrome'],
+        extraHTTPHeaders: { 'x-openreader-test-namespace': 'chromium' },
+      },
     },
 
     {
       name: 'firefox',
-      use: { ...devices['Desktop Firefox'] },
+      testIgnore: '**/unit/**',
+      use: {
+        ...devices['Desktop Firefox'],
+        extraHTTPHeaders: { 'x-openreader-test-namespace': 'firefox' },
+      },
     },
 
     {
       name: 'webkit',
-      use: { ...devices['Desktop Safari'] },
+      testIgnore: '**/unit/**',
+      use: {
+        ...devices['Desktop Safari'],
+        extraHTTPHeaders: { 'x-openreader-test-namespace': 'webkit' },
+      },
     },
 
     /* Test against mobile viewports. */
