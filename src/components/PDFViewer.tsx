@@ -1,6 +1,6 @@
 'use client';
 
-import { RefObject, useCallback, useState, useEffect, useRef } from 'react';
+import { RefObject, useCallback, useState, useEffect, useRef, useMemo } from 'react';
 import { Document, Page } from 'react-pdf';
 import type { Dest } from 'react-pdf/src/shared/types.js';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
@@ -47,7 +47,33 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
     currDocPages,
     currDocText,
     currDocPage,
+    pdfDocument,
   } = usePDF();
+
+  // Track document loading state to prevent rendering pages during transitions
+  const [isDocumentReady, setIsDocumentReady] = useState(false);
+  const documentKeyRef = useRef(0);
+  const lastDataRef = useRef<ArrayBuffer | undefined>(undefined);
+
+  // Reset ready state when document data changes
+  if (currDocData !== lastDataRef.current) {
+    lastDataRef.current = currDocData;
+    if (currDocData) {
+      documentKeyRef.current += 1;
+    }
+    if (isDocumentReady) {
+      setIsDocumentReady(false);
+    }
+  }
+
+  // Create a Uint8Array copy to prevent "detached ArrayBuffer" errors
+  const pdfFileData = useMemo(() => {
+    if (!currDocData) return undefined;
+    return { data: new Uint8Array(currDocData) };
+  }, [currDocData]);
+
+  // Only render pages when document is fully loaded and ready
+  const canRenderPages = isDocumentReady && pdfDocument && currDocPages;
 
   useEffect(() => {
     /*
@@ -165,11 +191,16 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
   return (
     <div ref={containerRef} className="flex flex-col items-center overflow-auto w-full px-6 h-full">
       <Document
+        key={documentKeyRef.current}
         loading={<DocumentSkeleton />}
         noData={<DocumentSkeleton />}
-        file={currDocData}
+        file={pdfFileData}
         onLoadSuccess={(pdf) => {
           onDocumentLoadSuccess(pdf);
+          setIsDocumentReady(true);
+        }}
+        onLoadError={() => {
+          // Ignore errors from destroyed documents during navigation/reload
         }}
         onItemClick={(args: PDFOnLinkClickArgs) => {
           if (args?.pageNumber) {
@@ -188,7 +219,7 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
           {viewType === 'scroll' ? (
             // Scroll mode: render all pages
             <div className="flex flex-col gap-4">
-              {currDocPages && [...Array(currDocPages)].map((_, i) => (
+              {canRenderPages && [...Array(currDocPages)].map((_, i) => (
                 <Page
                   key={`page_${i + 1}`}
                   pageNumber={i + 1}
@@ -206,7 +237,7 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
           ) : (
             // Single/Dual page mode
             <div className="flex justify-center gap-4">
-              {currDocPages && leftPage > 0 && (
+              {canRenderPages && leftPage > 0 && (
                 <Page
                   key={`page_${leftPage}`}
                   pageNumber={leftPage}
@@ -220,7 +251,7 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
                   }}
                 />
               )}
-              {currDocPages && rightPage && rightPage <= currDocPages && viewType === 'dual' && (
+              {canRenderPages && rightPage && rightPage <= currDocPages && viewType === 'dual' && (
                 <Page
                   key={`page_${rightPage}`}
                   pageNumber={rightPage}

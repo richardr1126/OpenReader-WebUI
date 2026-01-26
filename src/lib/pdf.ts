@@ -168,9 +168,6 @@ export async function extractTextFromPDF(
   margins = { header: 0.07, footer: 0.07, left: 0.07, right: 0.07 }
 ): Promise<string> {
   try {
-    // Log pdf worker version
-    //console.log('PDF worker version:', pdfjs.GlobalWorkerOptions.workerSrc);
-
     const page = await pdf.getPage(pageNumber);
     const textContent = await page.getTextContent();
     
@@ -271,6 +268,11 @@ export async function extractTextFromPDF(
 
     return pageText.replace(/\s+/g, ' ').trim();
   } catch (error) {
+    // Return empty string if document was destroyed during async operation
+    const msg = error instanceof Error ? error.message : '';
+    if (msg.includes('sendWithPromise') || msg.includes('destroyed')) {
+      return '';
+    }
     console.error('Error extracting text from PDF:', error);
     throw new Error('Failed to extract text from PDF');
   }

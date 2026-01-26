@@ -1,8 +1,7 @@
 export type SummarizeMode = 'current_page' | 'select_page' | 'whole_book';
-export type SummaryProvider = 'openai' | 'anthropic' | 'custom-openai';
 
 export interface SummaryRow {
-  id: string;           // `${docId}-${scope}-${pageNumber ?? 'all'}`
+  id: string;
   docId: string;
   docType: 'pdf' | 'epub' | 'html';
   scope: 'page' | 'book';
@@ -18,6 +17,8 @@ export interface SummarizeRequest {
   text: string;
   mode: SummarizeMode;
   maxLength?: number;
+  isChunk?: boolean;
+  isFinalPass?: boolean;
 }
 
 export interface SummarizeResponse {
@@ -25,10 +26,19 @@ export interface SummarizeResponse {
   provider: string;
   model: string;
   tokensUsed?: number;
+  chunksProcessed?: number;
+  totalChunks?: number;
 }
 
 export interface SummarizeError {
   code: string;
   message: string;
   details?: string;
+}
+
+export interface ChunkSummaryProgress {
+  currentChunk: number;
+  totalChunks: number;
+  phase: 'chunking' | 'summarizing' | 'combining' | 'complete';
+  message: string;
 }

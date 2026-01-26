@@ -35,6 +35,7 @@ export interface AppConfigValues {
   summaryModel: string;
   summaryApiKey: string;
   summaryBaseUrl: string;
+  summaryContextLimit: number; // Token limit for summarization
 }
 
 export const APP_CONFIG_DEFAULTS: AppConfigValues = {
@@ -73,6 +74,7 @@ export const APP_CONFIG_DEFAULTS: AppConfigValues = {
   summaryModel: 'llama-3.3-70b-versatile',
   summaryApiKey: '',
   summaryBaseUrl: '',
+  summaryContextLimit: 32768, // Default to 32k tokens
 };
 
 export interface AppConfigRow extends AppConfigValues {

@@ -23,6 +23,21 @@ Provide a comprehensive summary of the entire document content provided.
 Structure your summary with key themes, main arguments, and important conclusions.
 For longer texts, organize the summary into logical sections.
 Do not include any preamble like "Here is a summary" - just provide the summary directly.`,
+
+  // For summarizing individual chunks of a large document
+  chunk: `You are a helpful assistant that summarizes text content.
+This is a portion of a larger document. Provide a detailed summary of this section.
+Capture all key information, arguments, and details as they may be needed for the final summary.
+Focus on factual content and main points. Be thorough but concise.
+Do not include any preamble - just provide the summary directly.`,
+
+  // For combining chunk summaries into a final cohesive summary
+  final_pass: `You are a helpful assistant that creates comprehensive document summaries.
+You are given summaries of different sections of a document, separated by "---".
+Your task is to synthesize these section summaries into a single, cohesive, well-organized summary.
+Structure the final summary with clear sections covering key themes, main arguments, and important conclusions.
+Remove any redundancy while preserving all important information.
+Do not include any preamble like "Here is a summary" - just provide the summary directly.`,
 };
 
 export async function POST(req: NextRequest) {
@@ -53,9 +68,9 @@ export async function POST(req: NextRequest) {
     }
 
     const body = (await req.json()) as SummarizeRequest;
-    const { text, mode, maxLength } = body;
+    const { text, mode, maxLength, isChunk, isFinalPass } = body;
 
-    console.log('Received summarize request:', { provider, modelId, mode, textLength: text?.length });
+    console.log('Received summarize request:', { provider, modelId, mode, textLength: text?.length, isChunk, isFinalPass });
 
     if (!text) {
       const errorBody: SummarizeError = {
@@ -73,10 +88,25 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(errorBody, { status: 400 });
     }
 
-    const systemPrompt = SYSTEM_PROMPTS[mode] || SYSTEM_PROMPTS.current_page;
-    const userPrompt = maxLength
-      ? `Please summarize the following text in approximately ${maxLength} words:\n\n${text}`
-      : `Please summarize the following text:\n\n${text}`;
+    // Select appropriate prompt based on chunking mode
+    let systemPrompt: string;
+    let userPrompt: string;
+
+    if (isChunk) {
+      // Summarizing an individual chunk
+      systemPrompt = SYSTEM_PROMPTS.chunk;
+      userPrompt = `Please summarize this section of the document:\n\n${text}`;
+    } else if (isFinalPass) {
+      // Combining chunk summaries into final summary
+      systemPrompt = SYSTEM_PROMPTS.final_pass;
+      userPrompt = `Please synthesize these section summaries into a comprehensive document summary:\n\n${text}`;
+    } else {
+      // Normal summarization
+      systemPrompt = SYSTEM_PROMPTS[mode] || SYSTEM_PROMPTS.current_page;
+      userPrompt = maxLength
+        ? `Please summarize the following text in approximately ${maxLength} words:\n\n${text}`
+        : `Please summarize the following text:\n\n${text}`;
+    }
 
     let model;
 

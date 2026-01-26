@@ -13,12 +13,15 @@ import {
   Radio,
   Label,
 } from '@headlessui/react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { CopyIcon, CheckIcon } from '@/components/icons/Icons';
+import { CodeBlock } from '@/components/CodeBlock';
 import { LoadingSpinner } from '@/components/Spinner';
 import { useConfig } from '@/contexts/ConfigContext';
 import { generateSummary } from '@/lib/summarize';
 import { saveSummary, getSummary } from '@/lib/dexie';
-import type { SummarizeMode, SummaryRow } from '@/types/summary';
+import type { SummarizeMode, SummaryRow, ChunkSummaryProgress } from '@/types/summary';
 
 interface SummarizeModalProps {
   isOpen: boolean;
@@ -45,7 +48,7 @@ export function SummarizeModal({
   totalPages,
   onExtractText,
 }: SummarizeModalProps) {
-  const { summaryProvider, summaryModel, summaryApiKey, summaryBaseUrl } = useConfig();
+  const { summaryProvider, summaryModel, summaryApiKey, summaryBaseUrl, summaryContextLimit } = useConfig();
 
   const [mode, setMode] = useState<SummarizeMode>('current_page');
   const [selectedPage, setSelectedPage] = useState<number>(currentPage);
@@ -54,6 +57,7 @@ export function SummarizeModal({
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [savedSummary, setSavedSummary] = useState<SummaryRow | null>(null);
+  const [chunkProgress, setChunkProgress] = useState<ChunkSummaryProgress | null>(null);
 
   // Update selected page when current page changes
   useEffect(() => {
@@ -93,12 +97,13 @@ export function SummarizeModal({
     setError(null);
     setSummary('');
     setSavedSummary(null);
+    setChunkProgress(null);
 
     try {
       const pageNumber = mode === 'whole_book' ? undefined : (mode === 'current_page' ? currentPage : selectedPage);
       const text = await onExtractText(mode, pageNumber);
 
-      if (!text || text.trim().length === 0) {
+      if (!text?.trim()) {
         throw new Error('No text could be extracted from the document');
       }
 
@@ -107,11 +112,11 @@ export function SummarizeModal({
         apiKey: summaryApiKey,
         baseUrl: summaryBaseUrl,
         model: summaryModel,
-      });
+        contextLimit: summaryContextLimit,
+      }, undefined, setChunkProgress);
 
       setSummary(result.summary);
 
-      // Save to IndexedDB
       await saveSummary({
         docId,
         docType,
@@ -124,13 +129,13 @@ export function SummarizeModal({
         updatedAt: Date.now(),
       });
 
-      // Refresh saved summary state
       await checkSavedSummary();
     } catch (err) {
       console.error('Error generating summary:', err);
       setError(err instanceof Error ? err.message : 'Failed to generate summary');
     } finally {
       setIsGenerating(false);
+      setChunkProgress(null);
     }
   };
 
@@ -256,7 +261,11 @@ export function SummarizeModal({
                     {isGenerating ? (
                       <>
                         <LoadingSpinner />
-                        <span className="ml-2">Generating...</span>
+                        <span className="ml-2">
+                          {chunkProgress 
+                            ? chunkProgress.message 
+                            : 'Generating...'}
+                        </span>
                       </>
                     ) : savedSummary ? (
                       'Regenerate Summary'
@@ -264,6 +273,22 @@ export function SummarizeModal({
                       'Generate Summary'
                     )}
                   </Button>
+
+                  {/* Chunk progress indicator */}
+                  {isGenerating && chunkProgress && chunkProgress.totalChunks > 1 && (
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-xs text-muted">
+                        <span>{chunkProgress.message}</span>
+                        <span>{Math.round((chunkProgress.currentChunk / chunkProgress.totalChunks) * 100)}%</span>
+                      </div>
+                      <div className="w-full bg-offbase rounded-full h-2">
+                        <div 
+                          className="bg-accent h-2 rounded-full transition-all duration-300"
+                          style={{ width: `${(chunkProgress.currentChunk / chunkProgress.totalChunks) * 100}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
 
                   {/* Error display */}
                   {error && (
@@ -301,8 +326,34 @@ export function SummarizeModal({
                           )}
                         </Button>
                       </div>
-                      <div className="max-h-64 overflow-y-auto p-3 bg-background rounded-lg border border-offbase">
-                        <p className="text-sm text-foreground whitespace-pre-wrap">{summary}</p>
+                      <div className="max-h-64 overflow-y-auto p-3 bg-background rounded-lg border border-offbase
+                                      prose prose-sm dark:prose-invert max-w-none text-foreground
+                                      prose-headings:text-foreground prose-headings:font-semibold prose-headings:mt-3 prose-headings:mb-2
+                                      prose-p:text-foreground prose-p:my-1.5
+                                      prose-strong:text-foreground prose-em:text-foreground
+                                      prose-ul:text-foreground prose-ol:text-foreground prose-li:text-foreground prose-li:my-0.5
+                                      prose-a:text-accent hover:prose-a:text-secondary-accent
+                                      prose-blockquote:border-accent prose-blockquote:text-muted
+                                      prose-code:text-accent prose-code:bg-offbase prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-xs prose-code:before:content-none prose-code:after:content-none">
+                        <ReactMarkdown
+                          remarkPlugins={[remarkGfm]}
+                          components={{
+                            pre: ({ children }) => <>{children}</>,
+                            code: ({ className, children, ...props }) => {
+                              const match = /language-(\w+)/.exec(className || '');
+                              const isInline = !match && !className;
+                              return isInline ? (
+                                <code className={className} {...props}>
+                                  {children}
+                                </code>
+                              ) : (
+                                <CodeBlock>{String(children).replace(/\n$/, '')}</CodeBlock>
+                              );
+                            },
+                          }}
+                        >
+                          {summary}
+                        </ReactMarkdown>
                       </div>
                     </div>
                   )}

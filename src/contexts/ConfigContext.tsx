@@ -40,6 +40,7 @@ interface ConfigContextType {
   summaryModel: string;
   summaryApiKey: string;
   summaryBaseUrl: string;
+  summaryContextLimit: number;
 }
 
 const ConfigContext = createContext<ConfigContextType | undefined>(undefined);
@@ -117,6 +118,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     summaryModel,
     summaryApiKey,
     summaryBaseUrl,
+    summaryContextLimit,
   } = config || APP_CONFIG_DEFAULTS;
 
   /**
@@ -221,6 +223,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
       summaryModel,
       summaryApiKey,
       summaryBaseUrl,
+      summaryContextLimit,
     }}>
       {children}
     </ConfigContext.Provider>

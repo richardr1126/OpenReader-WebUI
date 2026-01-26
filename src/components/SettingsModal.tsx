@@ -41,7 +41,7 @@ export function SettingsModal() {
   const [isOpen, setIsOpen] = useState(false);
 
   const { theme, setTheme } = useTheme();
-  const { apiKey, baseUrl, ttsProvider, ttsModel, ttsInstructions, updateConfig, updateConfigKey, summaryProvider, summaryModel, summaryApiKey, summaryBaseUrl } = useConfig();
+  const { apiKey, baseUrl, ttsProvider, ttsModel, ttsInstructions, updateConfig, updateConfigKey, summaryProvider, summaryModel, summaryApiKey, summaryBaseUrl, summaryContextLimit } = useConfig();
   const { clearPDFs, clearEPUBs, clearHTML } = useDocuments();
   const [localApiKey, setLocalApiKey] = useState(apiKey);
   const [localBaseUrl, setLocalBaseUrl] = useState(baseUrl);
@@ -54,6 +54,18 @@ export function SettingsModal() {
   const [localSummaryModel, setLocalSummaryModel] = useState(summaryModel);
   const [localSummaryApiKey, setLocalSummaryApiKey] = useState(summaryApiKey);
   const [localSummaryBaseUrl, setLocalSummaryBaseUrl] = useState(summaryBaseUrl);
+  const [localSummaryContextLimit, setLocalSummaryContextLimit] = useState(summaryContextLimit);
+  
+  // Context limit options
+  const contextLimitOptions = useMemo(() => [
+    { id: 4096, name: '4K tokens' },
+    { id: 8192, name: '8K tokens' },
+    { id: 16384, name: '16K tokens' },
+    { id: 32768, name: '32K tokens' },
+    { id: 65536, name: '64K tokens' },
+    { id: 131072, name: '128K tokens' },
+    { id: 200000, name: '200K tokens' },
+  ], []);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [showProgress, setShowProgress] = useState(false);
@@ -205,7 +217,8 @@ export function SettingsModal() {
     setLocalSummaryModel(summaryModel);
     setLocalSummaryApiKey(summaryApiKey);
     setLocalSummaryBaseUrl(summaryBaseUrl);
-  }, [apiKey, baseUrl, ttsProvider, ttsModel, ttsInstructions, checkFirstVist, summaryProvider, summaryModel, summaryApiKey, summaryBaseUrl]);
+    setLocalSummaryContextLimit(summaryContextLimit);
+  }, [apiKey, baseUrl, ttsProvider, ttsModel, ttsInstructions, checkFirstVist, summaryProvider, summaryModel, summaryApiKey, summaryBaseUrl, summaryContextLimit]);
 
   // Detect if current model is custom (not in presets) and mirror it in the input field
   useEffect(() => {
@@ -322,7 +335,8 @@ export function SettingsModal() {
     setLocalSummaryModel(summaryModel);
     setLocalSummaryApiKey(summaryApiKey);
     setLocalSummaryBaseUrl(summaryBaseUrl);
-  }, [apiKey, baseUrl, ttsProvider, ttsModel, ttsInstructions, ttsModels, summaryProvider, summaryModel, summaryApiKey, summaryBaseUrl]);
+    setLocalSummaryContextLimit(summaryContextLimit);
+  }, [apiKey, baseUrl, ttsProvider, ttsModel, ttsInstructions, ttsModels, summaryProvider, summaryModel, summaryApiKey, summaryBaseUrl, summaryContextLimit]);
 
   const tabs = [
     { name: 'API', icon: '🔑' },
@@ -367,7 +381,7 @@ export function SettingsModal() {
                 leaveFrom="opacity-100 scale-100"
                 leaveTo="opacity-0 scale-95"
               >
-                <DialogPanel className="w-full max-w-md transform rounded-2xl bg-base p-6 text-left align-middle shadow-xl transition-all">
+                <DialogPanel className="w-full max-w-md lg:max-w-lg transform rounded-2xl bg-base p-6 text-left align-middle shadow-xl transition-all">
                   <DialogTitle
                     as="h3"
                     className="text-lg font-semibold leading-6 text-foreground mb-4"
@@ -376,23 +390,27 @@ export function SettingsModal() {
                   </DialogTitle>
 
                   <TabGroup>
-                    <TabList className="flex flex-col sm:flex-col-none sm:flex-row gap-1 rounded-xl bg-background p-1 mb-4">
+                    <TabList className="grid grid-cols-2 lg:grid-cols-4 gap-1 rounded-xl bg-background p-1 mb-4">
                       {tabs.map((tab) => (
                         <Tab
                           key={tab.name}
                           className={({ selected }) =>
-                            `w-full rounded-lg py-1 text-sm font-medium
-                             ring-accent/60 ring-offset-2 ring-offset-base
+                            `w-full rounded-lg py-2 px-2 text-sm font-medium transition-colors
                              ${selected
-                              ? 'bg-accent text-background shadow'
-                              : 'text-foreground hover:text-accent'
+                              ? 'bg-accent shadow'
+                              : 'hover:bg-offbase/50'
                             }`
                           }
                         >
-                          <span className="flex items-center justify-center gap-2">
-                            <span>{tab.icon}</span>
-                            {tab.name}
-                          </span>
+                          {({ selected }) => (
+                            <span 
+                              className="flex items-center justify-center gap-1.5"
+                              style={{ color: selected ? 'var(--background)' : 'var(--foreground)' }}
+                            >
+                              <span>{tab.icon}</span>
+                              <span>{tab.name}</span>
+                            </span>
+                          )}
                         </Tab>
                       ))}
                     </TabList>
@@ -585,7 +603,7 @@ export function SettingsModal() {
                         <div className="pt-4 flex justify-end gap-2">
                           <Button
                             type="button"
-                            className="inline-flex justify-center rounded-lg bg-background px-3 py-1.5 text-sm 
+                            className="inline-flex justify-center rounded-lg bg-background px-3 py-1.5 text-sm
                                font-medium text-foreground hover:bg-offbase focus:outline-none 
                                focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2
                                transform transition-transform duration-200 ease-in-out hover:scale-[1.04] hover:text-accent"
@@ -602,7 +620,7 @@ export function SettingsModal() {
                           </Button>
                           <Button
                             type="button"
-                             className="inline-flex justify-center rounded-lg bg-accent px-3 py-1.5 text-sm 
+                             className="inline-flex justify-center rounded-lg bg-accent px-3 py-1.5 text-sm
                                font-medium text-background hover:bg-secondary-accent focus:outline-none 
                                focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2
                                transform transition-transform duration-200 ease-in-out hover:scale-[1.04] hover:text-background"
@@ -795,6 +813,62 @@ export function SettingsModal() {
                           </div>
                         )}
 
+                        <div className="space-y-1">
+                          <label className="block text-sm font-medium text-foreground">
+                            Context Limit
+                            <span className="ml-2 text-xs text-muted">(for chunked summarization)</span>
+                          </label>
+                          <Listbox
+                            value={contextLimitOptions.find(o => o.id === localSummaryContextLimit) || contextLimitOptions[3]}
+                            onChange={(option) => setLocalSummaryContextLimit(option.id)}
+                          >
+                            <ListboxButton className="relative w-full cursor-pointer rounded-lg bg-background py-1.5 pl-3 pr-10 text-left text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-accent transform transition-transform duration-200 ease-in-out hover:scale-[1.009] hover:text-accent hover:bg-offbase">
+                              <span className="block truncate">
+                                {contextLimitOptions.find(o => o.id === localSummaryContextLimit)?.name || '32K tokens'}
+                              </span>
+                              <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2">
+                                <ChevronUpDownIcon className="h-5 w-5 text-muted" />
+                              </span>
+                            </ListboxButton>
+                            <Transition
+                              as={Fragment}
+                              leave="transition ease-in duration-100"
+                              leaveFrom="opacity-100"
+                              leaveTo="opacity-0"
+                            >
+                              <ListboxOptions className="absolute mt-1 w-full overflow-auto rounded-md bg-background py-1 shadow-lg ring-1 ring-black/5 focus:outline-none z-50">
+                                {contextLimitOptions.map((option) => (
+                                  <ListboxOption
+                                    key={option.id}
+                                    className={({ active }) =>
+                                      `relative cursor-pointer select-none py-1.5 pl-10 pr-4 ${
+                                        active ? 'bg-offbase text-accent' : 'text-foreground'
+                                      }`
+                                    }
+                                    value={option}
+                                  >
+                                    {({ selected }) => (
+                                      <>
+                                        <span className={`block truncate ${selected ? 'font-medium' : 'font-normal'}`}>
+                                          {option.name}
+                                        </span>
+                                        {selected ? (
+                                          <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-accent">
+                                            <CheckIcon className="h-5 w-5" />
+                                          </span>
+                                        ) : null}
+                                      </>
+                                    )}
+                                  </ListboxOption>
+                                ))}
+                              </ListboxOptions>
+                            </Transition>
+                          </Listbox>
+                          <p className="text-xs text-muted">
+                            Documents larger than this limit will be split into chunks and summarized hierarchically.
+                          </p>
+                        </div>
+
                         <div className="pt-4 flex justify-end gap-2">
                           <Button
                             type="button"
@@ -807,6 +881,7 @@ export function SettingsModal() {
                               setLocalSummaryModel('llama-3.3-70b-versatile');
                               setLocalSummaryApiKey('');
                               setLocalSummaryBaseUrl('');
+                              setLocalSummaryContextLimit(32768);
                             }}
                           >
                             Reset
@@ -822,6 +897,7 @@ export function SettingsModal() {
                               await updateConfigKey('summaryModel', localSummaryModel);
                               await updateConfigKey('summaryApiKey', localSummaryApiKey);
                               await updateConfigKey('summaryBaseUrl', localSummaryBaseUrl);
+                              await updateConfigKey('summaryContextLimit', localSummaryContextLimit);
                               setIsOpen(false);
                             }}
                           >
