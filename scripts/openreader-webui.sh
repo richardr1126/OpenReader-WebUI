@@ -7,6 +7,7 @@ set -e
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
 # Load GROQ_API_KEY
 source "$SCRIPT_DIR/.env"
@@ -14,8 +15,7 @@ export GROQ_API_KEY
 
 # Stop existing services
 lsof -ti:8880 | xargs -r kill -9 2>/dev/null || true
-docker stop openreader-webui 2>/dev/null || true
-docker rm openreader-webui 2>/dev/null || true
+lsof -ti:3003 | xargs -r kill -9 2>/dev/null || true
 sleep 1
 
 # Start Groq TTS proxy (adds /voices endpoint for OpenReader)
@@ -28,16 +28,17 @@ if ! curl -s http://localhost:8880/ > /dev/null; then
     exit 1
 fi
 
-# Run OpenReader WebUI
-docker run --name openreader-webui \
-  --restart unless-stopped \
-  --add-host=host.docker.internal:host-gateway \
-  -e API_KEY=none \
-  -e API_BASE=http://host.docker.internal:8880/v1 \
-  -p 3003:3003 \
-  -v openreader_docstore:/app/docstore \
-  -d \
-  ghcr.io/richardr1126/openreader-webui:latest
+# Build and run OpenReader WebUI
+cd "$PROJECT_DIR"
+pnpm install
+pnpm build
+
+# Set environment variables for the app
+export API_KEY=none
+export API_BASE=http://localhost:8880/v1
+
+# Start the app
+pnpm start &
 
 echo "OpenReader WebUI started at http://localhost:3003"
 echo "Groq TTS proxy running on port 8880"
