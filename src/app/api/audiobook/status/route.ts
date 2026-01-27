@@ -6,6 +6,7 @@ import { listStoredChapters } from '@/lib/server/audiobook';
 import type { AudiobookGenerationSettings } from '@/types/client';
 import type { TTSAudiobookFormat, TTSAudiobookChapter } from '@/types/tts';
 import { readFile } from 'fs/promises';
+import { requireAuthContext, requireAudiobookOwned } from '@/lib/server/auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,6 +36,23 @@ export async function GET(request: NextRequest) {
         { status: 409 },
       );
     }
+
+    const ctxOrRes = await requireAuthContext(request);
+    if (ctxOrRes instanceof Response) return ctxOrRes;
+
+    if (ctxOrRes.authEnabled) {
+      const denied = await requireAudiobookOwned(bookId, ctxOrRes.userId!, { onDenied: 'notFound' });
+      if (denied) {
+        return NextResponse.json({
+          chapters: [],
+          exists: false,
+          hasComplete: false,
+          bookId: null,
+          settings: null,
+        });
+      }
+    }
+
     const intermediateDir = join(getAudiobooksRootDir(request), `${bookId}-audiobook`);
 
     if (!existsSync(intermediateDir)) {
@@ -66,8 +84,8 @@ export async function GET(request: NextRequest) {
 
     const hasComplete = existsSync(join(intermediateDir, 'complete.mp3')) || existsSync(join(intermediateDir, 'complete.m4b'));
 
-    return NextResponse.json({ 
-      chapters, 
+    return NextResponse.json({
+      chapters,
       exists: true,
       hasComplete,
       bookId,

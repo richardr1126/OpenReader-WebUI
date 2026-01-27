@@ -43,19 +43,14 @@ export function UserMenu({ className = '' }: { className?: string }) {
   }
 
   return (
-    <div className={`flex items-center gap-2 ${className}`}>
-      <div className="hidden sm:flex flex-col items-end mr-1">
-        <span className="text-xs font-medium text-foreground leading-none mb-0.5">
-          {session.user.name || session.user.email || 'Account'}
-        </span>
-        <span className="text-[10px] text-muted truncate max-w-[120px] leading-none">
-          {session.user.email}
-        </span>
-      </div>
+    <div className={`flex items-center gap-2 px-2 py-1 rounded-md border border-offbase bg-base ${className}`}>
+      <span className="hidden sm:block text-xs font-medium text-foreground truncate max-w-[160px]">
+        {session.user.email || 'Account'}
+      </span>
 
       <Button
         onClick={handleSignOut}
-        className="inline-flex items-center py-1 px-2 rounded-md border border-offbase bg-base text-foreground text-xs hover:bg-offbase transition-all duration-200 ease-in-out hover:scale-[1.09] hover:text-red-500"
+        className="inline-flex items-center text-foreground text-xs hover:text-accent transform transition-all duration-200 ease-in-out hover:scale-[1.09]"
         title="Sign Out"
       >
         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

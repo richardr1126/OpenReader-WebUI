@@ -4,6 +4,10 @@ import { readdir, unlink } from 'fs/promises';
 import { join } from 'path';
 import { AUDIOBOOKS_V1_DIR, isAudiobooksV1Ready } from '@/lib/server/docstore';
 import { findStoredChapterByIndex } from '@/lib/server/audiobook';
+import { db } from '@/db';
+import { audiobookChapters } from '@/db/schema';
+import { and, eq } from 'drizzle-orm';
+import { requireAuthContext, requireAudiobookOwned } from '@/lib/server/auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,10 +22,10 @@ export async function GET(request: NextRequest) {
   try {
     const bookId = request.nextUrl.searchParams.get('bookId');
     const chapterIndexStr = request.nextUrl.searchParams.get('chapterIndex');
-    
+
     if (!bookId || !chapterIndexStr) {
       return NextResponse.json(
-        { error: 'Missing bookId or chapterIndex parameter' }, 
+        { error: 'Missing bookId or chapterIndex parameter' },
         { status: 400 }
       );
     }
@@ -29,7 +33,7 @@ export async function GET(request: NextRequest) {
     const chapterIndex = parseInt(chapterIndexStr);
     if (isNaN(chapterIndex)) {
       return NextResponse.json(
-        { error: 'Invalid chapterIndex parameter' }, 
+        { error: 'Invalid chapterIndex parameter' },
         { status: 400 }
       );
     }
@@ -40,8 +44,16 @@ export async function GET(request: NextRequest) {
         { status: 409 },
       );
     }
+
+    const ctxOrRes = await requireAuthContext(request);
+    if (ctxOrRes instanceof Response) return ctxOrRes;
+    if (ctxOrRes.authEnabled) {
+      const denied = await requireAudiobookOwned(bookId, ctxOrRes.userId!, { onDenied: 'notFound' });
+      if (denied) return denied;
+    }
+
     const intermediateDir = join(getAudiobooksRootDir(request), `${bookId}-audiobook`);
-    
+
     const chapter = await findStoredChapterByIndex(intermediateDir, chapterIndex, request.signal);
     if (!chapter || !existsSync(chapter.filePath)) {
       return NextResponse.json({ error: 'Chapter not found' }, { status: 404 });
@@ -113,22 +125,38 @@ export async function DELETE(request: NextRequest) {
         { status: 409 },
       );
     }
+
+    const ctxOrRes = await requireAuthContext(request);
+    if (ctxOrRes instanceof Response) return ctxOrRes;
+
+    if (ctxOrRes.authEnabled) {
+      const denied = await requireAudiobookOwned(bookId, ctxOrRes.userId!, { onDenied: 'forbidden' });
+      if (denied) return denied;
+
+      // Delete from DB first
+      if (db) {
+        await db.delete(audiobookChapters).where(
+          and(eq(audiobookChapters.bookId, bookId), eq(audiobookChapters.chapterIndex, chapterIndex)),
+        );
+      }
+    }
+
     const intermediateDir = join(getAudiobooksRootDir(request), `${bookId}-audiobook`);
     const chapterPrefix = `${String(chapterIndex + 1).padStart(4, '0')}__`;
     const files = await readdir(intermediateDir).catch(() => []);
     for (const file of files) {
       if (!file.startsWith(chapterPrefix)) continue;
       if (!file.endsWith('.mp3') && !file.endsWith('.m4b')) continue;
-      await unlink(join(intermediateDir, file)).catch(() => {});
+      await unlink(join(intermediateDir, file)).catch(() => { });
     }
 
     // Invalidate any combined "complete" files
     const completeM4b = join(intermediateDir, `complete.m4b`);
     const completeMp3 = join(intermediateDir, `complete.mp3`);
-    if (existsSync(completeM4b)) await unlink(completeM4b).catch(() => {});
-    if (existsSync(completeMp3)) await unlink(completeMp3).catch(() => {});
-    await unlink(join(intermediateDir, 'complete.mp3.manifest.json')).catch(() => {});
-    await unlink(join(intermediateDir, 'complete.m4b.manifest.json')).catch(() => {});
+    if (existsSync(completeM4b)) await unlink(completeM4b).catch(() => { });
+    if (existsSync(completeMp3)) await unlink(completeMp3).catch(() => { });
+    await unlink(join(intermediateDir, 'complete.mp3.manifest.json')).catch(() => { });
+    await unlink(join(intermediateDir, 'complete.m4b.manifest.json')).catch(() => { });
 
     return NextResponse.json({ success: true });
   } catch (error) {
@@ -139,3 +167,4 @@ export async function DELETE(request: NextRequest) {
     );
   }
 }
+

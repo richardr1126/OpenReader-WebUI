@@ -12,8 +12,22 @@ export function useAuth() {
   const { baseUrl, authEnabled } = useAuthConfig();
 
   const client = useMemo(() => {
+    if (!authEnabled || !baseUrl) return null;
     return getAuthClient(baseUrl);
-  }, [baseUrl]);
+  }, [baseUrl, authEnabled]);
+
+  if (!client) {
+    // Safe no-op implementation when auth is disabled
+    return {
+      authEnabled: false,
+      baseUrl: null,
+      signIn: async () => ({ data: null, error: null }),
+      signUp: async () => ({ data: null, error: null }),
+      signOut: async () => ({ data: null, error: null }),
+      useSession: () => ({ data: null, isPending: false, error: null }),
+      getSession: async () => ({ data: null, error: null }),
+    };
+  }
 
   return {
     authEnabled,
@@ -30,7 +44,16 @@ export function useAuth() {
  * Hook for session that uses the correct baseUrl from context
  */
 export function useAuthSession() {
-  const { baseUrl } = useAuthConfig();
-  const client = useMemo(() => getAuthClient(baseUrl), [baseUrl]);
+  const { baseUrl, authEnabled } = useAuthConfig();
+
+  const client = useMemo(() => {
+    if (!authEnabled || !baseUrl) return null;
+    return getAuthClient(baseUrl);
+  }, [baseUrl, authEnabled]);
+
+  if (!client) {
+    return { data: null, isPending: false, error: null };
+  }
+
   return client.useSession();
 }

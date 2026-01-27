@@ -1,39 +1,32 @@
 import { betterAuth } from "better-auth";
 import { nextCookies } from "better-auth/next-js";
 import { anonymous } from "better-auth/plugins";
-import { Pool } from "pg";
+import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
+import { db } from "@/db";
 import { rateLimiter } from "@/lib/server/rate-limiter";
 import { isAuthEnabled } from "@/lib/server/auth-config";
+import { eq } from 'drizzle-orm';
 
-const getAuthDatabase = () => {
-  if (process.env.POSTGRES_URL) {
-    return new Pool({
-      connectionString: process.env.POSTGRES_URL,
-      ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false,
-    });
-  }
 
-  // Fallback to SQLite
-  // We need to dynamically import or require better-sqlite3 to avoid build issues if it's not used?
-  // Actually better-auth supports it directly, we just pass the instance.
-  /* eslint-disable @typescript-eslint/no-require-imports */
-  const Database = require("better-sqlite3");
-  const path = require("path");
-  const fs = require("fs");
-  /* eslint-enable @typescript-eslint/no-require-imports */
 
-  // Ensure directory exists
-  const dbPath = path.join(process.cwd(), 'docstore', 'sqlite3.db');
-  const dir = path.dirname(dbPath);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
+import * as schema from "@/db/schema"; // Import the dynamic schema
 
-  return new Database(dbPath);
-};
+// ...
 
 const createAuth = () => betterAuth({
-  database: getAuthDatabase(),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  database: drizzleAdapter(db as any, {
+    provider: process.env.POSTGRES_URL ? "pg" : "sqlite", // Dynamic provider
+    schema: {
+      ...schema,
+      user: schema.user,
+      session: schema.session,
+      account: schema.account,
+      verification: schema.verification,
+    }
+  }),
   secret: process.env.BETTER_AUTH_SECRET!,
   baseURL: process.env.BETTER_AUTH_URL || "http://localhost:3003",
   emailAndPassword: {
@@ -57,16 +50,6 @@ const createAuth = () => betterAuth({
     updateAge: 60 * 60 * 1, // 1 hour (refresh more frequently)
     cookieCache: {
       maxAge: 60 * 60 * 24 * 7, // 7 days for cookie cache
-    },
-  },
-  advanced: {
-    database: {
-      generateId: () => {
-        // Generate user-friendly IDs similar to current system
-        const timestamp = Date.now();
-        const random = Math.random().toString(36).substring(2, 8);
-        return `user-${timestamp}-${random}`;
-      },
     },
   },
   plugins: [
@@ -104,3 +87,73 @@ export const auth = isAuthEnabled() ? createAuth() : null;
 type AuthInstance = ReturnType<typeof createAuth>;
 export type Session = AuthInstance["$Infer"]["Session"];
 export type User = AuthInstance["$Infer"]["Session"]["user"];
+
+export type AuthContext = {
+  authEnabled: boolean;
+  session: Session | null;
+  user: User | null;
+  userId: string | null;
+};
+
+export async function getAuthContext(request: Pick<NextRequest, 'headers'>): Promise<AuthContext> {
+  const authEnabled = isAuthEnabled();
+
+  if (!authEnabled || !auth) {
+    return { authEnabled, session: null, user: null, userId: null };
+  }
+
+  const session = await auth.api.getSession({ headers: request.headers });
+  const user = session?.user ?? null;
+  const userId = user?.id ?? null;
+
+  return { authEnabled, session, user, userId };
+}
+
+export async function requireAuthContext(
+  request: Pick<NextRequest, 'headers'>,
+  options?: { requireNonAnonymous?: boolean },
+): Promise<AuthContext | Response> {
+  const ctx = await getAuthContext(request);
+
+  if (!ctx.authEnabled) {
+    return ctx;
+  }
+
+  if (!ctx.userId) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  if (options?.requireNonAnonymous && ctx.user?.isAnonymous) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
+
+  return ctx;
+}
+
+export type AudiobookAccessMode = 'forbidden' | 'notFound';
+
+export async function requireAudiobookOwned(
+  bookId: string,
+  userId: string,
+  options?: { onDenied?: AudiobookAccessMode },
+): Promise<Response | null> {
+  if (!isAuthEnabled() || !db) return null;
+
+  const [existingBook] = await db
+    .select({ userId: schema.audiobooks.userId })
+    .from(schema.audiobooks)
+    .where(eq(schema.audiobooks.id, bookId));
+
+  if (!existingBook) {
+    return NextResponse.json({ error: 'Book not found' }, { status: 404 });
+  }
+
+  if (existingBook.userId && existingBook.userId !== userId) {
+    if (options?.onDenied === 'notFound') {
+      return NextResponse.json({ error: 'Book not found' }, { status: 404 });
+    }
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
+
+  return null;
+}

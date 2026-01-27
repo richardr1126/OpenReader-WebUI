@@ -69,7 +69,7 @@ OpenReader WebUI is an open source text to speech document reader web app built 
   > - `API_BASE` should point to your TTS API server's base URL (if running Kokoro-FastAPI locally in Docker, use `http://host.docker.internal:8880/v1`).
   > - `BETTER_AUTH_URL` should be your externally-facing URL for this app (for example `https://reader.example.com` or `http://localhost:3003`).
   > - To enable auth, set **both** `BETTER_AUTH_URL` and `BETTER_AUTH_SECRET` generated with `openssl rand -base64 32`.
-  > - If you set `POSTGRES_URL`, the container will not auto-run migrations for you; run `npx @better-auth/cli migrate -y` against your Postgres database.
+  > - If you set `POSTGRES_URL`, the container will attempt to run migrations against it. Ensure the database is accessible.
 
   <details>
   <summary><strong>Docker environment variables</strong> (Click to expand)</summary>
@@ -238,10 +238,13 @@ Optionally required for different features:
    >
    > Note: The base URL for the TTS API should be accessible and relative to the Next.js server
 
-4. Run auth DB migrations (required when auth is enabled):
-   ```bash
-   npx @better-auth/cli migrate -y
-   ```
+4. Run auth DB migrations:
+   
+   - **Production / Docker**: Migrations run automatically on startup via `pnpm start`.
+   - **Development**: Run explicitly:
+     ```bash
+     pnpm migrate
+     ```
   > Note: If you set `POSTGRES_URL` in `.env`, migrations will target Postgres instead of local SQLite.
 
 5. Start the development server:

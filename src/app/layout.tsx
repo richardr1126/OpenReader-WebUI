@@ -6,6 +6,7 @@ import { Footer } from "@/components/Footer";
 import { Toaster } from 'react-hot-toast';
 import { Analytics } from "@vercel/analytics/next";
 import { isAuthEnabled, getAuthBaseUrl } from '@/lib/server/auth-config';
+import ClaimDataPopup from '@/components/ClaimDataModal';
 
 export const metadata: Metadata = {
   title: "OpenReader WebUI",
@@ -64,6 +65,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       <body className="antialiased">
         <Providers authEnabled={authEnabled} authBaseUrl={authBaseUrl}>
           <div className="app-shell min-h-screen flex flex-col bg-background">
+            {authEnabled && <ClaimDataPopup />}
             <main className="flex-1 flex flex-col">
               {children}
               <Analytics />

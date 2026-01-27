@@ -1,52 +1,22 @@
-import { db } from '@/lib/server/db';
+import { db } from '@/db';
+import { userTtsChars } from '@/db/schema';
 import { isAuthEnabled } from '@/lib/server/auth-config';
+import { eq, and, lt, sql } from 'drizzle-orm';
 
 // Rate limits configuration - character counts per day
 export const RATE_LIMITS = {
   ANONYMOUS: 50_000,    // 50K characters per day for anonymous users
   AUTHENTICATED: 500_000, // 500K characters per day for authenticated users
   // IP-based backstop limits to make it harder to reset limits by creating new accounts
-  // or clearing storage/cookies. These are intentionally conservative defaults and can
-  // be tuned via env vars.
+  // or clearing storage/cookies
   IP_ANONYMOUS: Number(process.env.TTS_IP_DAILY_LIMIT_ANONYMOUS || 100_000),
   IP_AUTHENTICATED: Number(process.env.TTS_IP_DAILY_LIMIT_AUTHENTICATED || 1_000_000),
 } as const;
 
-// Singleton flag to ensure we only initialize the table once per process
-let tableInitialized: Promise<void> | null = null;
+// Helper to ensure DB is strictly typed when we know it exists
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const safeDb = () => db as any;
 
-// Initialize rate limiting table (cached, runs only once per process)
-export async function initializeRateLimitTable() {
-  if (tableInitialized) {
-    return tableInitialized;
-  }
-
-  tableInitialized = (async () => {
-    // Use transaction to ensure safe initialization
-    await db.transaction(async (client) => {
-      // Check if table exists first to avoid errors on some DBs
-      // Simple create table if not exists
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS user_tts_chars (
-          user_id VARCHAR(255) NOT NULL,
-          date DATE NOT NULL,
-          char_count BIGINT DEFAULT 0,
-          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          PRIMARY KEY (user_id, date)
-        )
-      `);
-
-      // Create index for faster queries
-      await client.query(`
-        CREATE INDEX IF NOT EXISTS idx_user_tts_chars_date ON user_tts_chars(date)
-      `);
-    });
-    console.log('Rate limit table initialized');
-  })();
-
-  return tableInitialized;
-}
 
 export interface RateLimitResult {
   allowed: boolean;
@@ -54,10 +24,6 @@ export interface RateLimitResult {
   limit: number;
   resetTime: Date;
   remainingChars: number;
-}
-
-interface DBCharCountRow {
-  char_count: string | number;
 }
 
 export interface UserInfo {
@@ -79,7 +45,6 @@ type Bucket = {
 };
 
 function normalizeBackstopKey(prefix: string, value: string): string {
-  // Keep the key reasonably bounded; prevent extremely long identifiers from bloating DB.
   const trimmed = value.trim();
   const safe = trimmed.length > 128 ? trimmed.slice(0, 128) : trimmed;
   return `${prefix}:${safe}`;
@@ -128,10 +93,8 @@ export class RateLimiter {
 
   /**
    * Check if a user can use TTS and increment their char count if allowed
-   * @param charCount - Number of characters to add
    */
   async checkAndIncrementLimit(user: UserInfo, charCount: number, backstops?: RateLimitBackstops): Promise<RateLimitResult> {
-    // If auth is not enabled, always allow
     if (!isAuthEnabled()) {
       return {
         allowed: true,
@@ -142,9 +105,7 @@ export class RateLimiter {
       };
     }
 
-    await initializeRateLimitTable();
-
-    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
+    const today = new Date().toISOString().split('T')[0];
     const userLimit = user.isAnonymous ? RATE_LIMITS.ANONYMOUS : RATE_LIMITS.AUTHENTICATED;
 
     const buckets: Bucket[] = [{ key: user.id, limit: userLimit }];
@@ -164,45 +125,64 @@ export class RateLimiter {
     }
 
     try {
-      return await db.transaction(async (client) => {
+      if (!db) throw new Error("DB not initialized");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return await safeDb().transaction(async (tx: any) => {
         // Ensure records exist for each bucket
         for (const bucket of buckets) {
-          await client.query(`
-            INSERT INTO user_tts_chars (user_id, date, char_count)
-            VALUES ($1, $2, 0)
-            ON CONFLICT (user_id, date)
-            DO UPDATE SET updated_at = CURRENT_TIMESTAMP
-          `, [bucket.key, today]);
+          await tx.insert(userTtsChars)
+            .values({
+              userId: bucket.key,
+              date: today as string,
+              charCount: 0,
+            })
+            .onConflictDoUpdate({
+              target: [userTtsChars.userId, userTtsChars.date],
+              set: { updatedAt: new Date() },
+            });
         }
 
-        // Attempt to increment each bucket. If any bucket is already at/over the limit,
-        // throw to force a transaction rollback (no partial increments).
+        // Attempt to increment each bucket
         for (const bucket of buckets) {
-          const updateResult = await client.query(`
-            UPDATE user_tts_chars
-            SET char_count = char_count + $3, updated_at = CURRENT_TIMESTAMP
-            WHERE user_id = $1 AND date = $2 AND char_count < $4
-          `, [bucket.key, today, charCount, bucket.limit]);
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
+          const updateResult = await tx.update(userTtsChars)
+            .set({
+              charCount: sql`${userTtsChars.charCount} + ${charCount}`,
+              updatedAt: new Date()
+            })
+            .where(and(
+              eq(userTtsChars.userId, bucket.key),
+              eq(userTtsChars.date, today as string),
+              lt(userTtsChars.charCount, bucket.limit)
+            ));
 
-          const updated = (updateResult.rowCount ?? 0) > 0;
-          if (!updated) {
+          // Check if update actually happened
+          const row = await tx.select({ count: userTtsChars.charCount }).from(userTtsChars)
+            .where(and(eq(userTtsChars.userId, bucket.key), eq(userTtsChars.date, today)))
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            .then((res: any) => res[0]);
+
+          if (!row || Number(row.count) > bucket.limit) {
             throw new RateLimitExceeded();
           }
         }
 
-        // Fetch current counts for all buckets after increment
+        // Fetch current counts
         const bucketResults: Array<{ currentCount: number; limit: number }> = [];
         for (const bucket of buckets) {
-          const result = await client.query(`
-            SELECT char_count FROM user_tts_chars
-            WHERE user_id = $1 AND date = $2
-          `, [bucket.key, today]);
+          const result = await tx.select({ currentCount: userTtsChars.charCount })
+            .from(userTtsChars)
+            .where(and(eq(userTtsChars.userId, bucket.key), eq(userTtsChars.date, today)));
 
-          const currentCount = parseInt(((result.rows[0] as unknown) as DBCharCountRow)?.char_count?.toString() || '0', 10);
+          const currentCount = result[0]?.currentCount ? Number(result[0].currentCount) : 0;
           bucketResults.push({ currentCount, limit: bucket.limit });
         }
 
         const effective = pickEffectiveResult(bucketResults);
+
+        if (effective.currentCount > effective.limit) {
+          throw new RateLimitExceeded();
+        }
 
         return {
           allowed: true,
@@ -225,7 +205,6 @@ export class RateLimiter {
    * Get current usage for a user without incrementing
    */
   async getCurrentUsage(user: UserInfo, backstops?: RateLimitBackstops): Promise<RateLimitResult> {
-    // If auth is not enabled, return unlimited
     if (!isAuthEnabled()) {
       return {
         allowed: true,
@@ -235,8 +214,6 @@ export class RateLimiter {
         remainingChars: Number.MAX_SAFE_INTEGER
       };
     }
-
-    await initializeRateLimitTable();
 
     const today = new Date().toISOString().split('T')[0];
     const userLimit = user.isAnonymous ? RATE_LIMITS.ANONYMOUS : RATE_LIMITS.AUTHENTICATED;
@@ -258,14 +235,21 @@ export class RateLimiter {
     }
 
     const bucketResults: Array<{ currentCount: number; limit: number }> = [];
+    if (!db) {
+      const effective = pickEffectiveResult([]);
+      return {
+        ...effective,
+        resetTime: this.getResetTime(),
+      };
+    }
+
     for (const bucket of buckets) {
-      const result = await db.query(
-        'SELECT char_count FROM user_tts_chars WHERE user_id = $1 AND date = $2',
-        [bucket.key, today]
-      );
-      const currentCount = result.rows.length > 0
-        ? parseInt(((result.rows[0] as unknown) as DBCharCountRow).char_count.toString(), 10)
-        : 0;
+      const result = await safeDb().select({ charCount: userTtsChars.charCount })
+
+        .from(userTtsChars)
+        .where(and(eq(userTtsChars.userId, bucket.key), eq(userTtsChars.date, today)));
+
+      const currentCount = result[0]?.charCount ? Number(result[0].charCount) : 0;
       bucketResults.push({ currentCount, limit: bucket.limit });
     }
 
@@ -286,39 +270,38 @@ export class RateLimiter {
   async transferAnonymousUsage(anonymousUserId: string, authenticatedUserId: string): Promise<void> {
     if (!isAuthEnabled()) return;
 
-    await initializeRateLimitTable();
+    if (!db) return;
 
-    await db.transaction(async (client) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await safeDb().transaction(async (tx: any) => {
       const today = new Date().toISOString().split('T')[0];
 
       // Get anonymous user's current count
-      const anonymousResult = await client.query(
-        'SELECT char_count FROM user_tts_chars WHERE user_id = $1 AND date = $2',
-        [anonymousUserId, today]
-      );
+      const anonymousResult = await tx.select({ charCount: userTtsChars.charCount })
+        .from(userTtsChars)
+        .where(and(eq(userTtsChars.userId, anonymousUserId), eq(userTtsChars.date, today)));
 
-      if (anonymousResult.rows.length > 0) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const anonymousCount = parseInt((anonymousResult.rows[0] as any).char_count, 10);
+      if (anonymousResult.length > 0) {
+        const anonymousCount = Number(anonymousResult[0].charCount);
 
-        // Update or create record for authenticated user
-        await client.query(`
-          INSERT INTO user_tts_chars (user_id, date, char_count)
-          VALUES ($1, $2, $3)
-          ON CONFLICT (user_id, date)
-          DO UPDATE SET 
-            char_count = CASE 
-              WHEN user_tts_chars.char_count > $3 THEN user_tts_chars.char_count 
-              ELSE $3 
-            END,
-            updated_at = CURRENT_TIMESTAMP
-        `, [authenticatedUserId, today, anonymousCount]);
+        const existingAuth = await tx.select({ charCount: userTtsChars.charCount })
+          .from(userTtsChars)
+          .where(and(eq(userTtsChars.userId, authenticatedUserId), eq(userTtsChars.date, today)));
+
+        if (existingAuth.length === 0) {
+          await tx.insert(userTtsChars).values({ userId: authenticatedUserId, date: today, charCount: anonymousCount });
+        } else {
+          const existingCount = Number(existingAuth[0].charCount);
+          if (anonymousCount > existingCount) {
+            await tx.update(userTtsChars)
+              .set({ charCount: anonymousCount, updatedAt: new Date() })
+              .where(and(eq(userTtsChars.userId, authenticatedUserId), eq(userTtsChars.date, today)));
+          }
+        }
 
         // Remove anonymous user's record
-        await client.query(
-          'DELETE FROM user_tts_chars WHERE user_id = $1 AND date = $2',
-          [anonymousUserId, today]
-        );
+        await tx.delete(userTtsChars)
+          .where(and(eq(userTtsChars.userId, anonymousUserId), eq(userTtsChars.date, today)));
       }
     });
   }
@@ -331,10 +314,10 @@ export class RateLimiter {
     cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
     const cutoffDateStr = cutoffDate.toISOString().split('T')[0];
 
-    await db.query(
-      'DELETE FROM user_tts_chars WHERE date < $1',
-      [cutoffDateStr]
-    );
+    if (!db) return;
+    // Assuming string comparison works for YYYY-MM-DD
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await safeDb().delete(userTtsChars).where(lt(userTtsChars.date, cutoffDateStr as any));
   }
 
   private getResetTime(): Date {

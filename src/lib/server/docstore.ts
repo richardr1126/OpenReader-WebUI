@@ -115,6 +115,59 @@ export function getMigratedDocumentFileName(id: string, name: string): string {
   return targetFileName;
 }
 
+export type FSDocument = {
+  id: string;
+  name: string;
+  type: string;
+  size: number;
+  lastModified: number;
+  filePath: string;
+};
+
+export async function scanDocumentsFS(): Promise<FSDocument[]> {
+  if (!existsSync(DOCUMENTS_V1_DIR)) return [];
+
+  const results: FSDocument[] = [];
+  let files: string[] = [];
+  try {
+    files = await readdir(DOCUMENTS_V1_DIR);
+  } catch {
+    return [];
+  }
+
+  for (const file of files) {
+    // Expected format: id__filename or id.ext (legacy fallback?)
+    // Actually current format is id__encodedName
+    const match = /^([a-f0-9]{64})__(.+)$/i.exec(file);
+    if (!match) continue;
+
+    const id = match[1];
+    const encodedName = match[2];
+    const name = decodeURIComponent(encodedName);
+    const ext = path.extname(name).toLowerCase().replace('.', '');
+
+    // Validate file exists and get stats
+    try {
+      const filePath = path.join(DOCUMENTS_V1_DIR, file);
+      const stats = await stat(filePath);
+      if (!stats.isFile()) continue;
+
+      results.push({
+        id,
+        name,
+        type: ext,
+        size: stats.size,
+        lastModified: Math.floor(stats.mtimeMs),
+        filePath: file,
+      });
+    } catch {
+      continue;
+    }
+  }
+
+  return results;
+}
+
 export async function ensureDocumentsV1Ready(): Promise<boolean> {
   await mkdir(DOCSTORE_DIR, { recursive: true });
   await mkdir(DOCUMENTS_V1_DIR, { recursive: true });
@@ -163,7 +216,7 @@ export async function ensureDocumentsV1Ready(): Promise<boolean> {
     const id = createHash('sha256').update(content).digest('hex');
     const fallbackName = `${id}.${metadata.type}`;
     const name = safeDocumentName(metadata.name, fallbackName);
-    
+
     const targetFileName = getMigratedDocumentFileName(id, name);
     const targetPath = path.join(DOCUMENTS_V1_DIR, targetFileName);
 
@@ -171,12 +224,12 @@ export async function ensureDocumentsV1Ready(): Promise<boolean> {
       await writeFile(targetPath, content);
       if (Number.isFinite(metadata.lastModified) && metadata.lastModified > 0) {
         const stamp = new Date(metadata.lastModified);
-        await utimes(targetPath, stamp, stamp).catch(() => {});
+        await utimes(targetPath, stamp, stamp).catch(() => { });
       }
     }
 
-    await unlink(metadataPath).catch(() => {});
-    await unlink(contentPath).catch(() => {});
+    await unlink(metadataPath).catch(() => { });
+    await unlink(contentPath).catch(() => { });
   }
 
   await saveMigrationState({ documentsV1Migrated: !(await hasLegacyDocumentFiles()) });
@@ -263,7 +316,7 @@ async function mergeDirectoryContents(sourceDir: string, targetDir: string): Pro
         if (remaining.length === 0) {
           await rm(sourcePath);
         }
-      } catch {}
+      } catch { }
       continue;
     }
 
@@ -334,7 +387,7 @@ export async function ensureAudiobooksV1Ready(): Promise<boolean> {
           } else {
             console.warn(`Legacy audiobook dir not fully migrated (kept): ${sourceDir}`);
           }
-        } catch {}
+        } catch { }
       } catch (error) {
         console.error('Error migrating legacy audiobook directory:', error);
         throw error;
@@ -425,10 +478,10 @@ async function normalizeAudiobookDirectoryChapterLayout(intermediateDir: string)
   }
 
   // Remove any combined output files from older layouts.
-  await unlink(path.join(intermediateDir, 'complete.mp3')).catch(() => {});
-  await unlink(path.join(intermediateDir, 'complete.m4b')).catch(() => {});
-  await unlink(path.join(intermediateDir, 'metadata.txt')).catch(() => {});
-  await unlink(path.join(intermediateDir, 'list.txt')).catch(() => {});
+  await unlink(path.join(intermediateDir, 'complete.mp3')).catch(() => { });
+  await unlink(path.join(intermediateDir, 'complete.m4b')).catch(() => { });
+  await unlink(path.join(intermediateDir, 'metadata.txt')).catch(() => { });
+  await unlink(path.join(intermediateDir, 'list.txt')).catch(() => { });
 
   const metaFiles = files.filter((file) => file.endsWith('.meta.json'));
   const migratedIndices = new Set<number>();
@@ -448,7 +501,7 @@ async function normalizeAudiobookDirectoryChapterLayout(intermediateDir: string)
     const format = meta.format === 'mp3' ? 'mp3' : 'm4b';
     const sourceAudio = path.join(intermediateDir, `${index}-chapter.${format}`);
     if (!existsSync(sourceAudio)) {
-      await unlink(metaPath).catch(() => {});
+      await unlink(metaPath).catch(() => { });
       continue;
     }
 
@@ -463,11 +516,11 @@ async function normalizeAudiobookDirectoryChapterLayout(intermediateDir: string)
 
     const finalName = encodeChapterFileName(index, meta.title ?? `Chapter ${index + 1}`, format);
     const finalPath = path.join(intermediateDir, finalName);
-    await unlink(finalPath).catch(() => {});
+    await unlink(finalPath).catch(() => { });
     await rename(taggedTemp, finalPath);
 
-    await unlink(sourceAudio).catch(() => {});
-    await unlink(metaPath).catch(() => {});
+    await unlink(sourceAudio).catch(() => { });
+    await unlink(metaPath).catch(() => { });
     migratedIndices.add(index);
   }
 
@@ -493,10 +546,10 @@ async function normalizeAudiobookDirectoryChapterLayout(intermediateDir: string)
 
     const finalName = encodeChapterFileName(index, `Chapter ${index + 1}`, format);
     const finalPath = path.join(intermediateDir, finalName);
-    await unlink(finalPath).catch(() => {});
+    await unlink(finalPath).catch(() => { });
     await rename(taggedTemp, finalPath);
 
-    await unlink(sourceAudio).catch(() => {});
+    await unlink(sourceAudio).catch(() => { });
   }
 
   // Rename any sha-named chapter files from previous runs into the index__title scheme.
@@ -517,18 +570,18 @@ async function normalizeAudiobookDirectoryChapterLayout(intermediateDir: string)
 
     const finalName = encodeChapterFileName(decoded.index, decoded.title, format);
     const finalPath = path.join(intermediateDir, finalName);
-    await unlink(finalPath).catch(() => {});
-    await rename(sourceAudio, finalPath).catch(() => {});
+    await unlink(finalPath).catch(() => { });
+    await rename(sourceAudio, finalPath).catch(() => { });
   }
 
   // Remove any leftover input temp files.
   files = await readdir(intermediateDir).catch(() => []);
   for (const file of files) {
     if (/^\d+-input\.mp3$/i.test(file)) {
-      await unlink(path.join(intermediateDir, file)).catch(() => {});
+      await unlink(path.join(intermediateDir, file)).catch(() => { });
     }
     if (file.endsWith('.meta.json') && file !== 'audiobook.meta.json') {
-      await unlink(path.join(intermediateDir, file)).catch(() => {});
+      await unlink(path.join(intermediateDir, file)).catch(() => { });
     }
   }
 }
@@ -544,12 +597,12 @@ async function normalizeAudiobookChapterLayout(): Promise<void> {
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
     if (!entry.name.endsWith('-audiobook')) continue;
-      const dir = path.join(AUDIOBOOKS_V1_DIR, entry.name);
-      try {
+    const dir = path.join(AUDIOBOOKS_V1_DIR, entry.name);
+    try {
       await normalizeAudiobookDirectoryChapterLayout(dir);
-      } catch (error) {
-        console.error('Error migrating audiobook chapter layout:', error);
-        throw error;
-      }
+    } catch (error) {
+      console.error('Error migrating audiobook chapter layout:', error);
+      throw error;
+    }
   }
 }

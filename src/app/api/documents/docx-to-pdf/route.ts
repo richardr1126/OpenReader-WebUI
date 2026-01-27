@@ -5,6 +5,7 @@ import path from 'path';
 import { existsSync } from 'fs';
 import { randomUUID } from 'crypto';
 import { pathToFileURL } from 'url';
+import { auth } from '@/lib/server/auth';
 
 const DOCSTORE_DIR = path.join(process.cwd(), 'docstore');
 const TEMP_DIR = path.join(DOCSTORE_DIR, 'tmp');
@@ -75,11 +76,17 @@ async function waitForPdfReady(dir: string, timeoutMs = 20000, intervalMs = 100)
 
 export async function POST(req: NextRequest) {
   try {
+    // Auth check - require session
+    const session = await auth?.api.getSession({ headers: req.headers });
+    if (auth && !session?.user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     await ensureTempDir();
-    
+
     const formData = await req.formData();
     const file = formData.get('file') as File;
-    
+
     if (!file) {
       return NextResponse.json(
         { error: 'No file provided' },

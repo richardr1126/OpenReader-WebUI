@@ -9,6 +9,7 @@ import {
   isAudiobooksV1Ready,
   isDocumentsV1Ready,
 } from '@/lib/server/docstore';
+import { auth } from '@/lib/server/auth';
 
 type Mapping = { oldId: string; id: string };
 
@@ -42,7 +43,7 @@ async function mergeDirectoryContents(sourceDir: string, targetDir: string): Pro
         if (remaining.length === 0) {
           await rm(sourcePath);
         }
-      } catch {}
+      } catch { }
       continue;
     }
 
@@ -95,7 +96,7 @@ async function rekeyAudiobooksV1(mappings: Mapping[]): Promise<{ renamed: number
       if (remaining.length === 0) {
         await rm(sourceDir);
       }
-    } catch {}
+    } catch { }
   }
 
   return { renamed, merged, skipped };
@@ -103,6 +104,12 @@ async function rekeyAudiobooksV1(mappings: Mapping[]): Promise<{ renamed: number
 
 export async function POST(request: NextRequest) {
   try {
+    // Auth check - require session
+    const session = await auth?.api.getSession({ headers: request.headers });
+    if (auth && !session?.user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const raw = (await request.json().catch(() => null)) as { mappings?: Mapping[] } | null;
     const mappings = (raw?.mappings ?? []).filter(
       (m): m is Mapping => Boolean(m && typeof m.oldId === 'string' && typeof m.id === 'string'),

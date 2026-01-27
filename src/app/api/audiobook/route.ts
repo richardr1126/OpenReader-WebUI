@@ -8,6 +8,11 @@ import { AUDIOBOOKS_V1_DIR, isAudiobooksV1Ready } from '@/lib/server/docstore';
 import { encodeChapterFileName, encodeChapterTitleTag, listStoredChapters, ffprobeAudio, escapeFFMetadata } from '@/lib/server/audiobook';
 import type { TTSAudioBytes, TTSAudiobookFormat } from '@/types/tts';
 import type { AudiobookGenerationSettings } from '@/types/client';
+import { db } from '@/db';
+import { audiobooks, audiobookChapters } from '@/db/schema';
+import { eq } from 'drizzle-orm';
+import { isAuthEnabled } from '@/lib/server/auth-config';
+import { requireAuthContext } from '@/lib/server/auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -51,7 +56,7 @@ async function getAudioDuration(filePath: string, signal?: AbortSignal): Promise
       finished = true;
       try {
         ffprobe.kill('SIGKILL');
-      } catch {}
+      } catch { }
       reject(new Error('ABORTED'));
     };
 
@@ -103,7 +108,7 @@ async function runFFmpeg(args: string[], signal?: AbortSignal): Promise<void> {
       finished = true;
       try {
         ffmpeg.kill('SIGKILL');
-      } catch {}
+      } catch { }
       reject(new Error('ABORTED'));
     };
 
@@ -158,7 +163,7 @@ export async function POST(request: NextRequest) {
     // Parse the request body
     const data: ConversionRequest = await request.json();
     const requestedFormat = data.format || 'm4b';
-    
+
     if (!(await isAudiobooksV1Ready())) {
       return NextResponse.json(
         { error: 'Audiobooks storage is not migrated; run /api/migrations/v1 first.' },
@@ -166,15 +171,36 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const ctxOrRes = await requireAuthContext(request);
+    if (ctxOrRes instanceof Response) return ctxOrRes;
+    const userId = ctxOrRes.userId;
+
     // Generate or use existing book ID
     const bookId = data.bookId || randomUUID();
-    
+
     if (!isSafeId(bookId)) {
       return NextResponse.json({ error: 'Invalid bookId parameter' }, { status: 400 });
     }
 
+    // DB Check / Insert Audiobook
+    if (isAuthEnabled() && db) {
+      const [existingBook] = await db.select().from(audiobooks).where(eq(audiobooks.id, bookId));
+
+      if (!existingBook) {
+        await db.insert(audiobooks).values({
+          id: bookId,
+          userId,
+          title: data.chapterTitle || 'Untitled Audiobook',
+        });
+      } else {
+        if (existingBook.userId && existingBook.userId !== userId) {
+          return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+        }
+      }
+    }
+
     const intermediateDir = join(getAudiobooksRootDir(request), `${bookId}-audiobook`);
-    
+
     // Create intermediate directory
     await mkdir(intermediateDir, { recursive: true });
 
@@ -254,7 +280,7 @@ export async function POST(request: NextRequest) {
     const inputPath = join(intermediateDir, `${chapterIndex}-input.mp3`);
     const chapterOutputTempPath = join(intermediateDir, `${chapterIndex}-chapter.tmp.${format}`);
     const titleTag = encodeChapterTitleTag(chapterIndex, data.chapterTitle);
-    
+
     // Write the chapter audio to a temp file
     await writeFile(inputPath, Buffer.from(new Uint8Array(data.buffer)));
 
@@ -292,7 +318,7 @@ export async function POST(request: NextRequest) {
     const duration = probe.durationSec ?? (await getAudioDuration(chapterOutputTempPath, request.signal));
 
     const finalChapterPath = join(intermediateDir, encodeChapterFileName(chapterIndex, data.chapterTitle, format));
-    await unlink(finalChapterPath).catch(() => {});
+    await unlink(finalChapterPath).catch(() => { });
     await rename(chapterOutputTempPath, finalChapterPath);
 
     // Remove any existing chapter files for this index (e.g., if the title changed and the
@@ -304,22 +330,39 @@ export async function POST(request: NextRequest) {
       if (!file.startsWith(chapterPrefix)) continue;
       if (!file.endsWith('.mp3') && !file.endsWith('.m4b')) continue;
       if (file === finalChapterName) continue;
-      await unlink(join(intermediateDir, file)).catch(() => {});
+      await unlink(join(intermediateDir, file)).catch(() => { });
     }
-    await unlink(join(intermediateDir, 'complete.mp3')).catch(() => {});
-    await unlink(join(intermediateDir, 'complete.m4b')).catch(() => {});
-    await unlink(join(intermediateDir, 'complete.mp3.manifest.json')).catch(() => {});
-    await unlink(join(intermediateDir, 'complete.m4b.manifest.json')).catch(() => {});
+    await unlink(join(intermediateDir, 'complete.mp3')).catch(() => { });
+    await unlink(join(intermediateDir, 'complete.m4b')).catch(() => { });
+    await unlink(join(intermediateDir, 'complete.mp3.manifest.json')).catch(() => { });
+    await unlink(join(intermediateDir, 'complete.m4b.manifest.json')).catch(() => { });
 
     // Ensure meta exists after first successful chapter.
     if (!existingSettings && incomingSettings) {
-      await writeFile(metaPath, JSON.stringify(incomingSettings, null, 2)).catch(() => {});
+      await writeFile(metaPath, JSON.stringify(incomingSettings, null, 2)).catch(() => { });
     }
 
     // Clean up input file
     await unlink(inputPath).catch(console.error);
 
-    return NextResponse.json({ 
+    // Insert Chapter Record (Denormalized)
+    if (isAuthEnabled() && db) {
+      await db.insert(audiobookChapters).values({
+        id: `${bookId}-${chapterIndex}`,
+        bookId,
+        userId,
+        chapterIndex,
+        title: data.chapterTitle,
+        duration,
+        format,
+        filePath: finalChapterName
+      }).onConflictDoUpdate({
+        target: [audiobookChapters.id],
+        set: { title: data.chapterTitle, duration, format, filePath: finalChapterName }
+      });
+    }
+
+    return NextResponse.json({
       index: chapterIndex,
       title: data.chapterTitle,
       duration,
@@ -360,6 +403,19 @@ export async function GET(request: NextRequest) {
         { status: 409 },
       );
     }
+
+    // Auth Check
+    const session = await auth?.api.getSession({ headers: request.headers });
+    const userId = session?.user?.id || null;
+
+    // Verify ownership
+    if (isAuthEnabled() && db) {
+      const [existingBook] = await db.select().from(audiobooks).where(eq(audiobooks.id, bookId));
+      if (existingBook && existingBook.userId && existingBook.userId !== userId) {
+        return NextResponse.json({ error: 'Book not found' }, { status: 404 }); // Hide existence
+      }
+    }
+
     const intermediateDir = join(getAudiobooksRootDir(request), `${bookId}-audiobook`);
 
     if (!existsSync(intermediateDir)) {
@@ -412,8 +468,8 @@ export async function GET(request: NextRequest) {
         return streamFile(outputPath, format);
       }
 
-      await unlink(outputPath).catch(() => {});
-      await unlink(manifestPath).catch(() => {});
+      await unlink(outputPath).catch(() => { });
+      await unlink(manifestPath).catch(() => { });
     }
 
     // Ensure we have chapter durations for chapter markers / ordering.
@@ -425,7 +481,7 @@ export async function GET(request: NextRequest) {
           chapter.duration = probe.durationSec;
           continue;
         }
-      } catch {}
+      } catch { }
 
       try {
         chapter.duration = await getAudioDuration(chapter.filePath, request.signal);
@@ -445,7 +501,7 @@ export async function GET(request: NextRequest) {
 
       metadata.push('[CHAPTER]', 'TIMEBASE=1/1000', `START=${startMs}`, `END=${endMs}`, `title=${escapeFFMetadata(chapter.title)}`);
     }
-    
+
     await writeFile(metadataPath, ';FFMETADATA1\n' + metadata.join('\n'));
 
     // Create list file for concat
@@ -486,7 +542,7 @@ export async function GET(request: NextRequest) {
       unlink(listPath).catch(console.error)
     ]);
 
-    await writeFile(manifestPath, JSON.stringify(signature, null, 2)).catch(() => {});
+    await writeFile(manifestPath, JSON.stringify(signature, null, 2)).catch(() => { });
 
     // Stream the file back to the client
     return streamFile(outputPath, format);
@@ -553,6 +609,30 @@ export async function DELETE(request: NextRequest) {
         { status: 409 },
       );
     }
+
+    // Auth Check
+    const session = await auth?.api.getSession({ headers: request.headers });
+    const userId = session?.user?.id || null;
+
+    if (!userId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    // Verify ownership
+    if (isAuthEnabled() && db) {
+      const [existingBook] = await db.select().from(audiobooks).where(eq(audiobooks.id, bookId));
+
+      if (existingBook) {
+        if (existingBook.userId && existingBook.userId !== userId) {
+          return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+        }
+
+        await db.delete(audiobooks).where(eq(audiobooks.id, bookId));
+      } else {
+        return NextResponse.json({ error: 'Book not found' }, { status: 404 });
+      }
+    }
+
     const intermediateDir = join(getAudiobooksRootDir(request), `${bookId}-audiobook`);
 
     // If directory doesn't exist, consider it already reset
