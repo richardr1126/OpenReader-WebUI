@@ -299,7 +299,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
   const audioContext = useAudioContext();
   const audioCache = useAudioCache(25);
   const { availableVoices, fetchVoices } = useVoiceManagement(openApiKey, openApiBaseUrl, configTTSProvider, configTTSModel);
-  const { onTTSStart, onTTSComplete, refresh: refreshRateLimit, triggerRateLimit } = useAutoRateLimit();
+  const { onTTSStart, onTTSComplete, refresh: refreshRateLimit, triggerRateLimit, isAtLimit } = useAutoRateLimit();
 
   // Add ref for location change handler
   const locationChangeHandlerRef = useRef<((location: TTSLocation) => void) | null>(null);
@@ -820,6 +820,15 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
       return cachedAudio;
     }
 
+    // If the user is already out of quota, avoid spamming requests.
+    // Cached audio above is still allowed to play.
+    if (isAtLimit) {
+      if (!preload) {
+        setIsPlaying(false);
+      }
+      return undefined;
+    }
+
     try {
       console.log('Requesting audio for sentence:', sentence);
 
@@ -906,28 +915,34 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
 
       // Handle daily quota exceeded (429 + Problem Details code)
       if (status === 429 && code === 'USER_DAILY_QUOTA_EXCEEDED') {
-        toast.error('Daily TTS limit reached.', {
-          id: 'tts-limit-error',
-          style: {
-            background: 'var(--background)',
-            color: 'var(--accent)',
-          },
-          duration: 5000,
-        });
+        // Avoid noisy toasts from background preloading; keep the user-facing error for active playback.
+        if (!preload) {
+          toast.error('Daily TTS limit reached.', {
+            id: 'tts-limit-error',
+            style: {
+              background: 'var(--background)',
+              color: 'var(--accent)',
+            },
+            duration: 5000,
+          });
+        }
         triggerRateLimit();
         refreshRateLimit().catch(console.error);
         // Do NOT re-throw, just return undefined to stop playback gracefully
         return undefined;
       }
 
-      toast.error('Failed to generate audio. Server not responding.', {
-        id: 'tts-api-error',
-        style: {
-          background: 'var(--background)',
-          color: 'var(--accent)',
-        },
-        duration: 7000,
-      });
+      // Avoid noisy toasts from background preloading.
+      if (!preload) {
+        toast.error('TTS failed. Skipped sentence and paused.', {
+          id: 'tts-api-error',
+          style: {
+            background: 'var(--background)',
+            color: 'var(--accent)',
+          },
+          duration: 7000,
+        });
+      }
       throw error;
     }
   }, [
@@ -947,7 +962,8 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     triggerRateLimit,
     refreshRateLimit,
     onTTSComplete,
-    onTTSStart
+    onTTSStart,
+    isAtLimit
   ]);
 
   /**
@@ -1000,9 +1016,13 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     if (preload) {
       preloadRequests.current.set(sentence, processPromise);
       // Clean up the map entry once the promise resolves or rejects
-      processPromise.finally(() => {
-        preloadRequests.current.delete(sentence);
-      });
+      void processPromise
+        .finally(() => {
+          preloadRequests.current.delete(sentence);
+        })
+        .catch(() => {
+          // Prevent unhandled rejections from the cleanup-only chained promise.
+        });
     }
 
     return processPromise;
@@ -1024,31 +1044,33 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     const INITIAL_RETRY_DELAY = 1000; // 1 second
 
     const createHowl = async (retryCount = 0): Promise<Howl | null> => {
-      try {
-        // Get the processed audio data URI directly from processSentence
-        const audioDataUri = await processSentence(sentence);
-        if (!audioDataUri) {
-          // Graceful exit for rate limit or skipped sentence
-          console.log('Skipping playback for sentence (no audio generated)');
-          return null;
-        }
+      let playErrorAttempts = 0;
+      // Get the processed audio data URI directly from processSentence
+      const audioDataUri = await processSentence(sentence);
+      if (!audioDataUri) {
+        // Graceful exit for rate limit / abort / intentionally skipped sentence
+        console.log('Skipping playback for sentence (no audio generated)');
+        return null;
+      }
 
-        // Force unload any previous Howl instance to free up resources
-        if (activeHowl) {
-          activeHowl.unload();
-        }
+      // Force unload any previous Howl instance to free up resources
+      if (activeHowl) {
+        activeHowl.unload();
+      }
 
-        return new Howl({
-          src: [audioDataUri],
-          format: ['mp3', 'mpeg'],
-          html5: true,
-          preload: true,
-          pool: 5,
-          rate: audioSpeed,
-          onload: function (this: Howl) {
-            const estimate = pageTurnEstimateRef.current;
-            if (!estimate || estimate.sentenceIndex !== sentenceIndex) return;
-            if (!visualPageChangeHandlerRef.current) return;
+      return new Howl({
+        src: [audioDataUri],
+        format: ['mp3', 'mpeg'],
+        html5: true,
+        preload: true,
+        // We never need overlapping playback for a single sentence. Keeping this low avoids
+        // Safari/HTML5 Audio pool exhaustion when retries happen.
+        pool: 1,
+        rate: audioSpeed,
+        onload: function (this: Howl) {
+          const estimate = pageTurnEstimateRef.current;
+          if (!estimate || estimate.sentenceIndex !== sentenceIndex) return;
+          if (!visualPageChangeHandlerRef.current) return;
 
             const duration = this.duration();
             if (!duration || !Number.isFinite(duration)) return;
@@ -1066,47 +1088,88 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
               if (!currentEstimate || currentEstimate.sentenceIndex !== sentenceIndex) return;
               visualPageChangeHandlerRef.current?.(currentEstimate.location);
             }, delayMs);
-          },
-          onplay: () => {
+        },
+        onplay: () => {
+          setIsProcessing(false);
+          if ('mediaSession' in navigator) {
+            navigator.mediaSession.playbackState = 'playing';
+          }
+        },
+        onplayerror: function (this: Howl, error) {
+          console.warn('Howl playback error:', error);
+          playErrorAttempts += 1;
+
+          // Avoid looping for many seconds on Safari: if playback still fails after a single
+          // recovery attempt, skip the sentence and pause.
+          if (playErrorAttempts > 1) {
             setIsProcessing(false);
-            if ('mediaSession' in navigator) {
-              navigator.mediaSession.playbackState = 'playing';
-            }
-          },
-          onplayerror: function (this: Howl, error) {
-            console.warn('Howl playback error:', error);
-            // Try to recover by forcing HTML5 audio mode
-            if (this.state() === 'loaded') {
+            setActiveHowl(null);
+            this.unload();
+            setIsPlaying(false);
+            advance();
+            return;
+          }
+
+          // Try to recover by reloading once.
+          if (this.state() === 'loaded') {
+            this.unload();
+            this.once('load', () => this.play());
+            this.load();
+          }
+        },
+        onloaderror: async function (this: Howl, error) {
+          console.warn(`Error loading audio (attempt ${retryCount + 1}/${MAX_RETRIES}):`, error);
+
+          if (retryCount < MAX_RETRIES) {
+            // Calculate exponential backoff delay
+            const delay = INITIAL_RETRY_DELAY * Math.pow(2, retryCount);
+            console.log(`Retrying in ${delay}ms...`);
+
+            // Free the current Howl/audio objects before retrying to avoid pool exhaustion.
+            try {
               this.unload();
-              this.once('load', () => {
-                this.play();
-              });
-              this.load();
+            } catch {
+              // ignore unload errors
             }
-          },
-          onloaderror: async function (this: Howl, error) {
-            console.warn(`Error loading audio (attempt ${retryCount + 1}/${MAX_RETRIES}):`, error);
 
-            if (retryCount < MAX_RETRIES) {
-              // Calculate exponential backoff delay
-              const delay = INITIAL_RETRY_DELAY * Math.pow(2, retryCount);
-              console.log(`Retrying in ${delay}ms...`);
+            // Wait for the delay
+            await new Promise(resolve => setTimeout(resolve, delay));
 
-              // Wait for the delay
-              await new Promise(resolve => setTimeout(resolve, delay));
-
-              // Try to create a new Howl instance
+            // Try to create a new Howl instance
+            try {
               const retryHowl = await createHowl(retryCount + 1);
               if (retryHowl) {
                 setActiveHowl(retryHowl);
                 retryHowl.play();
+              } else {
+                // No audio generated (quota/abort). Stop cleanly without spamming errors.
+                setIsProcessing(false);
+                setActiveHowl(null);
+                setIsPlaying(false);
               }
-            } else {
-              console.error('Max retries reached, moving to next sentence');
+            } catch (err) {
+              console.error('Error creating Howl instance:', err);
               setIsProcessing(false);
               setActiveHowl(null);
-              this.unload();
               setIsPlaying(false);
+
+              toast.error('Audio loading failed after retries. Moving to next sentence...', {
+                id: 'audio-load-error',
+                style: {
+                  background: 'var(--background)',
+                  color: 'var(--accent)',
+                },
+                duration: 2000,
+              });
+
+              advance();
+            }
+          } else {
+            console.error('Max retries reached, moving to next sentence');
+            setIsProcessing(false);
+            setActiveHowl(null);
+            this.unload();
+            setIsPlaying(false);
 
               toast.error('Audio loading failed after retries. Moving to next sentence...', {
                 id: 'audio-load-error',
@@ -1131,43 +1194,38 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
               advance();
             }
           },
-          onstop: function (this: Howl) {
-            setIsProcessing(false);
-            this.unload();
-          }
-        });
-      } catch (error) {
-        console.error('Error creating Howl instance:', error);
-        return null;
-      }
+        onstop: function (this: Howl) {
+          setIsProcessing(false);
+          this.unload();
+        }
+      });
     };
 
     try {
       const howl = await createHowl();
-      if (howl) {
-        setActiveHowl(howl);
-        return howl;
+      if (!howl) {
+        // No audio generated (quota hit / aborted / intentionally skipped). Stop cleanly without
+        // advancing or spamming errors.
+        setActiveHowl(null);
+        setIsProcessing(false);
+        setIsPlaying(false);
+        return null;
       }
 
-      throw new Error('Failed to create Howl instance');
+      setActiveHowl(howl);
+      return howl;
     } catch (error) {
       console.error('Error playing TTS:', error);
       setActiveHowl(null);
       setIsProcessing(false);
 
-      toast.error('Failed to process audio. Skipping problematic sentence.', {
-        id: 'tts-processing-error',
-        style: {
-          background: 'var(--background)',
-          color: 'var(--accent)',
-        },
-        duration: 3000,
-      });
-
+      // Skip the sentence but pause playback (user can resume manually).
+      abortAudio(true);
+      setIsPlaying(false);
       advance();
       return null;
     }
-  }, [isPlaying, advance, activeHowl, processSentence, audioSpeed]);
+  }, [abortAudio, isPlaying, advance, activeHowl, processSentence, audioSpeed]);
 
   const playAudio = useCallback(async () => {
     const sentence = sentences[currentIndex];
@@ -1245,6 +1303,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
    * Preloads the next sentence's audio
    */
   const preloadNextAudio = useCallback(async () => {
+    if (isAtLimit) return;
     try {
       const nextSentence = sentences[currentIndex + 1];
       if (nextSentence) {
@@ -1283,7 +1342,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     } catch (error) {
       console.error('Error initiating preload:', error);
     }
-  }, [currentIndex, sentences, audioCache, processSentence, voice, speed, configTTSProvider, ttsModel]);
+  }, [isAtLimit, currentIndex, sentences, audioCache, processSentence, voice, speed, configTTSProvider, ttsModel]);
 
   /**
    * Main Playback Driver

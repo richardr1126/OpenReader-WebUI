@@ -88,6 +88,14 @@ class RateLimitExceeded extends Error {
   name = 'RateLimitExceeded' as const;
 }
 
+function getRowsAffected(result: unknown): number {
+  if (typeof result !== 'object' || result === null) return 0;
+  const rec = result as Record<string, unknown>;
+  if (typeof rec.rowCount === 'number') return rec.rowCount;
+  if (typeof rec.changes === 'number') return rec.changes;
+  return 0;
+}
+
 export class RateLimiter {
   constructor() { }
 
@@ -144,7 +152,6 @@ export class RateLimiter {
 
         // Attempt to increment each bucket
         for (const bucket of buckets) {
-          // eslint-disable-next-line @typescript-eslint/no-unused-vars
           const updateResult = await tx.update(userTtsChars)
             .set({
               charCount: sql`${userTtsChars.charCount} + ${charCount}`,
@@ -156,13 +163,10 @@ export class RateLimiter {
               lt(userTtsChars.charCount, bucket.limit)
             ));
 
-          // Check if update actually happened
-          const row = await tx.select({ count: userTtsChars.charCount }).from(userTtsChars)
-            .where(and(eq(userTtsChars.userId, bucket.key), eq(userTtsChars.date, today)))
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            .then((res: any) => res[0]);
-
-          if (!row || Number(row.count) > bucket.limit) {
+          // If any bucket is already at/over its limit, reject the request (and roll back all increments).
+          // Note: we intentionally allow a request to push a bucket over its limit; we only block when the
+          // bucket was already exhausted before this request started.
+          if (getRowsAffected(updateResult) <= 0) {
             throw new RateLimitExceeded();
           }
         }
@@ -179,10 +183,6 @@ export class RateLimiter {
         }
 
         const effective = pickEffectiveResult(bucketResults);
-
-        if (effective.currentCount > effective.limit) {
-          throw new RateLimitExceeded();
-        }
 
         return {
           allowed: true,

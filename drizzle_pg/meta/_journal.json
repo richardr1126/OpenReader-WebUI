@@ -8,6 +8,13 @@
       "when": 1769393893675,
       "tag": "0000_military_nemesis",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1769404444945,
+      "tag": "0001_futuristic_harpoon",
+      "breakpoints": true
     }
   ]
 }

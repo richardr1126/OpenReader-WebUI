@@ -22,6 +22,7 @@ interface PDFOnLinkClickArgs {
 
 export function PDFViewer({ zoomLevel }: PDFViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const [isPageRendering, setIsPageRendering] = useState(false);
   const scaleRef = useRef<number>(1);
   const { containerWidth, containerHeight } = usePDFResize(containerRef);
   const sentenceHighlightSeqRef = useRef(0);
@@ -74,6 +75,14 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
   const documentFile = currDocId ? fileCacheRef.current.get(currDocId) : undefined;
 
   const layoutKey = `${zoomLevel}:${containerWidth}:${containerHeight}:${viewType}:${currDocPage}`;
+
+  // Track page turns so we can keep the previous canvas visible until the new one paints.
+  const lastRenderedLayoutKeyRef = useRef<string>('');
+  useEffect(() => {
+    if (layoutKey !== lastRenderedLayoutKeyRef.current) {
+      setIsPageRendering(true);
+    }
+  }, [layoutKey]);
 
   const clearSentenceHighlightTimeouts = useCallback(() => {
     for (const t of sentenceHighlightTimeoutsRef.current) clearTimeout(t);
@@ -282,7 +291,10 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
   }, [calculateScale]);
 
   return (
-    <div ref={containerRef} className="flex flex-col items-center overflow-auto w-full px-6 h-full">
+    <div
+      ref={containerRef}
+      className="flex flex-col items-center overflow-auto w-full px-6 h-full pdf-viewer"
+    >
       <Document
         key={currDocId || 'pdf'}
         loading={<DocumentSkeleton />}
@@ -302,9 +314,9 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
             }
           }
         }}
-        className="flex flex-col items-center m-0 z-0" 
+        className="flex flex-col items-center m-0 z-0"
       >
-        <div>
+        <div className="pdf-page-stage" data-rendering={isPageRendering ? 'true' : 'false'}>
           {viewType === 'scroll' ? (
             // Scroll mode: render all pages
             <div className="flex flex-col gap-4">
@@ -316,6 +328,10 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
                   renderTextLayer={i + 1 === currDocPage}
                   className="shadow-lg"
                   scale={currentScale()}
+                  onRenderSuccess={() => {
+                    lastRenderedLayoutKeyRef.current = layoutKey;
+                    setIsPageRendering(false);
+                  }}
                   onLoadSuccess={(page) => {
                     setPageWidth(page.originalWidth);
                     setPageHeight(page.originalHeight);
@@ -334,6 +350,10 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
                   renderTextLayer={leftPage === currDocPage}
                   className="shadow-lg"
                   scale={currentScale()}
+                  onRenderSuccess={() => {
+                    lastRenderedLayoutKeyRef.current = layoutKey;
+                    setIsPageRendering(false);
+                  }}
                   onLoadSuccess={(page) => {
                     setPageWidth(page.originalWidth);
                     setPageHeight(page.originalHeight);
@@ -348,6 +368,10 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
                   renderTextLayer={rightPage === currDocPage}
                   className="shadow-lg"
                   scale={currentScale()}
+                  onRenderSuccess={() => {
+                    lastRenderedLayoutKeyRef.current = layoutKey;
+                    setIsPageRendering(false);
+                  }}
                   onLoadSuccess={(page) => {
                     setPageWidth(page.originalWidth);
                     setPageHeight(page.originalHeight);

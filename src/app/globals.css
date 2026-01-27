@@ -119,6 +119,50 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/*
+ * PDF page turn smoothing
+ * - Keep a stable paint surface (prevents background flash)
+ * - Fade-in newly rendered canvas
+ */
+.pdf-page-stage {
+  /* Ensure we always paint something (matches app theme) while react-pdf swaps canvases */
+  background: var(--background);
+}
+
+.pdf-viewer .react-pdf__Page {
+  /* Make page paints more stable and avoid seeing the app background between renders */
+  background: var(--background);
+  isolation: isolate;
+}
+
+.pdf-viewer .react-pdf__Page canvas {
+  display: block;
+  background: var(--background);
+  /* GPU hint; helps reduce flicker on some browsers */
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+
+/* Fade-in the freshly rendered canvas (react-pdf replaces the canvas element). */
+.pdf-viewer .react-pdf__Page canvas {
+  opacity: 0;
+  animation: pdf-canvas-fade-in 140ms ease-out forwards;
+}
+
+@keyframes pdf-canvas-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Hide react-pdf's default tiny "Loading page..." placeholder to avoid jarring layout shifts. */
+.pdf-viewer .react-pdf__message {
+  display: none !important;
+}
+
+.pdf-page-stage {
+  position: relative;
+}
+
 /* App shell utility (fullscreen, vertical layout) */
 .app-shell {
   --header-height: 3.25rem;

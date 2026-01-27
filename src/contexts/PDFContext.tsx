@@ -101,6 +101,8 @@ interface PDFContextType {
 const PDFContext = createContext<PDFContextType | undefined>(undefined);
 
 const CONTINUATION_PREVIEW_CHARS = 600;
+const EMPTY_TEXT_RETRY_DELAY_MS = 120;
+const EMPTY_TEXT_MAX_RETRIES = 6;
 
 /**
  * PDFProvider Component
@@ -150,6 +152,8 @@ export function PDFProvider({ children }: { children: ReactNode }) {
   // or when react-pdf tears down and recreates its internal worker.
   const pdfDocGenerationRef = useRef(0);
   const pdfDocumentRef = useRef<PDFDocumentProxy | undefined>(undefined);
+  const loadSeqRef = useRef(0);
+  const emptyRetryRef = useRef<{ page: number; attempt: number; timer: ReturnType<typeof setTimeout> | null } | null>(null);
 
   useEffect(() => {
     pdfDocumentRef.current = pdfDocument;
@@ -183,6 +187,17 @@ export function PDFProvider({ children }: { children: ReactNode }) {
       const generation = pdfDocGenerationRef.current;
       const currentPdf = pdfDocumentRef.current;
       if (!currentPdf) return;
+      const seq = ++loadSeqRef.current;
+      const pageNumber = currDocPageNumber;
+
+      const existingRetry = emptyRetryRef.current;
+      if (existingRetry?.timer) {
+        clearTimeout(existingRetry.timer);
+      }
+      emptyRetryRef.current =
+        existingRetry && existingRetry.page === pageNumber
+          ? { ...existingRetry, timer: null }
+          : null;
 
       const margins = {
         header: headerMargin,
@@ -227,6 +242,35 @@ export function PDFProvider({ children }: { children: ReactNode }) {
 
       if (generation !== pdfDocGenerationRef.current || pdfDocumentRef.current !== currentPdf) {
         return;
+      }
+      if (seq !== loadSeqRef.current || pageNumber !== currDocPageNumber) {
+        return;
+      }
+
+      const trimmed = text.trim();
+      if (!trimmed) {
+        const prevAttempt = emptyRetryRef.current?.page === pageNumber ? emptyRetryRef.current.attempt : 0;
+        const attempt = prevAttempt + 1;
+
+        // Avoid pushing empty text into TTS immediately; transient empty extractions can happen
+        // during page turns or react-pdf worker churn. Retry a few times before treating it as
+        // a truly blank page.
+        if (attempt <= EMPTY_TEXT_MAX_RETRIES) {
+          const timer = setTimeout(() => {
+            if (generation !== pdfDocGenerationRef.current || pdfDocumentRef.current !== currentPdf) {
+              return;
+            }
+            if (pageNumber !== currDocPageNumber) {
+              return;
+            }
+            void loadCurrDocText();
+          }, EMPTY_TEXT_RETRY_DELAY_MS);
+
+          emptyRetryRef.current = { page: pageNumber, attempt, timer };
+          return;
+        }
+      } else {
+        emptyRetryRef.current = null;
       }
 
       if (text !== currDocText || text === '') {
@@ -277,6 +321,11 @@ export function PDFProvider({ children }: { children: ReactNode }) {
       // `getPage()` on a stale/destroyed PDFDocumentProxy after login redirects
       // or fast refresh.
       pdfDocGenerationRef.current += 1;
+      loadSeqRef.current += 1;
+      if (emptyRetryRef.current?.timer) {
+        clearTimeout(emptyRetryRef.current.timer);
+      }
+      emptyRetryRef.current = null;
       pageTextCacheRef.current.clear();
       setPdfDocument(undefined);
       setCurrDocPages(undefined);
@@ -304,6 +353,11 @@ export function PDFProvider({ children }: { children: ReactNode }) {
   const clearCurrDoc = useCallback(() => {
     pdfDocGenerationRef.current += 1;
     pdfDocumentRef.current = undefined;
+    loadSeqRef.current += 1;
+    if (emptyRetryRef.current?.timer) {
+      clearTimeout(emptyRetryRef.current.timer);
+    }
+    emptyRetryRef.current = null;
     setCurrDocId(undefined);
     setCurrDocName(undefined);
     setCurrDocData(undefined);
