@@ -12,7 +12,7 @@ import { db } from '@/db';
 import { audiobooks, audiobookChapters } from '@/db/schema';
 import { eq } from 'drizzle-orm';
 import { isAuthEnabled } from '@/lib/server/auth-config';
-import { requireAuthContext } from '@/lib/server/auth';
+import { getAuthContext, requireAuthContext } from '@/lib/server/auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -404,9 +404,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Auth Check
-    const session = await auth?.api.getSession({ headers: request.headers });
-    const userId = session?.user?.id || null;
+    const { userId } = await getAuthContext(request);
 
     // Verify ownership
     if (isAuthEnabled() && db) {
@@ -610,13 +608,9 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    // Auth Check
-    const session = await auth?.api.getSession({ headers: request.headers });
-    const userId = session?.user?.id || null;
-
-    if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    const ctxOrRes = await requireAuthContext(request);
+    if (ctxOrRes instanceof Response) return ctxOrRes;
+    const userId = ctxOrRes.userId;
 
     // Verify ownership
     if (isAuthEnabled() && db) {

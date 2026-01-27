@@ -34,13 +34,16 @@ OpenReader WebUI is an open source text to speech document reader web app built 
 ## 🐳 Docker Quick Start
 
 ### Prerequisites
+
 - Recent version of Docker installed on your machine
 - A TTS API server (Kokoro-FastAPI, Orpheus-FastAPI, Deepinfra, OpenAI, etc.) running and accessible
 
 > **Note:** If you have good hardware, you can run [Kokoro-FastAPI with Docker locally](#🗣️-local-kokoro-fastapi-quick-start-cpu-or-gpu) (see below).
 
-### 1. 🐳 Start the Docker container:
+### 1. 🐳 Start the Docker container
+
   Minimal (no persistence, auth disabled unless you set auth env vars):
+
   ```bash
   docker run --name openreader-webui \
     --restart unless-stopped \
@@ -49,6 +52,7 @@ OpenReader WebUI is an open source text to speech document reader web app built 
   ```
 
   Fully featured (persistent storage + server library import + KokoroFastAPI in Docker + optional auth):
+
   ```bash
   docker run --name openreader-webui \
     --restart unless-stopped \
@@ -66,6 +70,7 @@ OpenReader WebUI is an open source text to speech document reader web app built 
   You can remove both `BETTER_AUTH_*` env vars to keep auth disabled.
 
   > **Notes:**
+  >
   > - `API_BASE` should point to your TTS API server's base URL (if running Kokoro-FastAPI locally in Docker, use `http://host.docker.internal:8880/v1`).
   > - `BETTER_AUTH_URL` should be your externally-facing URL for this app (for example `https://reader.example.com` or `http://localhost:3003`).
   > - To enable auth, set **both** `BETTER_AUTH_URL` and `BETTER_AUTH_SECRET` generated with `openssl rand -base64 32`.
@@ -102,12 +107,14 @@ OpenReader WebUI is an open source text to speech document reader web app built 
 
   Visit [http://localhost:3003](http://localhost:3003) to run the app and set your settings.
 
-### 2. ⚙️ Configure the app settings in the UI:
-  - Set the TTS Provider and Model in the Settings modal
-  - Set the TTS API Base URL and API Key if needed (more secure to set in env vars)
-  - Select your model's voice from the dropdown (voices try to be fetched from TTS Provider API)
+### 2. ⚙️ Configure the app settings in the UI
+
+- Set the TTS Provider and Model in the Settings modal
+- Set the TTS API Base URL and API Key if needed (more secure to set in env vars)
+- Select your model's voice from the dropdown (voices try to be fetched from TTS Provider API)
 
 ### 3. ⬆️ Updating Docker Image
+
 ```bash
 docker stop openreader-webui && \
 docker rm openreader-webui && \
@@ -117,7 +124,6 @@ docker pull ghcr.io/richardr1126/openreader-webui:latest
 ### 🗣️ Local Kokoro-FastAPI Quick-start (CPU or GPU)
 
 You can run the Kokoro TTS API server directly with Docker. **We are not responsible for issues with [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI).** For best performance, use an NVIDIA GPU (for GPU version) or Apple Silicon (for CPU version).
-
 
 <details>
 <summary>
@@ -170,6 +176,7 @@ docker run -d \
 </details>
 
 > **⚠️ Important Notes:**
+>
 > - For best results, set the `-e API_BASE=` for OpenReader's Docker to `http://kokoro-tts:8880/v1`
 > - For issues or support, see the [Kokoro-FastAPI repository](https://github.com/remsky/Kokoro-FastAPI).
 > - The GPU version requires NVIDIA Docker support and works best with NVIDIA GPUs. The CPU version works best on Apple Silicon or modern x86 CPUs.
@@ -177,22 +184,30 @@ docker run -d \
 ## Local Development Installation
 
 ### Prerequisites
+
 - Node.js (recommended: use [nvm](https://github.com/nvm-sh/nvm))
 - pnpm (recommended) or npm
+
     ```bash
     npm install -g pnpm
     ```
+
 - A TTS API server (Kokoro-FastAPI, Orpheus-FastAPI, Deepinfra, OpenAI, etc.) running and accessible
 Optionally required for different features:
 - [FFmpeg](https://ffmpeg.org) (required for audiobook m4b creation only)
+
     ```bash
     brew install ffmpeg
     ```
+
 - [libreoffice](https://www.libreoffice.org) (required for DOCX files)
+
     ```bash
     brew install libreoffice
     ```
+
 - [whisper.cpp](https://github.com/ggml-org/whisper.cpp) (optional, required for word-by-word highlighting)
+
     ```bash
     # clone and build whisper.cpp (no model download needed – OpenReader handles that)
     git clone https://github.com/ggml-org/whisper.cpp.git
@@ -205,31 +220,36 @@ Optionally required for different features:
     ```
 
     > **Note:** The `WHISPER_CPP_BIN` path should be set in your `.env` file for OpenReader to use word-by-word highlighting features.
-    
+
 ### Steps
 
 1. Clone the repository:
+
    ```bash
    git clone https://github.com/richardr1126/OpenReader-WebUI.git
    cd OpenReader-WebUI
    ```
 
 2. Install dependencies:
-   
+
    With pnpm (recommended):
+
    ```bash
    pnpm i # or npm i
    ```
 
 3. Configure the environment:
+
    ```bash
    cp template.env .env
    # Edit .env with your configuration settings
    ```
+
    Auth is recommended for contributors and is enabled when **both** values are set:
 
    - Set `BETTER_AUTH_URL` to your local URL (default: `http://localhost:3003`)
    - Generate a `BETTER_AUTH_SECRET` and paste it into `.env`:
+
      ```bash
      openssl rand -base64 32
      ```
@@ -239,31 +259,38 @@ Optionally required for different features:
    > Note: The base URL for the TTS API should be accessible and relative to the Next.js server
 
 4. Run auth DB migrations:
-   
+
    - **Production / Docker**: Migrations run automatically on startup via `pnpm start`.
    - **Development**: Run explicitly:
+
      ```bash
      pnpm migrate
      ```
-  > Note: If you set `POSTGRES_URL` in `.env`, migrations will target Postgres instead of local SQLite.
+
+   > Note: If you set `POSTGRES_URL` in `.env`, migrations will target Postgres instead of local SQLite.
+   >
+   > Manual Drizzle Kit runs:
+   > - SQLite: `npx drizzle-kit migrate --config drizzle.config.sqlite.ts`
+   > - Postgres: `npx drizzle-kit migrate --config drizzle.config.pg.ts`
 
 5. Start the development server:
-   
+
    With pnpm (recommended):
+
    ```bash
    pnpm dev # or npm run dev
    ```
 
    or build and run the production server:
-   
+
    With pnpm:
+
    ```bash
    pnpm build # or npm run build
    pnpm start # or npm start
    ```
 
    Visit [http://localhost:3003](http://localhost:3003) to run the app.
-
 
 ## 💡 Feature requests
 
@@ -289,6 +316,7 @@ This project would not be possible without standing on the shoulders of these gi
 - [react-reader](https://github.com/happyr/react-reader) npm package
 
 ## Docker Supported Architectures
+
 - linux/amd64 (x86_64)
 - linux/arm64 (Apple Silicon, Raspberry Pi, SBCs, etc.)
 
@@ -298,7 +326,7 @@ This project would not be possible without standing on the shoulders of these gi
 - **Containerization:** Docker
 - **Storage:**
   - [Dexie.js](https://dexie.org/) IndexedDB wrapper for client-side storage
-- **PDF:** 
+- **PDF:**
   - [react-pdf](https://github.com/wojtekmaj/react-pdf)
   - [pdf.js](https://mozilla.github.io/pdf.js/)
 - **EPUB:**
@@ -307,7 +335,7 @@ This project would not be possible without standing on the shoulders of these gi
 - **Markdown/Text:**
   - [react-markdown](https://github.com/remarkjs/react-markdown)
   - [remark-gfm](https://github.com/remarkjs/remark-gfm)
-- **UI:** 
+- **UI:**
   - [Tailwind CSS](https://tailwindcss.com)
   - [Headless UI](https://headlessui.com)
   - [@tailwindcss/typography](https://tailwindcss.com/docs/typography-plugin)

@@ -45,7 +45,6 @@ export async function POST(req: NextRequest) {
 
     const ctxOrRes = await requireAuthContext(req);
     if (ctxOrRes instanceof Response) return ctxOrRes;
-    const userId = ctxOrRes.userId;
 
     const data = await req.json();
     const documentsData = data.documents as SyncedDocument[];
@@ -75,6 +74,11 @@ export async function POST(req: NextRequest) {
       // DB Upsert
       // With composite PK (id, userId), we check if THIS user already has this document
       if (isAuthEnabled() && db) {
+        const userId = ctxOrRes.userId;
+        if (!userId) {
+          return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
+
         const [existing] = await db.select().from(documents).where(
           and(eq(documents.id, id), eq(documents.userId, userId))
         );
@@ -113,7 +117,6 @@ export async function GET(req: NextRequest) {
 
     const ctxOrRes = await requireAuthContext(req);
     if (ctxOrRes instanceof Response) return ctxOrRes;
-    const userId = ctxOrRes.userId;
 
     const url = new URL(req.url);
     const list = url.searchParams.get('list') === 'true';
@@ -137,6 +140,11 @@ export async function GET(req: NextRequest) {
         allowedDocs = allowedDocs.filter(d => targetIds!.includes(d.id));
       }
     } else {
+      const userId = ctxOrRes.userId;
+      if (!userId) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      }
+
       if (!db) throw new Error("DB not initialized");
       const rows = await db.select().from(documents).where(
         and(
@@ -202,7 +210,6 @@ export async function DELETE(req: NextRequest) {
     // Auth check - require session
     const ctxOrRes = await requireAuthContext(req);
     if (ctxOrRes instanceof Response) return ctxOrRes;
-    const userId = ctxOrRes.userId;
 
     const url = new URL(req.url);
     const idsParam = url.searchParams.get('ids');
@@ -217,9 +224,14 @@ export async function DELETE(req: NextRequest) {
         const fsDocs = await scanDocumentsFS();
         targetIds = fsDocs.map((d) => d.id);
       } else {
+        const userId = ctxOrRes.userId;
+        if (!userId) {
+          return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
+
         // Existing behavior was "nuke everything"; keep it scoped to "my" docs.
         if (!db) throw new Error("DB not initialized");
-        const userDocs = await db.select({ id: documents.id }).from(documents).where(eq(documents.userId, userId as string));
+        const userDocs = await db.select({ id: documents.id }).from(documents).where(eq(documents.userId, userId));
         targetIds = userDocs.map((d: { id: string | null }) => d.id!).filter(Boolean) as string[];
       }
     }
@@ -241,10 +253,15 @@ export async function DELETE(req: NextRequest) {
         }
       }
     } else {
+      const userId = ctxOrRes.userId;
+      if (!userId) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      }
+
       if (!db) throw new Error("DB not initialized");
       const rows = await db.delete(documents)
         .where(and(
-          eq(documents.userId, userId as string),
+          eq(documents.userId, userId),
           inArray(documents.id, targetIds)
         ))
         .returning({ id: documents.id, filePath: documents.filePath });

@@ -9,7 +9,7 @@
     "lint": "next lint",
     "test": "playwright test",
     "migrate": "node scripts/migrate-if-auth.mjs",
-    "migrate:force": "drizzle-kit migrate"
+    "migrate:force": "node scripts/migrate.mjs"
   },
   "dependencies": {
     "@headlessui/react": "^2.2.9",
