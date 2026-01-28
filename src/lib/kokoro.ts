@@ -1,8 +1,7 @@
 /**
- * Voice Utilities
- * 
- * This module provides utilities for handling voice selection and management,
- * particularly for Kokoro multi-voice syntax.
+ * Kokoro Utilities
+ *
+ * Utilities for handling Kokoro multi-voice syntax.
  */
 
 /**

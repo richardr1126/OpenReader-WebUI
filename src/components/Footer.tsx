@@ -1,7 +1,7 @@
 'use client'
 
 import { GithubIcon } from '@/components/icons/Icons'
-import { showPrivacyPopup } from '@/components/privacy-popup'
+import { showPrivacyModal } from '@/components/PrivacyModal'
 import { useAuthConfig } from '@/contexts/AuthRateLimitContext'
 
 export function Footer() {
@@ -23,7 +23,7 @@ export function Footer() {
           <span className='w-full sm:w-fit'>•</span>
           <button
             type="button"
-            onClick={() => showPrivacyPopup({ authEnabled })}
+            onClick={() => showPrivacyModal({ authEnabled })}
             className="font-bold hover:text-foreground transition-colors outline-none"
           >
             Privacy

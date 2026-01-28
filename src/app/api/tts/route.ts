@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { SpeechCreateParams } from 'openai/resources/audio/speech.mjs';
-import { isKokoroModel } from '@/utils/voice';
+import { isKokoroModel } from '@/lib/kokoro';
 import { LRUCache } from 'lru-cache';
 import { createHash } from 'crypto';
 import type { TTSRequestPayload } from '@/types/client';

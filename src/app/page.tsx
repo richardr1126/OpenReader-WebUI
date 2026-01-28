@@ -2,8 +2,7 @@ import { Header } from '@/components/Header';
 import { HomeContent } from '@/components/HomeContent';
 import { SettingsModal } from '@/components/SettingsModal';
 import { UserMenu } from '@/components/auth/UserMenu';
-import { AuthLoader } from '@/components/auth/AuthLoader';
-import { RateLimitBanner } from '@/components/rate-limit-banner';
+import { RateLimitBanner } from '@/components/auth/RateLimitBanner';
 
 export default function Home() {
   return (
@@ -23,16 +22,12 @@ export default function Home() {
           </div>
         }
       />
-      <AuthLoader>
-        <>
-          <section className="flex-1 px-4 pb-8 pt-4 overflow-auto">
-            <div className="max-w-7xl mx-auto">
-              <RateLimitBanner className="mb-6" />
-              <HomeContent />
-            </div>
-          </section>
-        </>
-      </AuthLoader>
+      <section className="flex-1 px-4 pb-8 pt-4 overflow-auto">
+        <div className="max-w-7xl mx-auto">
+          <RateLimitBanner className="mb-6" />
+          <HomeContent />
+        </div>
+      </section>
     </div>
   );
 }

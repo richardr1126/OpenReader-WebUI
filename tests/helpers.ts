@@ -166,7 +166,7 @@ export async function setupTest(page: Page) {
   // If auth is enabled, establish an anonymous session BEFORE navigation.
   // This keeps each test self-contained (no shared storageState) while ensuring
   // server routes that require auth don't intermittently 401 during app startup.
-  await ensureAnonymousSession(page);
+  // await ensureAnonymousSession(page);
 
   // Navigate to the home page before each test
   await page.goto('/');

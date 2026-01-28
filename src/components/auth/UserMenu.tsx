@@ -2,26 +2,24 @@
 
 import { Button } from '@headlessui/react';
 import Link from 'next/link';
-import { useAuthConfig, useAuthRateLimit } from '@/contexts/AuthRateLimitContext';
-import { useAuthSession } from '@/hooks/useAuth';
+import { useAuthConfig } from '@/contexts/AuthRateLimitContext';
+import { useAuthSession } from '@/hooks/useAuthSession';
 import { getAuthClient } from '@/lib/auth-client';
-import { clearSignedOut } from '@/lib/session-utils';
 import { useRouter } from 'next/navigation';
 
 export function UserMenu({ className = '' }: { className?: string }) {
   const { authEnabled, baseUrl } = useAuthConfig();
-  const { refresh: refreshRateLimit } = useAuthRateLimit();
   const { data: session, isPending } = useAuthSession();
   const router = useRouter();
 
   if (!authEnabled || isPending) return null;
 
-  const handleSignOut = async () => {
+  const handleDisconnectAccount = async () => {
     const client = getAuthClient(baseUrl);
+    // "Sign out" here means: end the email/social session and immediately
+    // start a fresh anonymous session. The app should never be left without a session.
     await client.signOut();
-    await clearSignedOut();
-    await client.signIn.anonymous();
-    await refreshRateLimit();
+    // AuthLoader will create the next anonymous session.
     router.refresh();
   };
 
@@ -30,12 +28,12 @@ export function UserMenu({ className = '' }: { className?: string }) {
       <div className={`flex gap-2 ${className}`}>
         <Link href="/signin">
           <Button className="inline-flex items-center rounded-md bg-base border border-offbase px-2 py-1 text-xs font-medium text-foreground hover:bg-offbase focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2 transform transition-all duration-200 ease-in-out hover:scale-[1.09] hover:text-accent">
-            {session?.user.isAnonymous ? 'Log In' : 'Sign In'}
+            Connect
           </Button>
         </Link>
         <Link href="/signup">
           <Button className="inline-flex items-center rounded-md bg-accent px-2 py-1 text-xs font-medium text-background hover:bg-secondary-accent focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2 transform transition-all duration-200 ease-in-out hover:scale-[1.09]">
-            Sign Up
+            Create account
           </Button>
         </Link>
       </div>
@@ -49,9 +47,9 @@ export function UserMenu({ className = '' }: { className?: string }) {
       </span>
 
       <Button
-        onClick={handleSignOut}
+        onClick={handleDisconnectAccount}
         className="inline-flex items-center text-foreground text-xs hover:text-accent transform transition-all duration-200 ease-in-out hover:scale-[1.09]"
-        title="Sign Out"
+        title="Disconnect account"
       >
         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>

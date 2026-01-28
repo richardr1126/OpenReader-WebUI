@@ -6,7 +6,7 @@ import { Footer } from "@/components/Footer";
 import { Toaster } from 'react-hot-toast';
 import { Analytics } from "@vercel/analytics/next";
 import { isAuthEnabled, getAuthBaseUrl } from '@/lib/server/auth-config';
-import ClaimDataPopup from '@/components/ClaimDataModal';
+import ClaimDataPopup from '@/components/auth/ClaimDataModal';
 
 export const metadata: Metadata = {
   title: "OpenReader WebUI",

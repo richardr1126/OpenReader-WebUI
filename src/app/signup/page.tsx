@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { getAuthClient } from '@/lib/auth-client';
 import { useAuthConfig, useAuthRateLimit } from '@/contexts/AuthRateLimitContext';
-import { showPrivacyPopup } from '@/components/privacy-popup';
+import { showPrivacyModal } from '@/components/PrivacyModal';
 import { LoadingSpinner } from '@/components/Spinner';
 import toast from 'react-hot-toast';
 
@@ -229,7 +229,7 @@ export default function SignUpPage() {
           <p className="text-xs text-muted">
             By creating an account, you agree to our{' '}
             <button
-              onClick={() => showPrivacyPopup({ authEnabled })}
+              onClick={() => showPrivacyModal({ authEnabled })}
               className="underline hover:text-foreground"
             >
               Privacy Policy

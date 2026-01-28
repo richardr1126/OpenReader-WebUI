@@ -6,8 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { getAuthClient } from '@/lib/auth-client';
 import { useAuthConfig, useAuthRateLimit } from '@/contexts/AuthRateLimitContext';
-import { showPrivacyPopup } from '@/components/privacy-popup';
-import { wasSignedOut, clearSignedOut } from '@/lib/session-utils';
+import { showPrivacyModal } from '@/components/PrivacyModal';
 import { GithubIcon } from '@/components/icons/Icons';
 import { LoadingSpinner } from '@/components/Spinner';
 
@@ -26,15 +25,14 @@ function SignInContent() {
   const [password, setPassword] = useState('');
   const [loadingEmail, setLoadingEmail] = useState(false);
   const [loadingGithub, setLoadingGithub] = useState(false);
-  const [loadingGuest, setLoadingGuest] = useState(false);
+  const [loadingAnonymous, setLoadingAnonymous] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
   const [sessionExpired, setSessionExpired] = useState(false);
-  const [justSignedOut, setJustSignedOut] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { authEnabled, baseUrl } = useAuthConfig();
   const { refresh: refreshRateLimit } = useAuthRateLimit();
 
-  const isAnyLoading = loadingEmail || loadingGithub || loadingGuest;
+  const isAnyLoading = loadingEmail || loadingGithub || loadingAnonymous;
 
   // Check if auth is enabled, redirect home if not
   useEffect(() => {
@@ -42,16 +40,6 @@ function SignInContent() {
       router.push('/');
     }
   }, [router, authEnabled]);
-
-  // Detect explicit sign-out
-  useEffect(() => {
-    wasSignedOut().then(signedOut => {
-      if (signedOut) {
-        setJustSignedOut(true);
-        clearSignedOut();
-      }
-    });
-  }, []);
 
   const validateEmail = (email: string): boolean => {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
@@ -114,8 +102,8 @@ function SignInContent() {
     }
   };
 
-  const handleGuestSignIn = async () => {
-    setLoadingGuest(true);
+  const handleAnonymousContinue = async () => {
+    setLoadingAnonymous(true);
     setError(null);
     try {
       const client = getAuthClient(baseUrl);
@@ -124,9 +112,9 @@ function SignInContent() {
       router.push('/');
     } catch (e) {
       console.error('Anonymous sign-in failed:', e);
-      setError('Unable to continue as guest. Please try again.');
+      setError('Unable to continue anonymously. Please try again.');
     } finally {
-      setLoadingGuest(false);
+      setLoadingAnonymous(false);
     }
   };
 
@@ -140,25 +128,21 @@ function SignInContent() {
         <SessionExpiredLoader setSessionExpired={setSessionExpired} />
       </Suspense>
 
-      <div className="w-full max-w-md bg-base rounded-2xl shadow-xl p-6">
-        <h1 className="text-xl font-semibold text-foreground">
-          {sessionExpired ? 'Session Expired' : 'Sign In'}
-        </h1>
-        <p className="text-sm text-muted mt-1">
-          {sessionExpired
-            ? 'Please sign in again to continue'
-            : justSignedOut
-              ? 'Sign in to continue'
-              : 'Enter your email below to login'}
-        </p>
+        <div className="w-full max-w-md bg-base rounded-2xl shadow-xl p-6">
+          <h1 className="text-xl font-semibold text-foreground">
+            {sessionExpired ? 'Session Expired' : 'Connect Account'}
+          </h1>
+          <p className="text-sm text-muted mt-1">
+            {sessionExpired
+              ? 'Please sign in again to continue'
+              : 'Connect an email account to sync your data across devices'}
+          </p>
 
         {/* Alerts */}
-        {(sessionExpired || justSignedOut) && (
+        {sessionExpired && (
           <div className="mt-4 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
             <p className="text-sm text-amber-700 dark:text-amber-400">
-              {sessionExpired
-                ? 'Your session has expired. Please sign in again.'
-                : "You've been signed out."}
+              Your session has expired. Please sign in again.
             </p>
           </div>
         )}
@@ -207,7 +191,7 @@ function SignInContent() {
             <span className="text-sm text-foreground">Remember me</span>
           </label>
 
-          {/* Sign In Button */}
+          {/* Connect Button */}
           <Button
             type="submit"
             disabled={isAnyLoading}
@@ -217,7 +201,7 @@ function SignInContent() {
                      focus:ring-offset-2 disabled:opacity-50 transform transition-transform 
                      duration-200 hover:scale-[1.02]"
           >
-            {loadingEmail ? <LoadingSpinner className="w-4 h-4 mx-auto" /> : 'Sign In'}
+            {loadingEmail ? <LoadingSpinner className="w-4 h-4 mx-auto" /> : 'Connect'}
           </Button>
 
           {/* GitHub */}
@@ -241,17 +225,17 @@ function SignInContent() {
             )}
           </Button>
 
-          {/* Guest */}
+          {/* Anonymous */}
           <Button
             type="button"
             disabled={isAnyLoading}
-            onClick={handleGuestSignIn}
+            onClick={handleAnonymousContinue}
             className="w-full rounded-lg bg-background py-2 text-sm font-medium text-foreground 
                      hover:bg-offbase focus:outline-none focus:ring-2 focus:ring-accent 
                      focus:ring-offset-2 disabled:opacity-50 border border-offbase 
                      transform transition-transform duration-200 hover:scale-[1.02]"
           >
-            {loadingGuest ? <LoadingSpinner className="w-4 h-4 mx-auto" /> : 'Continue as Guest'}
+            {loadingAnonymous ? <LoadingSpinner className="w-4 h-4 mx-auto" /> : 'Continue anonymously'}
           </Button>
         </div>
 
@@ -266,7 +250,7 @@ function SignInContent() {
           <p className="text-xs text-muted">
             By signing in, you agree to our{' '}
             <button
-              onClick={() => showPrivacyPopup({ authEnabled })}
+              onClick={() => showPrivacyModal({ authEnabled })}
               className="underline hover:text-foreground"
             >
               Privacy Policy

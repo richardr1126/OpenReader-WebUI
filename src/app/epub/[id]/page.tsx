@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { useEPUB } from '@/contexts/EPUBContext';
 import { DocumentSkeleton } from '@/components/DocumentSkeleton';
-import { EPUBViewer } from '@/components/EPUBViewer';
+import { EPUBViewer } from '@/components/views/EPUBViewer';
 import { DocumentSettings } from '@/components/DocumentSettings';
 import { Header } from '@/components/Header';
 import { useTTS } from "@/contexts/TTSContext";
@@ -16,7 +16,7 @@ import { AudiobookExportModal } from '@/components/AudiobookExportModal';
 import type { TTSAudiobookChapter } from '@/types/tts';
 import type { AudiobookGenerationSettings } from '@/types/client';
 import { resolveDocumentId } from '@/lib/dexie';
-import { RateLimitBanner } from '@/components/rate-limit-banner';
+import { RateLimitBanner } from '@/components/auth/RateLimitBanner';
 import { useAuthRateLimit } from '@/contexts/AuthRateLimitContext';
 
 const isDev = process.env.NEXT_PUBLIC_NODE_ENV !== 'production' || process.env.NODE_ENV == null;

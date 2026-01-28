@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { isKokoroModel } from '@/utils/voice';
+import { isKokoroModel } from '@/lib/kokoro';
 import { auth } from '@/lib/server/auth';
 
 const OPENAI_VOICES = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'];

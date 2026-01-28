@@ -13,12 +13,12 @@ import { updateAppConfig, getAppConfig } from '@/lib/dexie';
 
 const isDev = process.env.NEXT_PUBLIC_NODE_ENV !== 'production' || process.env.NODE_ENV == null;
 
-interface PrivacyPopupProps {
+interface PrivacyModalProps {
   onAccept?: () => void;
   authEnabled?: boolean;
 }
 
-function PrivacyPopupBody({
+function PrivacyModalBody({
   origin,
   authEnabled,
 }: {
@@ -125,7 +125,7 @@ function PrivacyPopupBody({
   );
 }
 
-export function PrivacyPopup({ onAccept, authEnabled = false }: PrivacyPopupProps) {
+export function PrivacyModal({ onAccept, authEnabled = false }: PrivacyModalProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [origin, setOrigin] = useState('');
 
@@ -188,7 +188,7 @@ export function PrivacyPopup({ onAccept, authEnabled = false }: PrivacyPopupProp
                   Privacy & Data Usage
                 </DialogTitle>
 
-                <PrivacyPopupBody origin={origin} authEnabled={authEnabled} />
+                <PrivacyModalBody origin={origin} authEnabled={authEnabled} />
 
                 <div className="mt-6 flex justify-end">
                   <Button
@@ -215,10 +215,10 @@ export function PrivacyPopup({ onAccept, authEnabled = false }: PrivacyPopupProp
  * Function to programmatically show the privacy popup
  * This can be called from signin/signup components
  */
-export function showPrivacyPopup(options?: { authEnabled?: boolean }): void {
+export function showPrivacyModal(options?: { authEnabled?: boolean }): void {
   // Create a temporary container for the popup
   const container = document.createElement('div');
-  container.id = 'privacy-popup-container';
+  container.id = 'privacy-modal-container';
   document.body.appendChild(container);
 
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
@@ -278,7 +278,7 @@ export function showPrivacyPopup(options?: { authEnabled?: boolean }): void {
                         Privacy & Data Usage
                       </DialogTitle>
 
-                      <PrivacyPopupBody origin={origin} authEnabled={authEnabled} />
+                      <PrivacyModalBody origin={origin} authEnabled={authEnabled} />
 
                       <div className="mt-6 flex justify-end">
                         <Button

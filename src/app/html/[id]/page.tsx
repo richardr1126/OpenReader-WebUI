@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { useHTML } from '@/contexts/HTMLContext';
 import { DocumentSkeleton } from '@/components/DocumentSkeleton';
-import { HTMLViewer } from '@/components/HTMLViewer';
+import { HTMLViewer } from '@/components/views/HTMLViewer';
 import { DocumentSettings } from '@/components/DocumentSettings';
 import { RateLimitPauseButton } from '@/components/player/RateLimitPauseButton';
 import { Header } from '@/components/Header';
@@ -13,7 +13,7 @@ import { useTTS } from "@/contexts/TTSContext";
 import TTSPlayer from '@/components/player/TTSPlayer';
 import { resolveDocumentId } from '@/lib/dexie';
 import { DocumentHeaderMenu } from '@/components/DocumentHeaderMenu';
-import { RateLimitBanner } from '@/components/rate-limit-banner';
+import { RateLimitBanner } from '@/components/auth/RateLimitBanner';
 import { useAuthRateLimit } from '@/contexts/AuthRateLimitContext';
 
 export default function HTMLPage() {

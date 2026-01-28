@@ -16,14 +16,14 @@ import type { AudiobookGenerationSettings } from '@/types/client';
 import TTSPlayer from '@/components/player/TTSPlayer';
 import { RateLimitPauseButton } from '@/components/player/RateLimitPauseButton';
 import { resolveDocumentId } from '@/lib/dexie';
-import { RateLimitBanner } from '@/components/rate-limit-banner';
+import { RateLimitBanner } from '@/components/auth/RateLimitBanner';
 import { useAuthRateLimit } from '@/contexts/AuthRateLimitContext';
 
 const isDev = process.env.NEXT_PUBLIC_NODE_ENV !== 'production' || process.env.NODE_ENV == null;
 
 // Dynamic import for client-side rendering only
 const PDFViewer = dynamic(
-  () => import('@/components/PDFViewer').then((module) => module.PDFViewer),
+  () => import('@/components/views/PDFViewer').then((module) => module.PDFViewer),
   {
     ssr: false,
     loading: () => <DocumentSkeleton />

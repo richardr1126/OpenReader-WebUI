@@ -33,11 +33,10 @@ import { deleteServerDocuments } from '@/lib/client';
 import { DocumentSelectionModal } from '@/components/DocumentSelectionModal';
 import { BaseDocument } from '@/types/documents';
 import { getAuthClient } from '@/lib/auth-client';
-import { useAuthSession } from '@/hooks/useAuth';
-import { clearSignedOut } from '@/lib/session-utils';
-import { useAuthConfig, useAuthRateLimit } from '@/contexts/AuthRateLimitContext';
+import { useAuthSession } from '@/hooks/useAuthSession';
+import { useAuthConfig } from '@/contexts/AuthRateLimitContext';
 import { useRouter } from 'next/navigation';
-import { showPrivacyPopup } from '@/components/privacy-popup';
+import { showPrivacyModal } from '@/components/PrivacyModal';
 
 const isDev = process.env.NEXT_PUBLIC_NODE_ENV !== 'production' || process.env.NODE_ENV == null;
 
@@ -86,7 +85,6 @@ export function SettingsModal({ className = '' }: { className?: string }) {
   const [showDeleteAccountConfirm, setShowDeleteAccountConfirm] = useState(false);
   const { progress, setProgress, estimatedTimeRemaining } = useTimeEstimation();
   const { authEnabled, baseUrl: authBaseUrl } = useAuthConfig();
-  const { refresh: refreshRateLimit } = useAuthRateLimit();
   const { data: session } = useAuthSession();
   const router = useRouter();
 
@@ -335,12 +333,10 @@ export function SettingsModal({ className = '' }: { className?: string }) {
 
   const handleSignOut = async () => {
     const client = getAuthClient(authBaseUrl);
-    // Sign out of the authenticated account, then immediately start a fresh anonymous session.
-    // This avoids landing in a "no session" state that can be misinterpreted as a "Guest" user.
+    // "Sign out" here means: disconnect the email/social account and return to a fresh
+    // anonymous session. The app should not be able to end up truly signed out.
     await client.signOut();
-    await clearSignedOut();
-    await client.signIn.anonymous();
-    await refreshRateLimit();
+    // AuthLoader will create the next anonymous session and refresh rate limit state.
     router.refresh();
   };
 
@@ -352,8 +348,8 @@ export function SettingsModal({ className = '' }: { className?: string }) {
       // Sign out locally
       const client = getAuthClient(authBaseUrl);
       await client.signOut();
-      // Clear the "signed out" flag so AuthLoader triggers auto-anon-login
-      clearSignedOut();
+      // After account deletion, we return to a fresh anonymous session.
+      // AuthLoader will create the session if one isn't present yet.
       window.location.href = '/';
     } catch (error) {
       console.error('Failed to delete account:', error);
@@ -436,7 +432,7 @@ export function SettingsModal({ className = '' }: { className?: string }) {
                     </DialogTitle>
 
                     <Button
-                      onClick={() => showPrivacyPopup({ authEnabled })}
+                      onClick={() => showPrivacyModal({ authEnabled })}
                       className="text-sm font-medium text-muted hover:text-accent"
                     >
                       Privacy
@@ -832,7 +828,7 @@ export function SettingsModal({ className = '' }: { className?: string }) {
                                     )}
                                   </>
                                 ) : (
-                                  <p className="font-medium text-foreground">Not signed in</p>
+                                  <p className="font-medium text-foreground">No active session</p>
                                 )}
                               </div>
                             </div>
@@ -847,7 +843,7 @@ export function SettingsModal({ className = '' }: { className?: string }) {
                                              focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2
                                              transform transition-transform duration-200 ease-in-out hover:scale-[1.02]"
                                   >
-                                    Sign Out
+                                    Disconnect account
                                   </Button>
 
                                   <div className="pt-4 border-t border-offbase">
@@ -874,12 +870,12 @@ export function SettingsModal({ className = '' }: { className?: string }) {
                                   <div className="grid grid-cols-2 gap-3">
                                     <Link href="/signin" className="w-full">
                                       <Button className="w-full justify-center rounded-lg bg-background border border-offbase px-3 py-2 text-sm font-medium text-foreground hover:bg-offbase focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-base transform transition-transform duration-200 ease-in-out hover:scale-[1.02]">
-                                        Log In
+                                        Connect
                                       </Button>
                                     </Link>
                                     <Link href="/signup" className="w-full">
                                       <Button className="w-full justify-center rounded-lg bg-accent px-3 py-2 text-sm font-medium text-background hover:bg-secondary-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-base transform transition-transform duration-200 ease-in-out hover:scale-[1.02]">
-                                        Sign Up
+                                        Create account
                                       </Button>
                                     </Link>
                                   </div>

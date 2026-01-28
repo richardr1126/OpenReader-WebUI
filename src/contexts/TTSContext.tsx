@@ -38,7 +38,7 @@ import { getLastDocumentLocation, setLastDocumentLocation } from '@/lib/dexie';
 import { useBackgroundState } from '@/hooks/audio/useBackgroundState';
 import { withRetry, generateTTS, alignAudio } from '@/lib/client';
 import { preprocessSentenceForAudio, splitTextToTtsBlocks, splitTextToTtsBlocksEPUB } from '@/lib/nlp';
-import { isKokoroModel } from '@/utils/voice';
+import { isKokoroModel } from '@/lib/kokoro';
 import { useAuthRateLimit } from '@/contexts/AuthRateLimitContext';
 import type {
   TTSLocation,

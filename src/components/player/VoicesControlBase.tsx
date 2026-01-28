@@ -8,7 +8,7 @@ import {
 } from '@headlessui/react';
 import { ChevronUpDownIcon, AudioWaveIcon } from '@/components/icons/Icons';
 import { useEffect, useMemo, useState } from 'react';
-import { buildKokoroVoiceString, getMaxVoicesForProvider, isKokoroModel, parseKokoroVoiceNames } from '@/utils/voice';
+import { buildKokoroVoiceString, getMaxVoicesForProvider, isKokoroModel, parseKokoroVoiceNames } from '@/lib/kokoro';
 
 export function VoicesControlBase({
   availableVoices,
@@ -135,4 +135,3 @@ export function VoicesControlBase({
     </div>
   );
 }
-

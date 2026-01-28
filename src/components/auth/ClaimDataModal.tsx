@@ -9,7 +9,7 @@ import {
   TransitionChild,
   Button,
 } from '@headlessui/react';
-import { useAuthSession } from '@/hooks/useAuth';
+import { useAuthSession } from '@/hooks/useAuthSession';
 import { useRouter } from 'next/navigation';
 
 export default function ClaimDataModal() {

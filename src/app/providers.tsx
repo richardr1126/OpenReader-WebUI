@@ -8,7 +8,8 @@ import { ThemeProvider } from '@/contexts/ThemeContext';
 import { ConfigProvider } from '@/contexts/ConfigContext';
 import { HTMLProvider } from '@/contexts/HTMLContext';
 import { AuthRateLimitProvider } from '@/contexts/AuthRateLimitContext';
-import { PrivacyPopup } from '@/components/privacy-popup';
+import { PrivacyModal } from '@/components/PrivacyModal';
+import { AuthLoader } from '@/components/auth/AuthLoader';
 
 interface ProvidersProps {
   children: ReactNode;
@@ -20,20 +21,24 @@ export function Providers({ children, authEnabled, authBaseUrl }: ProvidersProps
   return (
     <AuthRateLimitProvider authEnabled={authEnabled} authBaseUrl={authBaseUrl}>
       <ThemeProvider>
-        <ConfigProvider>
-          <DocumentProvider>
-            <TTSProvider>
-              <PDFProvider>
-                <EPUBProvider>
-                  <HTMLProvider>
-                    {children}
-                    <PrivacyPopup authEnabled={authEnabled} />
-                  </HTMLProvider>
-                </EPUBProvider>
-              </PDFProvider>
-            </TTSProvider>
-          </DocumentProvider>
-        </ConfigProvider>
+        <AuthLoader>
+          <ConfigProvider>
+            <DocumentProvider>
+              <TTSProvider>
+                <PDFProvider>
+                  <EPUBProvider>
+                    <HTMLProvider>
+                      <>
+                        {children}
+                        <PrivacyModal authEnabled={authEnabled} />
+                      </>
+                    </HTMLProvider>
+                  </EPUBProvider>
+                </PDFProvider>
+              </TTSProvider>
+            </DocumentProvider>
+          </ConfigProvider>
+        </AuthLoader>
       </ThemeProvider>
     </AuthRateLimitProvider>
   );

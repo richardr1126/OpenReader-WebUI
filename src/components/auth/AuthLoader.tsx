@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState, ReactNode } from 'react';
+import { useEffect, useRef, useState, ReactNode } from 'react';
 import { useAuthConfig, useAuthRateLimit } from '@/contexts/AuthRateLimitContext';
-import { useAuthSession } from '@/hooks/useAuth';
+import { useAuthSession } from '@/hooks/useAuthSession';
 import { getAuthClient } from '@/lib/auth-client';
 import { LoadingSpinner } from '@/components/Spinner';
 
@@ -11,29 +11,35 @@ export function AuthLoader({ children }: { children: ReactNode }) {
   const { refresh: refreshRateLimit } = useAuthRateLimit();
   const { data: session, isPending } = useAuthSession();
   const [isAutoLoggingIn, setIsAutoLoggingIn] = useState(false);
-  const [isCheckingSignOut, setIsCheckingSignOut] = useState(true);
+  const [bootstrapError, setBootstrapError] = useState<string | null>(null);
+  const [retryNonce, setRetryNonce] = useState(0);
+  const attemptedForNullSessionRef = useRef(false);
+
+  // If the auth base URL changes, re-run the bootstrap logic.
+  useEffect(() => {
+    attemptedForNullSessionRef.current = false;
+    setBootstrapError(null);
+  }, [authEnabled, baseUrl]);
 
   useEffect(() => {
-    // Determine if we need to check sign-out status or proceed
+    // This app does not have a real "signed out" state when auth is enabled.
+    // If we ever observe "no session", we immediately start an anonymous session.
     const checkStatus = async () => {
-      // If auth is disabled, stop checking immediately
-      if (!authEnabled) {
-        setIsCheckingSignOut(false);
-        return;
-      }
-
-      // If session is still loading, wait
+      if (!authEnabled) return;
       if (isPending) return;
 
-      // If we have a session, we are done checking
       if (session) {
-        setIsCheckingSignOut(false);
+        attemptedForNullSessionRef.current = false;
+        setBootstrapError(null);
         return;
       }
 
-      // Not signed out, start auto-login
+      // Avoid double-calling anonymous sign-in (e.g. React strict mode).
+      if (attemptedForNullSessionRef.current) return;
+      attemptedForNullSessionRef.current = true;
+
       setIsAutoLoggingIn(true);
-      setIsCheckingSignOut(false); // Stop checking sign-out, now in auto-login mode
+      setBootstrapError(null);
 
       try {
         const client = getAuthClient(baseUrl);
@@ -41,27 +47,44 @@ export function AuthLoader({ children }: { children: ReactNode }) {
         await refreshRateLimit();
       } catch (err) {
         console.error('Auto-login failed', err);
+        setBootstrapError('Unable to start an anonymous session.');
       } finally {
         setIsAutoLoggingIn(false);
       }
     };
 
     checkStatus();
-  }, [session, isPending, authEnabled, baseUrl, refreshRateLimit]);
+  }, [session, isPending, authEnabled, baseUrl, refreshRateLimit, retryNonce]);
 
   // Show loader if:
   // 1. Auth client is initializing (isPending) AND auth is enabled
-  // 2. We are checking the sign-out status (Dexie)
-  // 3. We are actively auto-logging in
-  const isLoading = (isPending && authEnabled) || isCheckingSignOut || isAutoLoggingIn;
+  // 2. We are actively creating an anonymous session
+  const isLoading = authEnabled && (isPending || isAutoLoggingIn || !session);
 
   if (isLoading) {
     return (
       <div className="fixed inset-0 bg-base z-50 flex flex-col items-center justify-center gap-4">
         <LoadingSpinner className="w-8 h-8 text-accent" />
-        <p className="text-sm text-muted animate-pulse">
-          {isAutoLoggingIn ? 'Logging in anonymously...' : 'Loading...'}
-        </p>
+        {bootstrapError ? (
+          <div className="flex flex-col items-center gap-3">
+            <p className="text-sm text-muted text-center">{bootstrapError}</p>
+            <button
+              type="button"
+              onClick={() => {
+                attemptedForNullSessionRef.current = false;
+                setBootstrapError(null);
+                setRetryNonce((v) => v + 1);
+              }}
+              className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-background hover:bg-secondary-accent focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2"
+            >
+              Retry
+            </button>
+          </div>
+        ) : (
+          <p className="text-sm text-muted animate-pulse">
+            {isAutoLoggingIn ? 'Starting anonymous session...' : 'Loading...'}
+          </p>
+        )}
       </div>
     );
   }
