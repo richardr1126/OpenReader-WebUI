@@ -2,7 +2,7 @@
 
 import { Button } from '@headlessui/react';
 import Link from 'next/link';
-import { useAuthConfig, useAutoRateLimit } from '@/contexts/AutoRateLimitContext';
+import { useAuthConfig, useAuthRateLimit } from '@/contexts/AuthRateLimitContext';
 import { useAuthSession } from '@/hooks/useAuth';
 import { getAuthClient } from '@/lib/auth-client';
 import { clearSignedOut } from '@/lib/session-utils';
@@ -10,7 +10,7 @@ import { useRouter } from 'next/navigation';
 
 export function UserMenu({ className = '' }: { className?: string }) {
   const { authEnabled, baseUrl } = useAuthConfig();
-  const { refresh: refreshRateLimit } = useAutoRateLimit();
+  const { refresh: refreshRateLimit } = useAuthRateLimit();
   const { data: session, isPending } = useAuthSession();
   const router = useRouter();
 

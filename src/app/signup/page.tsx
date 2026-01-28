@@ -5,7 +5,7 @@ import { Button, Input } from '@headlessui/react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { getAuthClient } from '@/lib/auth-client';
-import { useAuthConfig, useAutoRateLimit } from '@/contexts/AutoRateLimitContext';
+import { useAuthConfig, useAuthRateLimit } from '@/contexts/AuthRateLimitContext';
 import { showPrivacyPopup } from '@/components/privacy-popup';
 import { LoadingSpinner } from '@/components/Spinner';
 import toast from 'react-hot-toast';
@@ -19,7 +19,7 @@ export default function SignUpPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { authEnabled, baseUrl } = useAuthConfig();
-  const { refresh: refreshRateLimit } = useAutoRateLimit();
+  const { refresh: refreshRateLimit } = useAuthRateLimit();
 
   // Check if auth is enabled, redirect home if not
   useEffect(() => {

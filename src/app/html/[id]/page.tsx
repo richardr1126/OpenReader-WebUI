@@ -14,14 +14,14 @@ import TTSPlayer from '@/components/player/TTSPlayer';
 import { resolveDocumentId } from '@/lib/dexie';
 import { DocumentHeaderMenu } from '@/components/DocumentHeaderMenu';
 import { RateLimitBanner } from '@/components/rate-limit-banner';
-import { useAutoRateLimit } from '@/contexts/AutoRateLimitContext';
+import { useAuthRateLimit } from '@/contexts/AuthRateLimitContext';
 
 export default function HTMLPage() {
   const { id } = useParams();
   const router = useRouter();
   const { setCurrentDocument, currDocName, clearCurrDoc } = useHTML();
   const { stop } = useTTS();
-  const { isAtLimit } = useAutoRateLimit();
+  const { isAtLimit } = useAuthRateLimit();
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);

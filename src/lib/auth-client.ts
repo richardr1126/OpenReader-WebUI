@@ -14,14 +14,14 @@ const clientCache = new Map<string, ReturnType<typeof createAuthClientWithUrl>>(
 
 /**
  * Factory function to get auth client with specific baseUrl.
- * In most cases, you should use the useAuth() hook instead of calling this directly.
+ * In components, prefer reading `baseUrl` from `useAuthConfig()` and then calling `getAuthClient(baseUrl)`.
  * @param baseUrl - The auth server base URL. If null, will throw an error.
  */
 export function getAuthClient(baseUrl: string | null) {
   if (!baseUrl) {
     throw new Error(
       'Cannot create auth client without baseUrl. ' +
-      'Use the useAuth() hook in components to get the properly configured client.'
+      'Use useAuthConfig() in components to get the properly configured baseUrl.'
     );
   }
 

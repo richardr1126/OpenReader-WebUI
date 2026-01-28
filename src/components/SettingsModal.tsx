@@ -35,7 +35,7 @@ import { BaseDocument } from '@/types/documents';
 import { getAuthClient } from '@/lib/auth-client';
 import { useAuthSession } from '@/hooks/useAuth';
 import { clearSignedOut } from '@/lib/session-utils';
-import { useAuthConfig, useAutoRateLimit } from '@/contexts/AutoRateLimitContext';
+import { useAuthConfig, useAuthRateLimit } from '@/contexts/AuthRateLimitContext';
 import { useRouter } from 'next/navigation';
 import { showPrivacyPopup } from '@/components/privacy-popup';
 
@@ -86,7 +86,7 @@ export function SettingsModal({ className = '' }: { className?: string }) {
   const [showDeleteAccountConfirm, setShowDeleteAccountConfirm] = useState(false);
   const { progress, setProgress, estimatedTimeRemaining } = useTimeEstimation();
   const { authEnabled, baseUrl: authBaseUrl } = useAuthConfig();
-  const { refresh: refreshRateLimit } = useAutoRateLimit();
+  const { refresh: refreshRateLimit } = useAuthRateLimit();
   const { data: session } = useAuthSession();
   const router = useRouter();
 

@@ -2,7 +2,7 @@
 
 import { GithubIcon } from '@/components/icons/Icons'
 import { showPrivacyPopup } from '@/components/privacy-popup'
-import { useAuthConfig } from '@/contexts/AutoRateLimitContext'
+import { useAuthConfig } from '@/contexts/AuthRateLimitContext'
 
 export function Footer() {
   const { authEnabled } = useAuthConfig();

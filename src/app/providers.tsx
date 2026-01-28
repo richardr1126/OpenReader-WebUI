@@ -7,7 +7,7 @@ import { TTSProvider } from '@/contexts/TTSContext';
 import { ThemeProvider } from '@/contexts/ThemeContext';
 import { ConfigProvider } from '@/contexts/ConfigContext';
 import { HTMLProvider } from '@/contexts/HTMLContext';
-import { AutoRateLimitProvider } from '@/contexts/AutoRateLimitContext';
+import { AuthRateLimitProvider } from '@/contexts/AuthRateLimitContext';
 import { PrivacyPopup } from '@/components/privacy-popup';
 
 interface ProvidersProps {
@@ -18,7 +18,7 @@ interface ProvidersProps {
 
 export function Providers({ children, authEnabled, authBaseUrl }: ProvidersProps) {
   return (
-    <AutoRateLimitProvider authEnabled={authEnabled} authBaseUrl={authBaseUrl}>
+    <AuthRateLimitProvider authEnabled={authEnabled} authBaseUrl={authBaseUrl}>
       <ThemeProvider>
         <ConfigProvider>
           <DocumentProvider>
@@ -35,6 +35,6 @@ export function Providers({ children, authEnabled, authBaseUrl }: ProvidersProps
           </DocumentProvider>
         </ConfigProvider>
       </ThemeProvider>
-    </AutoRateLimitProvider>
+    </AuthRateLimitProvider>
   );
 }

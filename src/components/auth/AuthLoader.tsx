@@ -1,14 +1,14 @@
 'use client';
 
 import { useEffect, useState, ReactNode } from 'react';
-import { useAuthConfig, useAutoRateLimit } from '@/contexts/AutoRateLimitContext';
+import { useAuthConfig, useAuthRateLimit } from '@/contexts/AuthRateLimitContext';
 import { useAuthSession } from '@/hooks/useAuth';
 import { getAuthClient } from '@/lib/auth-client';
 import { LoadingSpinner } from '@/components/Spinner';
 
 export function AuthLoader({ children }: { children: ReactNode }) {
   const { authEnabled, baseUrl } = useAuthConfig();
-  const { refresh: refreshRateLimit } = useAutoRateLimit();
+  const { refresh: refreshRateLimit } = useAuthRateLimit();
   const { data: session, isPending } = useAuthSession();
   const [isAutoLoggingIn, setIsAutoLoggingIn] = useState(false);
   const [isCheckingSignOut, setIsCheckingSignOut] = useState(true);

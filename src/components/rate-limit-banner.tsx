@@ -1,6 +1,6 @@
 'use client';
 
-import { useAutoRateLimit, formatCharCount } from '@/contexts/AutoRateLimitContext';
+import { useAuthRateLimit, formatCharCount } from '@/contexts/AuthRateLimitContext';
 import Link from 'next/link';
 
 interface RateLimitBannerProps {
@@ -8,7 +8,7 @@ interface RateLimitBannerProps {
 }
 
 export function RateLimitBanner({ className = '' }: RateLimitBannerProps) {
-  const { status, isAtLimit, timeUntilReset, authEnabled } = useAutoRateLimit();
+  const { status, isAtLimit, timeUntilReset, authEnabled } = useAuthRateLimit();
 
   // Don't show banner if auth is not enabled or if not at limit
   if (!authEnabled || !status?.authEnabled || !isAtLimit) {
@@ -49,7 +49,7 @@ export function RateLimitBanner({ className = '' }: RateLimitBannerProps) {
  * Compact version for inline display
  */
 export function RateLimitIndicator({ className = '' }: RateLimitBannerProps) {
-  const { status, isAtLimit, authEnabled } = useAutoRateLimit();
+  const { status, isAtLimit, authEnabled } = useAuthRateLimit();
 
   // Don't show if auth is not enabled
   if (!authEnabled || !status?.authEnabled) {

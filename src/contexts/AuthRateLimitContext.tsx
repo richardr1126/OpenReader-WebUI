@@ -12,7 +12,7 @@ export interface RateLimitStatus {
   authEnabled: boolean;
 }
 
-interface AutoRateLimitContextType {
+interface AuthRateLimitContextType {
   // Auth Config
   authEnabled: boolean;
   authBaseUrl: string | null;
@@ -30,24 +30,24 @@ interface AutoRateLimitContextType {
   triggerRateLimit: () => void;
 }
 
-const AutoRateLimitContext = createContext<AutoRateLimitContextType | null>(null);
+const AuthRateLimitContext = createContext<AuthRateLimitContextType | null>(null);
 
-export function useAutoRateLimit(): AutoRateLimitContextType {
-  const context = useContext(AutoRateLimitContext);
+export function useAuthRateLimit(): AuthRateLimitContextType {
+  const context = useContext(AuthRateLimitContext);
   if (!context) {
-    throw new Error('useAutoRateLimit must be used within a AutoRateLimitProvider');
+    throw new Error('useAuthRateLimit must be used within an AuthRateLimitProvider');
   }
   return context;
 }
 
 // Re-export specific hooks for backward compatibility or convenience if needed
 export function useAuthConfig() {
-  const { authEnabled, authBaseUrl } = useAutoRateLimit();
+  const { authEnabled, authBaseUrl } = useAuthRateLimit();
   return { authEnabled, baseUrl: authBaseUrl };
 }
 
 export function useRateLimit() {
-  return useAutoRateLimit();
+  return useAuthRateLimit();
 }
 
 function calculateTimeUntilReset(resetTime: Date): string {
@@ -82,13 +82,13 @@ export function formatCharCount(count: number): string {
   return count.toString();
 }
 
-interface AutoRateLimitProviderProps {
+interface AuthRateLimitProviderProps {
   children: ReactNode;
   authEnabled: boolean;
   authBaseUrl: string | null;
 }
 
-export function AutoRateLimitProvider({ children, authEnabled, authBaseUrl }: AutoRateLimitProviderProps) {
+export function AuthRateLimitProvider({ children, authEnabled, authBaseUrl }: AuthRateLimitProviderProps) {
   const [status, setStatus] = useState<RateLimitStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -209,7 +209,7 @@ export function AutoRateLimitProvider({ children, authEnabled, authBaseUrl }: Au
     };
   }, []);
 
-  const contextValue: AutoRateLimitContextType = {
+  const contextValue: AuthRateLimitContextType = {
     authEnabled,
     authBaseUrl,
     status,
@@ -225,8 +225,8 @@ export function AutoRateLimitProvider({ children, authEnabled, authBaseUrl }: Au
   };
 
   return (
-    <AutoRateLimitContext.Provider value={contextValue}>
+    <AuthRateLimitContext.Provider value={contextValue}>
       {children}
-    </AutoRateLimitContext.Provider>
+    </AuthRateLimitContext.Provider>
   );
 }

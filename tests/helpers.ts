@@ -6,6 +6,50 @@ const DIR = './tests/files/';
 const TTS_MOCK_PATH = path.join(__dirname, 'files', 'sample.mp3');
 let ttsMockBuffer: Buffer | null = null;
 
+type RateLimitStatusResponse = {
+  authEnabled: boolean;
+  userType?: 'anonymous' | 'authenticated' | 'unauthenticated';
+};
+
+async function getRateLimitStatus(page: Page): Promise<RateLimitStatusResponse | null> {
+  try {
+    const res = await page.request.get('/api/rate-limit/status');
+    if (!res.ok()) return null;
+    return (await res.json()) as RateLimitStatusResponse;
+  } catch {
+    return null;
+  }
+}
+
+async function ensureAnonymousSession(page: Page): Promise<void> {
+  const initial = await getRateLimitStatus(page);
+  if (!initial) return;
+  if (!initial.authEnabled) return;
+  if (initial.userType && initial.userType !== 'unauthenticated') return;
+
+  // Create a session cookie for this test context.
+  // This avoids races where the app makes authenticated API calls before AuthLoader finishes.
+  try {
+    await page.request.post('/api/auth/sign-in/anonymous', { data: {} });
+  } catch {
+    // ignore
+  }
+
+  // Wait until the server sees us as anonymous/authenticated (i.e. cookie persisted).
+  const deadline = Date.now() + 15_000;
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const next = await getRateLimitStatus(page);
+    if (next && (!next.authEnabled || (next.userType && next.userType !== 'unauthenticated'))) {
+      return;
+    }
+    if (Date.now() > deadline) {
+      throw new Error('Timed out waiting for anonymous auth session in tests');
+    }
+    await page.waitForTimeout(200);
+  }
+}
+
 async function ensureTtsRouteMock(page: Page) {
   if (!ttsMockBuffer) {
     ttsMockBuffer = fs.readFileSync(TTS_MOCK_PATH);
@@ -119,9 +163,20 @@ export async function setupTest(page: Page) {
   // Mock the TTS API so tests don't hit the real TTS service.
   await ensureTtsRouteMock(page);
 
+  // If auth is enabled, establish an anonymous session BEFORE navigation.
+  // This keeps each test self-contained (no shared storageState) while ensuring
+  // server routes that require auth don't intermittently 401 during app startup.
+  await ensureAnonymousSession(page);
+
   // Navigate to the home page before each test
   await page.goto('/');
   await page.waitForLoadState('networkidle');
+
+  // AuthLoader may show a full-screen overlay while session is loading.
+  // Wait for it to be gone before interacting with underlying UI.
+  await page
+    .waitForSelector('.fixed.inset-0.bg-base.z-50', { state: 'detached', timeout: 15_000 })
+    .catch(() => { });
 
   // Privacy modal should come first in onboarding.
   // Be tolerant if it's already accepted (e.g., reused context).
@@ -219,7 +274,7 @@ export async function deleteDocumentByName(page: Page, fileName: string) {
 // Open Settings modal and navigate to Documents tab
 export async function openSettingsDocumentsTab(page: Page) {
   await page.getByRole('button', { name: 'Settings' }).click();
-  await page.getByRole('tab', { name: '📄 Documents' }).click();
+  await page.getByRole('tab', { name: '📄 Docs' }).click();
 }
 
 // Delete all local documents through Settings and close dialogs

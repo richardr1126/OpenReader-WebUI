@@ -5,7 +5,7 @@ import { Button, Input } from '@headlessui/react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { getAuthClient } from '@/lib/auth-client';
-import { useAuthConfig, useAutoRateLimit } from '@/contexts/AutoRateLimitContext';
+import { useAuthConfig, useAuthRateLimit } from '@/contexts/AuthRateLimitContext';
 import { showPrivacyPopup } from '@/components/privacy-popup';
 import { wasSignedOut, clearSignedOut } from '@/lib/session-utils';
 import { GithubIcon } from '@/components/icons/Icons';
@@ -32,7 +32,7 @@ function SignInContent() {
   const [justSignedOut, setJustSignedOut] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { authEnabled, baseUrl } = useAuthConfig();
-  const { refresh: refreshRateLimit } = useAutoRateLimit();
+  const { refresh: refreshRateLimit } = useAuthRateLimit();
 
   const isAnyLoading = loadingEmail || loadingGithub || loadingGuest;
 

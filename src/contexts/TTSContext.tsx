@@ -39,7 +39,7 @@ import { useBackgroundState } from '@/hooks/audio/useBackgroundState';
 import { withRetry, generateTTS, alignAudio } from '@/lib/client';
 import { preprocessSentenceForAudio, splitTextToTtsBlocks, splitTextToTtsBlocksEPUB } from '@/lib/nlp';
 import { isKokoroModel } from '@/utils/voice';
-import { useAutoRateLimit } from '@/contexts/AutoRateLimitContext';
+import { useAuthRateLimit } from '@/contexts/AuthRateLimitContext';
 import type {
   TTSLocation,
   TTSSmartMergeResult,
@@ -299,7 +299,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
   const audioContext = useAudioContext();
   const audioCache = useAudioCache(25);
   const { availableVoices, fetchVoices } = useVoiceManagement(openApiKey, openApiBaseUrl, configTTSProvider, configTTSModel);
-  const { onTTSStart, onTTSComplete, refresh: refreshRateLimit, triggerRateLimit, isAtLimit } = useAutoRateLimit();
+  const { onTTSStart, onTTSComplete, refresh: refreshRateLimit, triggerRateLimit, isAtLimit } = useAuthRateLimit();
 
   // Add ref for location change handler
   const locationChangeHandlerRef = useRef<((location: TTSLocation) => void) | null>(null);

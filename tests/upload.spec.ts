@@ -61,9 +61,6 @@ test.describe('Document Upload Tests', () => {
   });
 
   test('uploads and converts a DOCX document', async ({ page }) => {
-    // This test only runs in development mode
-    test.skip(process.env.NODE_ENV === 'production', 'DOCX upload is only available in development mode');
-    
     await uploadFile(page, 'sample.docx');
     // Should see the converting message
     await expect(page.getByText('Converting DOCX to PDF...')).toBeVisible();
