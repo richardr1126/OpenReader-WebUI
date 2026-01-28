@@ -85,7 +85,7 @@ OpenReader WebUI is an open source text to speech document reader web app built 
   | `API_KEY` | Default TTS API key | `none` or your provider key |
   | `BETTER_AUTH_URL` | Enables auth when set with `BETTER_AUTH_SECRET` | External URL for this app, e.g. `http://localhost:3003` or `https://reader.example.com` |
   | `BETTER_AUTH_SECRET` | Enables auth when set with `BETTER_AUTH_URL` | Generate with `openssl rand -base64 32` |
-  | `POSTGRES_URL` | Use Postgres for auth storage instead of SQLite | If set, run migrations manually (see note above) |
+  | `POSTGRES_URL` | Use Postgres for auth storage instead of SQLite | If set, startup migrations target Postgres |
   | `GITHUB_CLIENT_ID` | Optional GitHub OAuth sign-in | Requires `GITHUB_CLIENT_SECRET` |
   | `GITHUB_CLIENT_SECRET` | Optional GitHub OAuth sign-in | Requires `GITHUB_CLIENT_ID` |
 
@@ -263,15 +263,20 @@ Optionally required for different features:
    - **Production / Docker**: Migrations run automatically on startup via `pnpm start`.
    - **Development**: Run explicitly:
 
-     ```bash
-     pnpm migrate
-     ```
+      ```bash
+      pnpm migrate
+      ```
 
-   > Note: If you set `POSTGRES_URL` in `.env`, migrations will target Postgres instead of local SQLite.
-   >
-   > Manual Drizzle Kit runs:
-   > - SQLite: `npx drizzle-kit migrate --config drizzle.config.sqlite.ts`
-   > - Postgres: `npx drizzle-kit migrate --config drizzle.config.pg.ts`
+    > Note: If you set `POSTGRES_URL` in `.env`, migrations will target Postgres instead of local SQLite.
+    >
+    > Generating migrations (contributors):
+    > - `pnpm generate` generates migrations for **both** SQLite and Postgres (requires `POSTGRES_URL`).
+    >
+    > Manual Drizzle Kit runs:
+    > - SQLite migrate: `npx drizzle-kit migrate --config drizzle.config.sqlite.ts`
+    > - Postgres migrate: `npx drizzle-kit migrate --config drizzle.config.pg.ts`
+    > - SQLite generate: `npx drizzle-kit generate --config drizzle.config.sqlite.ts`
+    > - Postgres generate: `npx drizzle-kit generate --config drizzle.config.pg.ts`
 
 5. Start the development server:
 

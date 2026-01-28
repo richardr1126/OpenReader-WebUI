@@ -5,11 +5,11 @@
   "scripts": {
     "dev": "next dev --turbopack -p 3003",
     "build": "next build",
-    "start": "node scripts/migrate-if-auth.mjs && next start -p 3003",
+    "start": "node drizzle/scripts/migrate-if-auth.mjs && next start -p 3003",
     "lint": "next lint",
     "test": "playwright test",
-    "migrate": "node scripts/migrate-if-auth.mjs",
-    "migrate:force": "node scripts/migrate.mjs"
+    "migrate": "node drizzle/scripts/migrate-if-auth.mjs",
+    "generate": "node drizzle/scripts/generate.mjs"
   },
   "dependencies": {
     "@headlessui/react": "^2.2.9",
