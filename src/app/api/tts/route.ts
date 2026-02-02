@@ -74,6 +74,143 @@ async function fetchTTSBufferWithRetry(
   }
 }
 
+// Provider-specific character limits for TTS input
+const PROVIDER_CHAR_LIMITS: Record<string, number> = {
+  groq: 3800, // Groq limit is 4000, use 3800 for safety margin
+  openai: 4096,
+  deepinfra: 10000, // Kokoro can handle longer text
+};
+
+// Split text into chunks at natural break points
+function splitTextIntoChunks(text: string, maxChars: number): string[] {
+  if (text.length <= maxChars) return [text];
+
+  const chunks: string[] = [];
+  let remaining = text;
+
+  while (remaining.length > 0) {
+    if (remaining.length <= maxChars) {
+      chunks.push(remaining.trim());
+      break;
+    }
+
+    const searchRange = remaining.slice(0, maxChars);
+    // Find best break: sentence > clause > word > hard cut
+    const breakPoints = [
+      ...(['. ', '! ', '? ', '.\n', '!\n', '?\n'].map(s => searchRange.lastIndexOf(s)).filter(i => i > maxChars * 0.3)),
+      ...([', ', '; ', '\n'].map(s => searchRange.lastIndexOf(s)).filter(i => i > maxChars * 0.3)),
+      searchRange.lastIndexOf(' '),
+    ].filter(i => i > 0);
+
+    const breakPoint = breakPoints.length > 0 ? Math.max(...breakPoints) : maxChars;
+    chunks.push(remaining.slice(0, breakPoint + 1).trim());
+    remaining = remaining.slice(breakPoint + 1).trim();
+  }
+
+  return chunks.filter(c => c.length > 0);
+}
+
+// Concatenate WAV buffers (for Groq which returns WAV with streaming headers)
+function concatenateWavBuffers(buffers: ArrayBuffer[]): ArrayBuffer {
+  if (buffers.length === 0) return new ArrayBuffer(0);
+  if (buffers.length === 1) return buffers[0];
+
+  // Parse first WAV to get format info
+  const firstView = new DataView(buffers[0]);
+  const numChannels = firstView.getUint16(22, true);
+  const sampleRate = firstView.getUint32(24, true);
+  const bitsPerSample = firstView.getUint16(34, true);
+
+  // Calculate total data size (excluding headers)
+  let totalDataSize = 0;
+  const dataChunks: ArrayBuffer[] = [];
+
+  for (const buffer of buffers) {
+    const view = new DataView(buffer);
+    // Find 'data' chunk by scanning through all chunks
+    let offset = 12; // Skip RIFF header (RIFF + size + WAVE = 12 bytes)
+    while (offset < buffer.byteLength - 8) {
+      const chunkId = String.fromCharCode(
+        view.getUint8(offset),
+        view.getUint8(offset + 1),
+        view.getUint8(offset + 2),
+        view.getUint8(offset + 3)
+      );
+      let chunkSize = view.getUint32(offset + 4, true);
+
+      if (chunkId === 'data') {
+        // Handle streaming WAV with 0xFFFFFFFF placeholder size
+        // Actual data size = file size - current offset - 8 (chunk header)
+        if (chunkSize === 0xFFFFFFFF) {
+          chunkSize = buffer.byteLength - offset - 8;
+        }
+        totalDataSize += chunkSize;
+        dataChunks.push(buffer.slice(offset + 8, offset + 8 + chunkSize));
+        break;
+      }
+      // Handle streaming placeholder for other chunks too
+      if (chunkSize === 0xFFFFFFFF) {
+        break; // Can't continue if we don't know chunk size
+      }
+      offset += 8 + chunkSize;
+      // Align to even byte boundary (WAV chunks are word-aligned)
+      if (offset % 2 !== 0) offset++;
+    }
+  }
+
+  // Create new WAV with combined data
+  const headerSize = 44;
+  const result = new ArrayBuffer(headerSize + totalDataSize);
+  const view = new DataView(result);
+  const byteRate = sampleRate * numChannels * (bitsPerSample / 8);
+  const blockAlign = numChannels * (bitsPerSample / 8);
+
+  // Write WAV header
+  const writeString = (offset: number, str: string) => {
+    for (let i = 0; i < str.length; i++) {
+      view.setUint8(offset + i, str.charCodeAt(i));
+    }
+  };
+
+  writeString(0, 'RIFF');
+  view.setUint32(4, 36 + totalDataSize, true);
+  writeString(8, 'WAVE');
+  writeString(12, 'fmt ');
+  view.setUint32(16, 16, true); // fmt chunk size
+  view.setUint16(20, 1, true); // PCM format
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, byteRate, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, bitsPerSample, true);
+  writeString(36, 'data');
+  view.setUint32(40, totalDataSize, true);
+
+  // Copy data chunks
+  let writeOffset = headerSize;
+  for (const chunk of dataChunks) {
+    new Uint8Array(result, writeOffset).set(new Uint8Array(chunk));
+    writeOffset += chunk.byteLength;
+  }
+
+  return result;
+}
+
+// Concatenate MP3 buffers (simple concatenation works for MP3)
+function concatenateMp3Buffers(buffers: ArrayBuffer[]): ArrayBuffer {
+  if (buffers.length === 0) return new ArrayBuffer(0);
+  if (buffers.length === 1) return buffers[0];
+
+  const totalSize = buffers.reduce((sum, b) => sum + b.byteLength, 0);
+  const result = new Uint8Array(totalSize);
+  let offset = 0;
+  for (const buffer of buffers) {
+    result.set(new Uint8Array(buffer), offset);
+    offset += buffer.byteLength;
+  }
+  return result.buffer;
+}
+
 function makeCacheKey(input: {
   provider: string;
   model: string | null | undefined;
@@ -233,6 +370,50 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    // Check if text needs chunking due to provider limits
+    const charLimit = PROVIDER_CHAR_LIMITS[provider] || 10000;
+    if (text.length > charLimit) {
+      const chunks = splitTextIntoChunks(text, charLimit);
+      console.log(`[TTS] Chunking ${text.length} chars into ${chunks.length} chunks (limit: ${charLimit})`);
+
+      const audioBuffers: ArrayBuffer[] = [];
+      const startTime = Date.now();
+      for (let i = 0; i < chunks.length; i++) {
+        if (req.signal.aborted) {
+          throw new DOMException('Aborted', 'AbortError');
+        }
+
+        const chunkParams: ExtendedSpeechParams = {
+          ...createParams,
+          input: chunks[i],
+        };
+
+        const buffer = await fetchTTSBufferWithRetry(openai, chunkParams, req.signal);
+        audioBuffers.push(buffer);
+      }
+      console.log(`[TTS] ${chunks.length} chunks done in ${Date.now() - startTime}ms`);
+
+      // Concatenate audio buffers
+      const combinedBuffer = actualFormat === 'wav'
+        ? concatenateWavBuffers(audioBuffers)
+        : concatenateMp3Buffers(audioBuffers);
+
+      // Cache the combined result
+      ttsAudioCache.set(cacheKey, combinedBuffer);
+
+      return new NextResponse(combinedBuffer, {
+        headers: {
+          'Content-Type': contentType,
+          'X-Cache': 'MISS',
+          'X-Chunks': String(chunks.length),
+          'ETag': etag,
+          'Content-Length': String(combinedBuffer.byteLength),
+          'Cache-Control': 'private, max-age=1800',
+          'Vary': 'x-tts-provider, x-openai-key, x-openai-base-url'
+        }
+      });
+    }
+
     // De-duplicate identical in-flight requests
     const existing = inflightRequests.get(cacheKey);
     if (existing) {
@@ -265,13 +446,14 @@ export async function POST(req: NextRequest) {
     }
 
     const controller = new AbortController();
+    const startTime = Date.now();
     const entry: InflightEntry = {
       controller,
       consumers: 1,
       promise: (async () => {
         try {
           const buffer = await fetchTTSBufferWithRetry(openai, createParams, controller.signal);
-          // Save to cache
+          console.log(`[TTS] ${provider} ${text.length} chars -> ${buffer.byteLength} bytes in ${Date.now() - startTime}ms`);
           ttsAudioCache.set(cacheKey, buffer);
           return buffer;
         } finally {
