@@ -24,15 +24,48 @@ function splitTextIntoChunks(text: string, maxTokens: number): string[] {
   const chunks: string[] = [];
   let current = '';
 
+  // Helper to split oversized text into multiple chunks
+  function splitOversizedText(oversized: string): string[] {
+    const parts: string[] = [];
+    let remaining = oversized;
+    while (remaining.length > 0) {
+      // Try to split at sentence boundary within maxChars
+      let splitPoint = maxChars;
+      if (remaining.length > maxChars) {
+        const searchRange = remaining.slice(0, maxChars);
+        const lastSentence = Math.max(
+          searchRange.lastIndexOf('. '),
+          searchRange.lastIndexOf('! '),
+          searchRange.lastIndexOf('? ')
+        );
+        if (lastSentence > maxChars * 0.5) {
+          splitPoint = lastSentence + 2; // Include the punctuation and space
+        }
+      }
+      parts.push(remaining.slice(0, splitPoint).trim());
+      remaining = remaining.slice(splitPoint).trim();
+    }
+    return parts;
+  }
+
   for (const para of text.split(/\n\n+/)) {
     const trimmed = para.trim();
     if (!trimmed) continue;
 
     if ((current + '\n\n' + trimmed).length > maxChars) {
       if (current) chunks.push(current.trim());
-      current = trimmed.length > maxChars 
-        ? trimmed.slice(0, maxChars) // Force split if paragraph too long
-        : trimmed;
+      // Handle oversized paragraphs by splitting them iteratively
+      if (trimmed.length > maxChars) {
+        const splitParts = splitOversizedText(trimmed);
+        // Add all but the last part as separate chunks
+        for (let i = 0; i < splitParts.length - 1; i++) {
+          chunks.push(splitParts[i]);
+        }
+        // Use the last part as the new current
+        current = splitParts[splitParts.length - 1] || '';
+      } else {
+        current = trimmed;
+      }
     } else {
       current = current ? current + '\n\n' + trimmed : trimmed;
     }
@@ -101,9 +134,19 @@ export async function generateSummary(
 
   // Combine summaries (recursively if still too large)
   onProgress?.({ currentChunk: chunks.length, totalChunks: chunks.length, phase: 'combining', message: 'Combining summaries...' });
-  
+
   let combined = summaries.join('\n\n---\n\n');
+  const MAX_COMBINING_ITERATIONS = 10;
+  let combiningIterations = 0;
+
   while (needsChunking(combined, contextLimit)) {
+    combiningIterations++;
+    if (combiningIterations > MAX_COMBINING_ITERATIONS) {
+      console.warn('Summary combining reached maximum iterations, proceeding with current result');
+      break;
+    }
+
+    const previousLength = combined.length;
     const subChunks = splitTextIntoChunks(combined, maxInputTokens);
     const subSummaries: string[] = [];
     for (const chunk of subChunks) {
@@ -112,6 +155,12 @@ export async function generateSummary(
       totalTokens += result.tokensUsed || 0;
     }
     combined = subSummaries.join('\n\n---\n\n');
+
+    // Guard against non-convergence: if combined didn't shrink, break to avoid infinite loop
+    if (combined.length >= previousLength) {
+      console.warn('Summary combining not converging, proceeding with current result');
+      break;
+    }
   }
 
   // Final pass

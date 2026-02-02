@@ -329,6 +329,7 @@ async function applyDocumentIdMapping(oldId: string, newId: string): Promise<voi
         db[LAST_LOCATION_TABLE],
         db[APP_CONFIG_TABLE],
         db[DOCUMENT_ID_MAP_TABLE],
+        db[SUMMARIES_TABLE],
       ],
       async () => {
         await recordDocumentIdMapping(oldId, nextId);
@@ -405,6 +406,24 @@ async function applyDocumentIdMapping(oldId: string, newId: string): Promise<voi
           if (mapped !== appConfig.documentListState) {
             await db[APP_CONFIG_TABLE].update('singleton', { documentListState: mapped });
           }
+        }
+
+        // Remap summaries to use the new document ID
+        const oldSummaries = await db[SUMMARIES_TABLE].where('docId').equals(oldId).toArray();
+        for (const summary of oldSummaries) {
+          const newSummaryId = `${nextId}-${summary.scope}-${summary.pageNumber ?? 'all'}`;
+          // Check if a summary with the new ID already exists
+          const existing = await db[SUMMARIES_TABLE].get(newSummaryId);
+          if (!existing) {
+            // Create new summary with updated docId and id
+            await db[SUMMARIES_TABLE].put({
+              ...summary,
+              id: newSummaryId,
+              docId: nextId,
+            });
+          }
+          // Delete the old summary
+          await db[SUMMARIES_TABLE].delete(summary.id);
         }
       },
     );

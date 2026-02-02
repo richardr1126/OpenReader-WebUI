@@ -730,15 +730,19 @@ export function SettingsModal() {
                               switch (provider.id) {
                                 case 'openai':
                                   setLocalSummaryModel('gpt-4o-mini');
+                                  setLocalSummaryBaseUrl(''); // Clear custom base URL
                                   break;
                                 case 'anthropic':
                                   setLocalSummaryModel('claude-3-5-haiku-latest');
+                                  setLocalSummaryBaseUrl(''); // Clear custom base URL
                                   break;
                                 case 'groq':
                                   setLocalSummaryModel('llama-3.3-70b-versatile');
+                                  setLocalSummaryBaseUrl(''); // Clear custom base URL
                                   break;
                                 case 'openrouter':
                                   setLocalSummaryModel('google/gemini-2.0-flash-001');
+                                  setLocalSummaryBaseUrl(''); // Clear custom base URL
                                   break;
                                 case 'custom-openai':
                                   setLocalSummaryModel('');

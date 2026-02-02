@@ -62,15 +62,15 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
   const lastDataRef = useRef<ArrayBuffer | undefined>(undefined);
 
   // Reset ready state when document data changes
-  if (currDocData !== lastDataRef.current) {
-    lastDataRef.current = currDocData;
-    if (currDocData) {
-      documentKeyRef.current += 1;
-    }
-    if (isDocumentReady) {
+  useEffect(() => {
+    if (currDocData !== lastDataRef.current) {
+      lastDataRef.current = currDocData;
+      if (currDocData) {
+        documentKeyRef.current += 1;
+      }
       setIsDocumentReady(false);
     }
-  }
+  }, [currDocData]);
 
   // Create a Uint8Array copy to prevent "detached ArrayBuffer" errors
   const pdfFileData = useMemo(() => {
@@ -300,8 +300,11 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
           onDocumentLoadSuccess(pdf);
           setIsDocumentReady(true);
         }}
-        onLoadError={() => {
-          // Ignore errors from destroyed documents during navigation/reload
+        onLoadError={(error) => {
+          // Log errors in development for debugging
+          if (process.env.NODE_ENV !== 'production') {
+            console.warn('PDFViewer load error (may be from destroyed document during navigation):', error);
+          }
         }}
         onItemClick={(args: PDFOnLinkClickArgs) => {
           if (args?.pageNumber) {

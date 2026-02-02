@@ -10,6 +10,7 @@ interface SummarizeButtonProps {
 export function SummarizeButton({ onClick, disabled }: SummarizeButtonProps) {
   return (
     <button
+      type="button"
       onClick={onClick}
       disabled={disabled}
       className="inline-flex items-center py-1 px-2 rounded-md border border-offbase bg-base text-foreground text-xs hover:bg-offbase transition-all duration-200 ease-in-out hover:scale-[1.09] hover:text-accent disabled:opacity-50 disabled:cursor-not-allowed"
