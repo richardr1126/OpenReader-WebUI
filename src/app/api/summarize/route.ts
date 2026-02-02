@@ -4,8 +4,110 @@ import { createOpenAI } from '@ai-sdk/openai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGroq } from '@ai-sdk/groq';
 import type { SummarizeRequest, SummarizeResponse, SummarizeError } from '@/types/summary';
+import { getAuthToken } from '@/lib/auth';
 
 export const runtime = 'nodejs';
+
+// Default provider endpoints - these are the only allowed baseUrls in production
+// unless SUMMARY_ALLOWED_BASE_URLS is configured
+const PROVIDER_DEFAULT_ENDPOINTS: Record<string, string> = {
+  openai: 'https://api.openai.com/v1',
+  anthropic: 'https://api.anthropic.com',
+  groq: 'https://api.groq.com/openai/v1',
+  openrouter: 'https://openrouter.ai/api/v1',
+};
+
+// Parse allowed base URLs from environment variable (comma-separated)
+function getAllowedBaseUrls(): string[] {
+  const envUrls = process.env.SUMMARY_ALLOWED_BASE_URLS;
+  if (!envUrls) return [];
+  return envUrls.split(',').map(url => url.trim()).filter(Boolean);
+}
+
+// Validate baseUrl against allowlist in production
+function validateBaseUrl(baseUrl: string, provider: string): string | null {
+  // Empty baseUrl is always allowed - will use SDK defaults
+  if (!baseUrl) {
+    return null;
+  }
+
+  // In development, allow any baseUrl
+  if (process.env.NODE_ENV !== 'production') {
+    return baseUrl;
+  }
+
+  // Parse and normalize the URL
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(baseUrl);
+  } catch {
+    return null; // Invalid URL
+  }
+
+  // Only allow https in production
+  if (parsedUrl.protocol !== 'https:') {
+    return null;
+  }
+
+  const normalizedUrl = parsedUrl.origin + parsedUrl.pathname.replace(/\/$/, '');
+
+  // Check against provider defaults
+  const providerDefault = PROVIDER_DEFAULT_ENDPOINTS[provider];
+  if (providerDefault && normalizedUrl === providerDefault) {
+    return baseUrl;
+  }
+
+  // Check against configured allowlist
+  const allowedUrls = getAllowedBaseUrls();
+  for (const allowed of allowedUrls) {
+    try {
+      const allowedParsed = new URL(allowed);
+      const normalizedAllowed = allowedParsed.origin + allowedParsed.pathname.replace(/\/$/, '');
+      if (normalizedUrl === normalizedAllowed || normalizedUrl.startsWith(normalizedAllowed + '/')) {
+        return baseUrl;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  // URL not in allowlist - return null to use provider default
+  return null;
+}
+
+// Authenticate request - returns error response if auth fails, null if auth passes
+function authenticateRequest(req: NextRequest): NextResponse | null {
+  // Auth disabled by default - set AUTH_ENABLED=true to enable
+  if (process.env.AUTH_ENABLED !== 'true') {
+    return null;
+  }
+
+  // Check for valid auth_session cookie
+  const sessionCookie = req.cookies.get('auth_session')?.value;
+  if (sessionCookie) {
+    const validToken = getAuthToken();
+    if (sessionCookie === validToken) {
+      return null; // Auth passed
+    }
+  }
+
+  // Check for Authorization header (Bearer token)
+  const authHeader = req.headers.get('Authorization');
+  if (authHeader?.startsWith('Bearer ')) {
+    const bearerToken = authHeader.slice(7);
+    const validToken = getAuthToken();
+    if (bearerToken === validToken) {
+      return null; // Auth passed
+    }
+  }
+
+  // Auth failed
+  const errorBody: SummarizeError = {
+    code: 'UNAUTHORIZED',
+    message: 'Authentication required. Please provide a valid session cookie or Authorization header.',
+  };
+  return NextResponse.json(errorBody, { status: 401 });
+}
 
 const SYSTEM_PROMPTS: Record<string, string> = {
   current_page: `You are a helpful assistant that summarizes text content.
@@ -42,12 +144,25 @@ Do not include any preamble like "Here is a summary" - just provide the summary 
 
 export async function POST(req: NextRequest) {
   try {
+    // Authentication check - must pass before processing any other headers
+    const authError = authenticateRequest(req);
+    if (authError) {
+      return authError;
+    }
+
     // Get configuration from headers
     const provider = req.headers.get('x-summary-provider') || 'openai';
-    const baseUrl = req.headers.get('x-summary-base-url') || '';
+    const requestedBaseUrl = req.headers.get('x-summary-base-url') || '';
     const modelId = req.headers.get('x-summary-model') || 'gpt-4o-mini';
 
+    // Validate and sanitize baseUrl - in production, only allow configured endpoints
+    const baseUrl = validateBaseUrl(requestedBaseUrl, provider);
+    if (requestedBaseUrl && !baseUrl && process.env.NODE_ENV === 'production') {
+      console.warn(`Rejected untrusted baseUrl: ${requestedBaseUrl} for provider: ${provider}`);
+    }
+
     // Get API key from headers or environment variables based on provider
+    // API key selection only occurs after authentication has passed
     let apiKey = req.headers.get('x-summary-api-key') || '';
     if (!apiKey) {
       switch (provider) {
@@ -136,10 +251,18 @@ export async function POST(req: NextRequest) {
         break;
       }
       case 'custom-openai': {
-        if (!baseUrl) {
+        if (!requestedBaseUrl) {
           const errorBody: SummarizeError = {
             code: 'MISSING_BASE_URL',
             message: 'Custom provider requires a base URL',
+          };
+          return NextResponse.json(errorBody, { status: 400 });
+        }
+        if (!baseUrl) {
+          // URL was provided but rejected by validation
+          const errorBody: SummarizeError = {
+            code: 'INVALID_BASE_URL',
+            message: 'The provided base URL is not allowed. In production, only configured endpoints are permitted.',
           };
           return NextResponse.json(errorBody, { status: 400 });
         }
