@@ -4,7 +4,6 @@ import { createOpenAI } from '@ai-sdk/openai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGroq } from '@ai-sdk/groq';
 import type { SummarizeRequest, SummarizeResponse, SummarizeError } from '@/types/summary';
-import { getAuthToken } from '@/lib/auth';
 
 export const runtime = 'nodejs';
 
@@ -75,40 +74,6 @@ function validateBaseUrl(baseUrl: string, provider: string): string | null {
   return null;
 }
 
-// Authenticate request - returns error response if auth fails, null if auth passes
-function authenticateRequest(req: NextRequest): NextResponse | null {
-  // Auth disabled by default - set AUTH_ENABLED=true to enable
-  if (process.env.AUTH_ENABLED !== 'true') {
-    return null;
-  }
-
-  // Check for valid auth_session cookie
-  const sessionCookie = req.cookies.get('auth_session')?.value;
-  if (sessionCookie) {
-    const validToken = getAuthToken();
-    if (sessionCookie === validToken) {
-      return null; // Auth passed
-    }
-  }
-
-  // Check for Authorization header (Bearer token)
-  const authHeader = req.headers.get('Authorization');
-  if (authHeader?.startsWith('Bearer ')) {
-    const bearerToken = authHeader.slice(7);
-    const validToken = getAuthToken();
-    if (bearerToken === validToken) {
-      return null; // Auth passed
-    }
-  }
-
-  // Auth failed
-  const errorBody: SummarizeError = {
-    code: 'UNAUTHORIZED',
-    message: 'Authentication required. Please provide a valid session cookie or Authorization header.',
-  };
-  return NextResponse.json(errorBody, { status: 401 });
-}
-
 const SYSTEM_PROMPTS: Record<string, string> = {
   current_page: `You are a helpful assistant that summarizes text content.
 Provide a clear, concise summary of the current page content provided.
@@ -144,12 +109,6 @@ Do not include any preamble like "Here is a summary" - just provide the summary 
 
 export async function POST(req: NextRequest) {
   try {
-    // Authentication check - must pass before processing any other headers
-    const authError = authenticateRequest(req);
-    if (authError) {
-      return authError;
-    }
-
     // Get configuration from headers
     const provider = req.headers.get('x-summary-provider') || 'openai';
     const requestedBaseUrl = req.headers.get('x-summary-base-url') || '';
@@ -162,7 +121,6 @@ export async function POST(req: NextRequest) {
     }
 
     // Get API key from headers or environment variables based on provider
-    // API key selection only occurs after authentication has passed
     let apiKey = req.headers.get('x-summary-api-key') || '';
     if (!apiKey) {
       switch (provider) {
