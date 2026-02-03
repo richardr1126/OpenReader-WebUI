@@ -8,6 +8,101 @@ import { decodeChapterTitleTag, encodeChapterFileName, encodeChapterTitleTag, ff
 export const DOCSTORE_DIR = path.join(process.cwd(), 'docstore');
 export const DOCUMENTS_V1_DIR = path.join(DOCSTORE_DIR, 'documents_v1');
 export const AUDIOBOOKS_V1_DIR = path.join(DOCSTORE_DIR, 'audiobooks_v1');
+export const AUDIOBOOKS_USERS_DIR = path.join(DOCSTORE_DIR, 'audiobooks_users');
+
+export const UNCLAIMED_USER_ID = 'unclaimed';
+
+/**
+ * Get the audiobook directory for a specific user when auth is enabled.
+ * Returns path like: docstore/audiobooks_users/{userId}
+ */
+export function getUserAudiobookDir(userId: string): string {
+  // Sanitize userId to prevent path traversal
+  const safeUserId = userId.replace(/[^a-zA-Z0-9._-]/g, '');
+  if (!safeUserId || safeUserId === '.' || safeUserId === '..' || safeUserId.includes('..')) {
+    throw new Error('Invalid userId for audiobook directory');
+  }
+  return path.join(AUDIOBOOKS_USERS_DIR, safeUserId);
+}
+
+/**
+ * Get the unclaimed audiobooks directory for pre-auth content.
+ * Returns path like: docstore/audiobooks_users/unclaimed
+ */
+export function getUnclaimedAudiobookDir(): string {
+  return path.join(AUDIOBOOKS_USERS_DIR, UNCLAIMED_USER_ID);
+}
+
+/**
+ * Get the full path to a specific audiobook directory.
+ * - When auth is disabled: docstore/audiobooks_v1/{bookId}-audiobook
+ * - When auth is enabled: docstore/audiobooks_users/{userId}/{bookId}-audiobook
+ */
+export function getAudiobookPath(bookId: string, userId: string | null, authEnabled: boolean): string {
+  if (!authEnabled || !userId) {
+    return path.join(AUDIOBOOKS_V1_DIR, `${bookId}-audiobook`);
+  }
+  return path.join(getUserAudiobookDir(userId), `${bookId}-audiobook`);
+}
+
+/**
+ * Move an audiobook folder from one user's directory to another.
+ * Used for claiming unclaimed audiobooks or transferring on account linking.
+ * @returns true if moved successfully, false if source doesn't exist
+ */
+export async function moveAudiobookToUser(
+  bookId: string,
+  fromUserId: string,
+  toUserId: string
+): Promise<boolean> {
+  const sourceDir = path.join(getUserAudiobookDir(fromUserId), `${bookId}-audiobook`);
+  const targetUserDir = getUserAudiobookDir(toUserId);
+  const targetDir = path.join(targetUserDir, `${bookId}-audiobook`);
+
+  if (!existsSync(sourceDir)) {
+    return false;
+  }
+
+  // Ensure target user directory exists
+  await mkdir(targetUserDir, { recursive: true });
+
+  // If target already exists, we need to merge or skip
+  if (existsSync(targetDir)) {
+    // Target exists - merge contents (move files that don't exist in target)
+    const result = await mergeDirectoryContents(sourceDir, targetDir);
+    // Try to remove source if empty
+    try {
+      const remaining = await readdir(sourceDir);
+      if (remaining.length === 0) {
+        await rm(sourceDir, { recursive: true, force: true });
+      }
+    } catch { /* ignore */ }
+    return result.moved > 0 || result.skipped > 0;
+  }
+
+  // Simple rename/move
+  await rename(sourceDir, targetDir);
+  return true;
+}
+
+/**
+ * List all audiobook IDs in a user's directory.
+ */
+export async function listUserAudiobookIds(userId: string): Promise<string[]> {
+  const userDir = getUserAudiobookDir(userId);
+  if (!existsSync(userDir)) return [];
+
+  const entries = await readdir(userDir, { withFileTypes: true });
+  const bookIds: string[] = [];
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    if (!entry.name.endsWith('-audiobook')) continue;
+    bookIds.push(entry.name.replace('-audiobook', ''));
+  }
+
+  return bookIds;
+}
 
 const MIGRATIONS_DIR = path.join(DOCSTORE_DIR, '.migrations');
 const MIGRATIONS_STATE_PATH = path.join(MIGRATIONS_DIR, 'state.json');
@@ -341,6 +436,8 @@ async function mergeDirectoryContents(sourceDir: string, targetDir: string): Pro
 export async function ensureAudiobooksV1Ready(): Promise<boolean> {
   await mkdir(DOCSTORE_DIR, { recursive: true });
   await mkdir(AUDIOBOOKS_V1_DIR, { recursive: true });
+  // Also ensure the user-specific audiobooks directory exists for auth-enabled scenarios
+  await mkdir(AUDIOBOOKS_USERS_DIR, { recursive: true });
 
   const state = await loadMigrationState();
   const legacyDirsPresent = await hasLegacyAudiobookDirs();

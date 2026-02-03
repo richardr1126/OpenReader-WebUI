@@ -7,9 +7,7 @@ import type { NextRequest } from 'next/server';
 import { db } from "@/db";
 import { rateLimiter } from "@/lib/server/rate-limiter";
 import { isAuthEnabled } from "@/lib/server/auth-config";
-import { eq } from 'drizzle-orm';
-
-
+import { transferUserAudiobooks } from "@/lib/server/claim-data";
 
 import * as schema from "@/db/schema"; // Import the dynamic schema
 
@@ -36,6 +34,11 @@ const createAuth = () => betterAuth({
       // Send an email to the user with a link to reset their password
       console.log("Password reset requested for:", data.user.email);
     },
+  },
+  rateLimit: {
+    // Disable rate limiting when running tests to support parallel test workers
+    // In production, better-auth's default rate limiting applies
+    enabled: process.env.DISABLE_AUTH_RATE_LIMIT !== 'true',
   },
   socialProviders: {
     ...(process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET && {
@@ -70,6 +73,17 @@ const createAuth = () => betterAuth({
             console.log(`Successfully transferred rate limit data from anonymous user ${anonymousUser.user.id} to user ${newUser.user.id}`);
           } catch (error) {
             console.error("Error transferring rate limit data during account linking:", error);
+            // Don't throw here to prevent blocking the account linking process
+          }
+
+          // Transfer audiobooks from anonymous user to new authenticated user
+          try {
+            const transferred = await transferUserAudiobooks(anonymousUser.user.id, newUser.user.id);
+            if (transferred > 0) {
+              console.log(`Successfully transferred ${transferred} audiobook(s) from anonymous user ${anonymousUser.user.id} to user ${newUser.user.id}`);
+            }
+          } catch (error) {
+            console.error("Error transferring audiobooks during account linking:", error);
             // Don't throw here to prevent blocking the account linking process
           }
         } catch (error) {
@@ -128,32 +142,4 @@ export async function requireAuthContext(
   }
 
   return ctx;
-}
-
-export type AudiobookAccessMode = 'forbidden' | 'notFound';
-
-export async function requireAudiobookOwned(
-  bookId: string,
-  userId: string,
-  options?: { onDenied?: AudiobookAccessMode },
-): Promise<Response | null> {
-  if (!isAuthEnabled() || !db) return null;
-
-  const [existingBook] = await db
-    .select({ userId: schema.audiobooks.userId })
-    .from(schema.audiobooks)
-    .where(eq(schema.audiobooks.id, bookId));
-
-  if (!existingBook) {
-    return NextResponse.json({ error: 'Book not found' }, { status: 404 });
-  }
-
-  if (existingBook.userId && existingBook.userId !== userId) {
-    if (options?.onDenied === 'notFound') {
-      return NextResponse.json({ error: 'Book not found' }, { status: 404 });
-    }
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-  }
-
-  return null;
 }

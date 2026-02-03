@@ -14,26 +14,30 @@ export const documents = pgTable('documents', {
 }));
 
 export const audiobooks = pgTable('audiobooks', {
-  id: text('id').primaryKey(),
-  userId: text('user_id'),
+  id: text('id').notNull(),
+  userId: text('user_id').notNull(),
   title: text('title').notNull(),
   author: text('author'),
   description: text('description'),
   coverPath: text('cover_path'),
   duration: real('duration').default(0),
   createdAt: timestamp('created_at').defaultNow(),
-});
+}, (table) => ({
+  pk: primaryKey({ columns: [table.id, table.userId] }),
+}));
 
 export const audiobookChapters = pgTable('audiobook_chapters', {
-  id: text('id').primaryKey(),
-  bookId: text('book_id').notNull().references(() => audiobooks.id, { onDelete: 'cascade' }),
-  userId: text('user_id'),
+  id: text('id').notNull(),
+  bookId: text('book_id').notNull(),
+  userId: text('user_id').notNull(),
   chapterIndex: integer('chapter_index').notNull(),
   title: text('title').notNull(),
   duration: real('duration').default(0),
   filePath: text('file_path').notNull(),
   format: text('format').notNull(), // mp3, m4b
-});
+}, (table) => ({
+  pk: primaryKey({ columns: [table.id, table.userId] }),
+}));
 
 export const user = pgTable("user", {
   id: text("id").primaryKey(),

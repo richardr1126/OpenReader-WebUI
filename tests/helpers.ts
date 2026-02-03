@@ -6,50 +6,6 @@ const DIR = './tests/files/';
 const TTS_MOCK_PATH = path.join(__dirname, 'files', 'sample.mp3');
 let ttsMockBuffer: Buffer | null = null;
 
-type RateLimitStatusResponse = {
-  authEnabled: boolean;
-  userType?: 'anonymous' | 'authenticated' | 'unauthenticated';
-};
-
-async function getRateLimitStatus(page: Page): Promise<RateLimitStatusResponse | null> {
-  try {
-    const res = await page.request.get('/api/rate-limit/status');
-    if (!res.ok()) return null;
-    return (await res.json()) as RateLimitStatusResponse;
-  } catch {
-    return null;
-  }
-}
-
-async function ensureAnonymousSession(page: Page): Promise<void> {
-  const initial = await getRateLimitStatus(page);
-  if (!initial) return;
-  if (!initial.authEnabled) return;
-  if (initial.userType && initial.userType !== 'unauthenticated') return;
-
-  // Create a session cookie for this test context.
-  // This avoids races where the app makes authenticated API calls before AuthLoader finishes.
-  try {
-    await page.request.post('/api/auth/sign-in/anonymous', { data: {} });
-  } catch {
-    // ignore
-  }
-
-  // Wait until the server sees us as anonymous/authenticated (i.e. cookie persisted).
-  const deadline = Date.now() + 15_000;
-  // eslint-disable-next-line no-constant-condition
-  while (true) {
-    const next = await getRateLimitStatus(page);
-    if (next && (!next.authEnabled || (next.userType && next.userType !== 'unauthenticated'))) {
-      return;
-    }
-    if (Date.now() > deadline) {
-      throw new Error('Timed out waiting for anonymous auth session in tests');
-    }
-    await page.waitForTimeout(200);
-  }
-}
-
 async function ensureTtsRouteMock(page: Page) {
   if (!ttsMockBuffer) {
     ttsMockBuffer = fs.readFileSync(TTS_MOCK_PATH);

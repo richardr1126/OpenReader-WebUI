@@ -17,6 +17,10 @@ export const RATE_LIMITS = {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const safeDb = () => db as any;
 
+type UserTtsCharsInsert = typeof userTtsChars.$inferInsert;
+type UserTtsCharsDateValue = UserTtsCharsInsert['date'];
+type UserTtsCharsUpdatedAtValue = UserTtsCharsInsert['updatedAt'];
+
 
 export interface RateLimitResult {
   allowed: boolean;
@@ -99,6 +103,14 @@ function getRowsAffected(result: unknown): number {
 export class RateLimiter {
   constructor() { }
 
+  private isPostgres(): boolean {
+    return Boolean(process.env.POSTGRES_URL);
+  }
+
+  private getUpdatedAtValue(): Date | number {
+    return this.isPostgres() ? new Date() : Date.now();
+  }
+
   /**
    * Check if a user can use TTS and increment their char count if allowed
    */
@@ -114,6 +126,7 @@ export class RateLimiter {
     }
 
     const today = new Date().toISOString().split('T')[0];
+    const dateValue = today as unknown as UserTtsCharsDateValue;
     const userLimit = user.isAnonymous ? RATE_LIMITS.ANONYMOUS : RATE_LIMITS.AUTHENTICATED;
 
     const buckets: Bucket[] = [{ key: user.id, limit: userLimit }];
@@ -134,6 +147,13 @@ export class RateLimiter {
 
     try {
       if (!db) throw new Error("DB not initialized");
+
+      const updatedAt = this.getUpdatedAtValue() as unknown as UserTtsCharsUpdatedAtValue;
+
+      // Use a DB transaction to avoid partial increments across buckets and to avoid
+      // non-transactional "rollback" logic that can corrupt counts under concurrency.
+      // Note: We intentionally allow a request to push a bucket over its limit; we only
+      // block when the bucket was already exhausted before this request starts updating.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return await safeDb().transaction(async (tx: any) => {
         // Ensure records exist for each bucket
@@ -141,31 +161,30 @@ export class RateLimiter {
           await tx.insert(userTtsChars)
             .values({
               userId: bucket.key,
-              date: today as string,
+              date: dateValue,
               charCount: 0,
             })
             .onConflictDoUpdate({
               target: [userTtsChars.userId, userTtsChars.date],
-              set: { updatedAt: new Date() },
+              set: { updatedAt },
             });
         }
 
-        // Attempt to increment each bucket
+        // Attempt to increment each bucket. The `lt(..., limit)` guard blocks requests
+        // that start after the bucket is already exhausted, while still allowing a
+        // request to push the count over the limit.
         for (const bucket of buckets) {
           const updateResult = await tx.update(userTtsChars)
             .set({
               charCount: sql`${userTtsChars.charCount} + ${charCount}`,
-              updatedAt: new Date()
+              updatedAt,
             })
             .where(and(
               eq(userTtsChars.userId, bucket.key),
-              eq(userTtsChars.date, today as string),
+              eq(userTtsChars.date, dateValue),
               lt(userTtsChars.charCount, bucket.limit)
             ));
 
-          // If any bucket is already at/over its limit, reject the request (and roll back all increments).
-          // Note: we intentionally allow a request to push a bucket over its limit; we only block when the
-          // bucket was already exhausted before this request started.
           if (getRowsAffected(updateResult) <= 0) {
             throw new RateLimitExceeded();
           }
@@ -176,7 +195,7 @@ export class RateLimiter {
         for (const bucket of buckets) {
           const result = await tx.select({ currentCount: userTtsChars.charCount })
             .from(userTtsChars)
-            .where(and(eq(userTtsChars.userId, bucket.key), eq(userTtsChars.date, today)));
+            .where(and(eq(userTtsChars.userId, bucket.key), eq(userTtsChars.date, dateValue)));
 
           const currentCount = result[0]?.currentCount ? Number(result[0].currentCount) : 0;
           bucketResults.push({ currentCount, limit: bucket.limit });
@@ -272,38 +291,36 @@ export class RateLimiter {
 
     if (!db) return;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await safeDb().transaction(async (tx: any) => {
-      const today = new Date().toISOString().split('T')[0];
+    const today = new Date().toISOString().split('T')[0];
+    const dateValue = today as unknown as UserTtsCharsDateValue;
+    const updatedAt = this.getUpdatedAtValue() as unknown as UserTtsCharsUpdatedAtValue;
 
-      // Get anonymous user's current count
-      const anonymousResult = await tx.select({ charCount: userTtsChars.charCount })
-        .from(userTtsChars)
-        .where(and(eq(userTtsChars.userId, anonymousUserId), eq(userTtsChars.date, today)));
+    const anonymousResult = await safeDb().select({ charCount: userTtsChars.charCount })
+      .from(userTtsChars)
+      .where(and(eq(userTtsChars.userId, anonymousUserId), eq(userTtsChars.date, dateValue)));
 
-      if (anonymousResult.length > 0) {
-        const anonymousCount = Number(anonymousResult[0].charCount);
+    if (anonymousResult.length === 0) return;
 
-        const existingAuth = await tx.select({ charCount: userTtsChars.charCount })
-          .from(userTtsChars)
-          .where(and(eq(userTtsChars.userId, authenticatedUserId), eq(userTtsChars.date, today)));
+    const anonymousCount = Number(anonymousResult[0].charCount);
 
-        if (existingAuth.length === 0) {
-          await tx.insert(userTtsChars).values({ userId: authenticatedUserId, date: today, charCount: anonymousCount });
-        } else {
-          const existingCount = Number(existingAuth[0].charCount);
-          if (anonymousCount > existingCount) {
-            await tx.update(userTtsChars)
-              .set({ charCount: anonymousCount, updatedAt: new Date() })
-              .where(and(eq(userTtsChars.userId, authenticatedUserId), eq(userTtsChars.date, today)));
-          }
-        }
+    const existingAuth = await safeDb().select({ charCount: userTtsChars.charCount })
+      .from(userTtsChars)
+      .where(and(eq(userTtsChars.userId, authenticatedUserId), eq(userTtsChars.date, dateValue)));
 
-        // Remove anonymous user's record
-        await tx.delete(userTtsChars)
-          .where(and(eq(userTtsChars.userId, anonymousUserId), eq(userTtsChars.date, today)));
+    if (existingAuth.length === 0) {
+      await safeDb().insert(userTtsChars)
+        .values({ userId: authenticatedUserId, date: dateValue, charCount: anonymousCount });
+    } else {
+      const existingCount = Number(existingAuth[0].charCount);
+      if (anonymousCount > existingCount) {
+        await safeDb().update(userTtsChars)
+          .set({ charCount: anonymousCount, updatedAt })
+          .where(and(eq(userTtsChars.userId, authenticatedUserId), eq(userTtsChars.date, dateValue)));
       }
-    });
+    }
+
+    await safeDb().delete(userTtsChars)
+      .where(and(eq(userTtsChars.userId, anonymousUserId), eq(userTtsChars.date, dateValue)));
   }
 
   /**
@@ -313,11 +330,11 @@ export class RateLimiter {
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
     const cutoffDateStr = cutoffDate.toISOString().split('T')[0];
+    const cutoffDateValue = cutoffDateStr as unknown as UserTtsCharsDateValue;
 
     if (!db) return;
     // Assuming string comparison works for YYYY-MM-DD
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await safeDb().delete(userTtsChars).where(lt(userTtsChars.date, cutoffDateStr as any));
+    await safeDb().delete(userTtsChars).where(lt(userTtsChars.date, cutoffDateValue));
   }
 
   private getResetTime(): Date {

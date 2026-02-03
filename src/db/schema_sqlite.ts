@@ -15,26 +15,30 @@ export const documents = sqliteTable('documents', {
 }));
 
 export const audiobooks = sqliteTable('audiobooks', {
-  id: text('id').primaryKey(),
-  userId: text('user_id'),
+  id: text('id').notNull(),
+  userId: text('user_id').notNull(),
   title: text('title').notNull(),
   author: text('author'),
   description: text('description'),
   coverPath: text('cover_path'),
   duration: real('duration').default(0),
   createdAt: integer('created_at').default(sql`(cast(strftime('%s','now') as int) * 1000)`),
-});
+}, (table) => ({
+  pk: primaryKey({ columns: [table.id, table.userId] }),
+}));
 
 export const audiobookChapters = sqliteTable('audiobook_chapters', {
-  id: text('id').primaryKey(),
-  bookId: text('book_id').notNull().references(() => audiobooks.id, { onDelete: 'cascade' }),
-  userId: text('user_id'),
+  id: text('id').notNull(),
+  bookId: text('book_id').notNull(),
+  userId: text('user_id').notNull(),
   chapterIndex: integer('chapter_index').notNull(),
   title: text('title').notNull(),
   duration: real('duration').default(0),
   filePath: text('file_path').notNull(),
   format: text('format').notNull(), // mp3, m4b
-});
+}, (table) => ({
+  pk: primaryKey({ columns: [table.id, table.userId] }),
+}));
 
 export const user = sqliteTable("user", {
   id: text("id").primaryKey(),

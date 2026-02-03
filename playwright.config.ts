@@ -26,7 +26,8 @@ export default defineConfig({
 
   /* Run your local dev server before starting the tests */
   webServer: {
-    command: 'npm run build && npm run start',
+    // Disable auth rate limiting for tests to support parallel workers creating sessions
+    command: 'npm run build && DISABLE_AUTH_RATE_LIMIT=true npm run start',
     url: 'http://localhost:3003',
     reuseExistingServer: !process.env.CI,
     timeout: 120 * 1000,

@@ -15,25 +15,27 @@ CREATE TABLE "account" (
 );
 --> statement-breakpoint
 CREATE TABLE "audiobook_chapters" (
-	"id" text PRIMARY KEY NOT NULL,
+	"id" text NOT NULL,
 	"book_id" text NOT NULL,
-	"user_id" text,
+	"user_id" text NOT NULL,
 	"chapter_index" integer NOT NULL,
 	"title" text NOT NULL,
 	"duration" real DEFAULT 0,
 	"file_path" text NOT NULL,
-	"format" text NOT NULL
+	"format" text NOT NULL,
+	CONSTRAINT "audiobook_chapters_id_user_id_pk" PRIMARY KEY("id","user_id")
 );
 --> statement-breakpoint
 CREATE TABLE "audiobooks" (
-	"id" text PRIMARY KEY NOT NULL,
-	"user_id" text,
+	"id" text NOT NULL,
+	"user_id" text NOT NULL,
 	"title" text NOT NULL,
 	"author" text,
 	"description" text,
 	"cover_path" text,
 	"duration" real DEFAULT 0,
-	"created_at" timestamp DEFAULT now()
+	"created_at" timestamp DEFAULT now(),
+	CONSTRAINT "audiobooks_id_user_id_pk" PRIMARY KEY("id","user_id")
 );
 --> statement-breakpoint
 CREATE TABLE "documents" (
@@ -88,7 +90,6 @@ CREATE TABLE "verification" (
 	"updated_at" timestamp
 );
 --> statement-breakpoint
-ALTER TABLE "account" ADD CONSTRAINT "account_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "audiobook_chapters" ADD CONSTRAINT "audiobook_chapters_book_id_audiobooks_id_fk" FOREIGN KEY ("book_id") REFERENCES "public"."audiobooks"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "session" ADD CONSTRAINT "session_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "account" ADD CONSTRAINT "account_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "session" ADD CONSTRAINT "session_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "idx_user_tts_chars_date" ON "user_tts_chars" USING btree ("date");

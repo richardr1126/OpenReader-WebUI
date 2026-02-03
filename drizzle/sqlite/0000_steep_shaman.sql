@@ -12,30 +12,31 @@ CREATE TABLE `account` (
 	`password` text,
 	`created_at` integer NOT NULL,
 	`updated_at` integer NOT NULL,
-	FOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE no action
+	FOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
 CREATE TABLE `audiobook_chapters` (
-	`id` text PRIMARY KEY NOT NULL,
+	`id` text NOT NULL,
 	`book_id` text NOT NULL,
-	`user_id` text,
+	`user_id` text NOT NULL,
 	`chapter_index` integer NOT NULL,
 	`title` text NOT NULL,
 	`duration` real DEFAULT 0,
 	`file_path` text NOT NULL,
 	`format` text NOT NULL,
-	FOREIGN KEY (`book_id`) REFERENCES `audiobooks`(`id`) ON UPDATE no action ON DELETE cascade
+	PRIMARY KEY(`id`, `user_id`)
 );
 --> statement-breakpoint
 CREATE TABLE `audiobooks` (
-	`id` text PRIMARY KEY NOT NULL,
-	`user_id` text,
+	`id` text NOT NULL,
+	`user_id` text NOT NULL,
 	`title` text NOT NULL,
 	`author` text,
 	`description` text,
 	`cover_path` text,
 	`duration` real DEFAULT 0,
-	`created_at` integer DEFAULT (cast(strftime('%s','now') as int) * 1000)
+	`created_at` integer DEFAULT (cast(strftime('%s','now') as int) * 1000),
+	PRIMARY KEY(`id`, `user_id`)
 );
 --> statement-breakpoint
 CREATE TABLE `documents` (
@@ -59,7 +60,7 @@ CREATE TABLE `session` (
 	`ip_address` text,
 	`user_agent` text,
 	`user_id` text NOT NULL,
-	FOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE no action
+	FOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `session_token_unique` ON `session` (`token`);--> statement-breakpoint

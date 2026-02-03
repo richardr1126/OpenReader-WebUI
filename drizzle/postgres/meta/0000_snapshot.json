@@ -1,5 +1,5 @@
 {
-  "id": "5ac6552c-824b-4b79-8cb6-f0ec3d121031",
+  "id": "63a00f5b-69ff-4d95-a48a-9e84cc331445",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -99,7 +99,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
@@ -116,7 +116,7 @@
         "id": {
           "name": "id",
           "type": "text",
-          "primaryKey": true,
+          "primaryKey": false,
           "notNull": true
         },
         "book_id": {
@@ -129,7 +129,7 @@
           "name": "user_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "chapter_index": {
           "name": "chapter_index",
@@ -164,22 +164,16 @@
         }
       },
       "indexes": {},
-      "foreignKeys": {
-        "audiobook_chapters_book_id_audiobooks_id_fk": {
-          "name": "audiobook_chapters_book_id_audiobooks_id_fk",
-          "tableFrom": "audiobook_chapters",
-          "tableTo": "audiobooks",
-          "columnsFrom": [
-            "book_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "audiobook_chapters_id_user_id_pk": {
+          "name": "audiobook_chapters_id_user_id_pk",
+          "columns": [
+            "id",
+            "user_id"
+          ]
         }
       },
-      "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
@@ -192,14 +186,14 @@
         "id": {
           "name": "id",
           "type": "text",
-          "primaryKey": true,
+          "primaryKey": false,
           "notNull": true
         },
         "user_id": {
           "name": "user_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "title": {
           "name": "title",
@@ -242,7 +236,15 @@
       },
       "indexes": {},
       "foreignKeys": {},
-      "compositePrimaryKeys": {},
+      "compositePrimaryKeys": {
+        "audiobooks_id_user_id_pk": {
+          "name": "audiobooks_id_user_id_pk",
+          "columns": [
+            "id",
+            "user_id"
+          ]
+        }
+      },
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
@@ -383,7 +385,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },

@@ -1,20 +1,45 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { existsSync } from 'fs';
-import { join } from 'path';
-import { AUDIOBOOKS_V1_DIR, isAudiobooksV1Ready } from '@/lib/server/docstore';
+import { join, resolve } from 'path';
+import { AUDIOBOOKS_V1_DIR, UNCLAIMED_USER_ID, getUserAudiobookDir, isAudiobooksV1Ready } from '@/lib/server/docstore';
 import { listStoredChapters } from '@/lib/server/audiobook';
 import type { AudiobookGenerationSettings } from '@/types/client';
 import type { TTSAudiobookFormat, TTSAudiobookChapter } from '@/types/tts';
 import { readFile } from 'fs/promises';
-import { requireAuthContext, requireAudiobookOwned } from '@/lib/server/auth';
+import { requireAuthContext } from '@/lib/server/auth';
+import { db } from '@/db';
+import { audiobooks } from '@/db/schema';
+import { eq, and, or } from 'drizzle-orm';
 
 export const dynamic = 'force-dynamic';
 
-function getAudiobooksRootDir(request: NextRequest): string {
+/**
+ * Get the base audiobooks directory, accounting for test namespaces.
+ * When auth is disabled, returns AUDIOBOOKS_V1_DIR.
+ * When auth is enabled, returns the user-specific directory.
+ */
+function getAudiobooksRootDir(request: NextRequest, userId: string | null, authEnabled: boolean): string {
   const raw = request.headers.get('x-openreader-test-namespace')?.trim();
-  if (!raw) return AUDIOBOOKS_V1_DIR;
-  const safe = raw.replace(/[^a-zA-Z0-9._-]/g, '');
-  return safe ? join(AUDIOBOOKS_V1_DIR, safe) : AUDIOBOOKS_V1_DIR;
+  
+  const applyTestNamespace = (baseDir: string): string => {
+    if (!raw) return baseDir;
+    const safe = raw.replace(/[^a-zA-Z0-9._-]/g, '');
+    if (!safe || safe === '.' || safe === '..' || safe.includes('..')) {
+      return baseDir;
+    }
+    const resolved = resolve(baseDir, safe);
+    if (!resolved.startsWith(resolve(baseDir) + '/')) {
+      return baseDir;
+    }
+    return resolved;
+  };
+
+  if (!authEnabled || !userId) {
+    return applyTestNamespace(AUDIOBOOKS_V1_DIR);
+  }
+
+  const userDir = getUserAudiobookDir(userId);
+  return applyTestNamespace(userDir);
 }
 
 const SAFE_ID_REGEX = /^[a-zA-Z0-9._-]{1,128}$/;
@@ -40,9 +65,18 @@ export async function GET(request: NextRequest) {
     const ctxOrRes = await requireAuthContext(request);
     if (ctxOrRes instanceof Response) return ctxOrRes;
 
-    if (ctxOrRes.authEnabled) {
-      const denied = await requireAudiobookOwned(bookId, ctxOrRes.userId!, { onDenied: 'notFound' });
-      if (denied) {
+    const { userId, authEnabled } = ctxOrRes;
+
+    // Check if audiobook exists for user OR is unclaimed (similar to documents)
+    if (authEnabled && db && userId) {
+      const [existingBook] = await db.select().from(audiobooks).where(
+        and(
+          eq(audiobooks.id, bookId),
+          or(eq(audiobooks.userId, userId), eq(audiobooks.userId, UNCLAIMED_USER_ID))
+        )
+      );
+      if (!existingBook) {
+        // Book doesn't exist for this user or unclaimed - return empty state
         return NextResponse.json({
           chapters: [],
           exists: false,
@@ -53,7 +87,16 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const intermediateDir = join(getAudiobooksRootDir(request), `${bookId}-audiobook`);
+    // Get the audiobook directory - check user's directory first, then unclaimed
+    let intermediateDir = join(getAudiobooksRootDir(request, userId, authEnabled), `${bookId}-audiobook`);
+    
+    // If not found in user's directory and auth is enabled, check unclaimed directory
+    if (!existsSync(intermediateDir) && authEnabled && userId) {
+      const unclaimedDir = join(getAudiobooksRootDir(request, UNCLAIMED_USER_ID, authEnabled), `${bookId}-audiobook`);
+      if (existsSync(unclaimedDir)) {
+        intermediateDir = unclaimedDir;
+      }
+    }
 
     if (!existsSync(intermediateDir)) {
       return NextResponse.json({

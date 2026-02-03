@@ -4,30 +4,49 @@ import { readFile, writeFile, mkdir, unlink, rm, rename, readdir } from 'fs/prom
 import { existsSync, createReadStream } from 'fs';
 import { basename, join, resolve } from 'path';
 import { randomUUID } from 'crypto';
-import { AUDIOBOOKS_V1_DIR, isAudiobooksV1Ready } from '@/lib/server/docstore';
+import { AUDIOBOOKS_V1_DIR, UNCLAIMED_USER_ID, isAudiobooksV1Ready, getUserAudiobookDir } from '@/lib/server/docstore';
 import { encodeChapterFileName, encodeChapterTitleTag, listStoredChapters, ffprobeAudio, escapeFFMetadata } from '@/lib/server/audiobook';
 import type { TTSAudioBytes, TTSAudiobookFormat } from '@/types/tts';
 import type { AudiobookGenerationSettings } from '@/types/client';
 import { db } from '@/db';
 import { audiobooks, audiobookChapters } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, and, or } from 'drizzle-orm';
 import { isAuthEnabled } from '@/lib/server/auth-config';
-import { getAuthContext, requireAuthContext } from '@/lib/server/auth';
+import { requireAuthContext } from '@/lib/server/auth';
 
 export const dynamic = 'force-dynamic';
 
-function getAudiobooksRootDir(request: NextRequest): string {
+/**
+ * Apply test namespace to a directory path if present in request headers.
+ */
+function applyTestNamespace(baseDir: string, request: NextRequest): string {
   const raw = request.headers.get('x-openreader-test-namespace')?.trim();
-  if (!raw) return AUDIOBOOKS_V1_DIR;
+  if (!raw) return baseDir;
   const safe = raw.replace(/[^a-zA-Z0-9._-]/g, '');
   if (!safe || safe === '.' || safe === '..' || safe.includes('..')) {
-    return AUDIOBOOKS_V1_DIR;
+    return baseDir;
   }
-  const resolved = resolve(AUDIOBOOKS_V1_DIR, safe);
-  if (!resolved.startsWith(resolve(AUDIOBOOKS_V1_DIR) + '/')) {
-    return AUDIOBOOKS_V1_DIR;
+  const resolved = resolve(baseDir, safe);
+  if (!resolved.startsWith(resolve(baseDir) + '/')) {
+    return baseDir;
   }
   return resolved;
+}
+
+/**
+ * Get the base audiobooks directory, accounting for test namespaces.
+ * When auth is disabled, returns AUDIOBOOKS_V1_DIR (possibly with test namespace).
+ * When auth is enabled, returns the user-specific directory under AUDIOBOOKS_USERS_DIR.
+ */
+function getAudiobooksRootDir(request: NextRequest, userId: string | null, authEnabled: boolean): string {
+  // When auth is disabled, use the flat audiobooks_v1 directory
+  if (!authEnabled || !userId) {
+    return applyTestNamespace(AUDIOBOOKS_V1_DIR, request);
+  }
+
+  // When auth is enabled, use user-specific directory
+  const userDir = getUserAudiobookDir(userId);
+  return applyTestNamespace(userDir, request);
 }
 
 interface ConversionRequest {
@@ -183,8 +202,10 @@ export async function POST(request: NextRequest) {
     }
 
     // DB Check / Insert Audiobook
-    if (isAuthEnabled() && db) {
-      const [existingBook] = await db.select().from(audiobooks).where(eq(audiobooks.id, bookId));
+    if (isAuthEnabled() && db && userId) {
+      const [existingBook] = await db.select().from(audiobooks).where(
+        and(eq(audiobooks.id, bookId), eq(audiobooks.userId, userId))
+      );
 
       if (!existingBook) {
         await db.insert(audiobooks).values({
@@ -192,14 +213,10 @@ export async function POST(request: NextRequest) {
           userId,
           title: data.chapterTitle || 'Untitled Audiobook',
         });
-      } else {
-        if (existingBook.userId && existingBook.userId !== userId) {
-          return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-        }
       }
     }
 
-    const intermediateDir = join(getAudiobooksRootDir(request), `${bookId}-audiobook`);
+    const intermediateDir = join(getAudiobooksRootDir(request, userId, ctxOrRes.authEnabled), `${bookId}-audiobook`);
 
     // Create intermediate directory
     await mkdir(intermediateDir, { recursive: true });
@@ -346,7 +363,7 @@ export async function POST(request: NextRequest) {
     await unlink(inputPath).catch(console.error);
 
     // Insert Chapter Record (Denormalized)
-    if (isAuthEnabled() && db) {
+    if (isAuthEnabled() && db && userId) {
       await db.insert(audiobookChapters).values({
         id: `${bookId}-${chapterIndex}`,
         bookId,
@@ -357,7 +374,7 @@ export async function POST(request: NextRequest) {
         format,
         filePath: finalChapterName
       }).onConflictDoUpdate({
-        target: [audiobookChapters.id],
+        target: [audiobookChapters.id, audiobookChapters.userId],
         set: { title: data.chapterTitle, duration, format, filePath: finalChapterName }
       });
     }
@@ -404,17 +421,33 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const { userId } = await getAuthContext(request);
+    const ctxOrRes = await requireAuthContext(request);
+    if (ctxOrRes instanceof Response) return ctxOrRes;
+    const { userId, authEnabled } = ctxOrRes;
 
-    // Verify ownership
-    if (isAuthEnabled() && db) {
-      const [existingBook] = await db.select().from(audiobooks).where(eq(audiobooks.id, bookId));
-      if (existingBook && existingBook.userId && existingBook.userId !== userId) {
-        return NextResponse.json({ error: 'Book not found' }, { status: 404 }); // Hide existence
+    // Check if audiobook exists for user OR is unclaimed (similar to documents)
+    if (authEnabled && db && userId) {
+      const [existingBook] = await db.select().from(audiobooks).where(
+        and(
+          eq(audiobooks.id, bookId),
+          or(eq(audiobooks.userId, userId), eq(audiobooks.userId, UNCLAIMED_USER_ID))
+        )
+      );
+      if (!existingBook) {
+        return NextResponse.json({ error: 'Book not found' }, { status: 404 });
       }
     }
 
-    const intermediateDir = join(getAudiobooksRootDir(request), `${bookId}-audiobook`);
+    // Get the audiobook directory - check user's directory first, then unclaimed
+    let intermediateDir = join(getAudiobooksRootDir(request, userId, authEnabled), `${bookId}-audiobook`);
+    
+    // If not found in user's directory and auth is enabled, check unclaimed directory
+    if (!existsSync(intermediateDir) && authEnabled && userId) {
+      const unclaimedDir = join(getAudiobooksRootDir(request, UNCLAIMED_USER_ID, authEnabled), `${bookId}-audiobook`);
+      if (existsSync(unclaimedDir)) {
+        intermediateDir = unclaimedDir;
+      }
+    }
 
     if (!existsSync(intermediateDir)) {
       return NextResponse.json({ error: 'Book not found' }, { status: 404 });
@@ -610,24 +643,29 @@ export async function DELETE(request: NextRequest) {
 
     const ctxOrRes = await requireAuthContext(request);
     if (ctxOrRes instanceof Response) return ctxOrRes;
-    const userId = ctxOrRes.userId;
+    const { userId, authEnabled } = ctxOrRes;
 
-    // Verify ownership
-    if (isAuthEnabled() && db) {
-      const [existingBook] = await db.select().from(audiobooks).where(eq(audiobooks.id, bookId));
+    // Delete from DB - with composite PK, we delete by both id and userId
+    if (authEnabled && db && userId) {
+      const [existingBook] = await db.select().from(audiobooks).where(
+        and(eq(audiobooks.id, bookId), eq(audiobooks.userId, userId))
+      );
 
-      if (existingBook) {
-        if (existingBook.userId && existingBook.userId !== userId) {
-          return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-        }
-
-        await db.delete(audiobooks).where(eq(audiobooks.id, bookId));
-      } else {
+      if (!existingBook) {
         return NextResponse.json({ error: 'Book not found' }, { status: 404 });
       }
+
+      // Delete chapters first (no foreign key constraint with composite PK)
+      await db.delete(audiobookChapters).where(
+        and(eq(audiobookChapters.bookId, bookId), eq(audiobookChapters.userId, userId))
+      );
+      
+      await db.delete(audiobooks).where(
+        and(eq(audiobooks.id, bookId), eq(audiobooks.userId, userId))
+      );
     }
 
-    const intermediateDir = join(getAudiobooksRootDir(request), `${bookId}-audiobook`);
+    const intermediateDir = join(getAudiobooksRootDir(request, userId, authEnabled), `${bookId}-audiobook`);
 
     // If directory doesn't exist, consider it already reset
     if (!existsSync(intermediateDir)) {

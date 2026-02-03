@@ -100,6 +100,10 @@ interface SetTextOptions {
 const CONTINUATION_LOOKAHEAD = 600;
 const SENTENCE_ENDING = /[.?!…]["'”’)\]]*\s*$/;
 
+// Tiny silent WAV used to unlock HTML5 audio on iOS/Safari.
+const SILENT_WAV_DATA_URI =
+  'data:audio/wav;base64,UklGRkQDAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YSADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==';
+
 const normalizeLocationKey = (location: TTSLocation) =>
   typeof location === 'number' ? `num:${location}` : `str:${location}`;
 
@@ -367,6 +371,109 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
   const sentencesRef = useRef<string[]>([]);
   const currentIndexRef = useRef(0);
 
+  const audioUnlockAttemptRef = useRef(0);
+
+  // Safari/iOS (HTML5 audio) can spontaneously reset playbackRate to 1. Keep re-applying
+  // the desired rate while a sentence is playing.
+  const rateWatchdogIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const clearRateWatchdog = useCallback(() => {
+    if (!rateWatchdogIntervalRef.current) return;
+    clearInterval(rateWatchdogIntervalRef.current);
+    rateWatchdogIntervalRef.current = null;
+  }, []);
+
+  const applyPlaybackRateToHowl = useCallback((howl: Howl | null) => {
+    if (!howl) return;
+
+    try {
+      howl.rate(audioSpeed);
+    } catch {
+      // ignore
+    }
+
+    // Best-effort: Howler doesn't expose the underlying HTMLAudioElement publicly.
+    // This helps on browsers that reset playbackRate/defaultPlaybackRate.
+    try {
+      const sounds = (howl as unknown as { _sounds?: Array<{ _node?: unknown }> })._sounds;
+      const node = sounds?.[0]?._node as unknown;
+      if (node && typeof node === 'object') {
+        const anyNode = node as { playbackRate?: number; defaultPlaybackRate?: number };
+        if (typeof anyNode.playbackRate === 'number') anyNode.playbackRate = audioSpeed;
+        if (typeof anyNode.defaultPlaybackRate === 'number') anyNode.defaultPlaybackRate = audioSpeed;
+      }
+    } catch {
+      // ignore
+    }
+  }, [audioSpeed]);
+
+  const startRateWatchdog = useCallback((howl: Howl | null) => {
+    if (!howl) return;
+    clearRateWatchdog();
+
+    // Apply immediately + keep applying while playback is active.
+    applyPlaybackRateToHowl(howl);
+    rateWatchdogIntervalRef.current = setInterval(() => {
+      applyPlaybackRateToHowl(howl);
+    }, 250);
+  }, [applyPlaybackRateToHowl, clearRateWatchdog]);
+
+  const unlockPlaybackOnUserGesture = useCallback(() => {
+    // Best-effort; safe to call multiple times.
+    audioUnlockAttemptRef.current += 1;
+    const attempt = audioUnlockAttemptRef.current;
+
+    try {
+      void audioContext?.resume();
+    } catch {
+      // ignore
+    }
+
+    try {
+      const el = new Audio(SILENT_WAV_DATA_URI);
+      try {
+        el.setAttribute('playsinline', 'true');
+      } catch {
+        // ignore
+      }
+      el.preload = 'auto';
+      el.volume = 0;
+
+      const p = el.play();
+      if (p && typeof (p as Promise<void>).then === 'function') {
+        void (p as Promise<void>)
+          .then(() => {
+            if (audioUnlockAttemptRef.current !== attempt) return;
+            try {
+              el.pause();
+              el.currentTime = 0;
+            } catch {
+              // ignore
+            }
+          })
+          .catch(() => {
+            // ignore
+          });
+      }
+    } catch {
+      // ignore
+    }
+  }, [audioContext]);
+
+  const isAutoplayBlockedError = useCallback((err: unknown) => {
+    const msg = (() => {
+      if (typeof err === 'string') return err;
+      if (err instanceof Error) return err.message;
+      if (typeof err === 'object' && err !== null && 'message' in err) {
+        const maybe = (err as { message?: unknown }).message;
+        if (typeof maybe === 'string') return maybe;
+      }
+      return '';
+    })();
+
+    return /notallowed|not allowed|user gesture|interaction|autoplay|play\(\) failed/i.test(msg);
+  }, []);
+
   useEffect(() => {
     sentencesRef.current = sentences;
   }, [sentences]);
@@ -395,6 +502,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
    * @param {boolean} [clearPending=false] - Whether to clear pending requests
    */
   const abortAudio = useCallback((clearPending = false) => {
+    clearRateWatchdog();
     if (activeHowl) {
       activeHowl.stop();
       activeHowl.unload();
@@ -414,7 +522,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
       pageTurnTimeoutRef.current = null;
     }
     setCurrentWordIndex(null);
-  }, [activeHowl]);
+  }, [activeHowl, clearRateWatchdog]);
 
   /**
    * Pauses the current audio playback
@@ -666,15 +774,16 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
    * Toggles the playback state between playing and paused
    */
   const togglePlay = useCallback(() => {
-    setIsPlaying((prev) => {
-      if (!prev) {
-        return true;
-      } else {
-        abortAudio();
-        return false;
-      }
-    });
-  }, [abortAudio]);
+    if (isPlaying) {
+      abortAudio();
+      setIsPlaying(false);
+      return;
+    }
+
+    // Ensure audio is unlocked while we're still in the click/tap handler.
+    unlockPlaybackOnUserGesture();
+    setIsPlaying(true);
+  }, [abortAudio, isPlaying, unlockPlaybackOnUserGesture]);
 
 
   /**
@@ -1068,6 +1177,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
         pool: 1,
         rate: audioSpeed,
         onload: function (this: Howl) {
+          applyPlaybackRateToHowl(this);
           const estimate = pageTurnEstimateRef.current;
           if (!estimate || estimate.sentenceIndex !== sentenceIndex) return;
           if (!visualPageChangeHandlerRef.current) return;
@@ -1089,14 +1199,40 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
               visualPageChangeHandlerRef.current?.(currentEstimate.location);
             }, delayMs);
         },
-        onplay: () => {
+        onplay: function (this: Howl) {
           setIsProcessing(false);
+          startRateWatchdog(this);
           if ('mediaSession' in navigator) {
             navigator.mediaSession.playbackState = 'playing';
           }
         },
-        onplayerror: function (this: Howl, error) {
-          console.warn('Howl playback error:', error);
+        onplayerror: function (this: Howl, soundId, error) {
+          const actualError = error ?? soundId;
+          console.warn('Howl playback error:', actualError);
+
+          // Common on iOS/Safari when the actual play() call happens after awaiting TTS.
+          // Do not skip/advance in this case; just pause and tell the user to tap play again.
+          if (isAutoplayBlockedError(actualError)) {
+            setIsProcessing(false);
+            setActiveHowl(null);
+            try {
+              this.unload();
+            } catch {
+              // ignore unload errors
+            }
+            setIsPlaying(false);
+
+            toast.error('Playback was blocked by your browser. Tap play again to start.', {
+              id: 'tts-playback-blocked',
+              style: {
+                background: 'var(--background)',
+                color: 'var(--accent)',
+              },
+              duration: 4000,
+            });
+            return;
+          }
+
           playErrorAttempts += 1;
 
           // Avoid looping for many seconds on Safari: if playback still fails after a single
@@ -1106,6 +1242,16 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
             setActiveHowl(null);
             this.unload();
             setIsPlaying(false);
+
+            toast.error('Audio playback failed. Skipped sentence and paused.', {
+              id: 'tts-playback-error',
+              style: {
+                background: 'var(--background)',
+                color: 'var(--accent)',
+              },
+              duration: 4000,
+            });
+
             advance();
             return;
           }
@@ -1117,8 +1263,9 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
             this.load();
           }
         },
-        onloaderror: async function (this: Howl, error) {
-          console.warn(`Error loading audio (attempt ${retryCount + 1}/${MAX_RETRIES}):`, error);
+        onloaderror: async function (this: Howl, soundId, error) {
+          const actualError = error ?? soundId;
+          console.warn(`Error loading audio (attempt ${retryCount + 1}/${MAX_RETRIES}):`, actualError);
 
           if (retryCount < MAX_RETRIES) {
             // Calculate exponential backoff delay
@@ -1184,6 +1331,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
             }
           },
           onend: function (this: Howl) {
+            clearRateWatchdog();
             this.unload();
             setActiveHowl(null);
             if (pageTurnTimeoutRef.current) {
@@ -1195,6 +1343,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
             }
           },
         onstop: function (this: Howl) {
+          clearRateWatchdog();
           setIsProcessing(false);
           this.unload();
         }
@@ -1225,7 +1374,18 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
       advance();
       return null;
     }
-  }, [abortAudio, isPlaying, advance, activeHowl, processSentence, audioSpeed]);
+  }, [
+    abortAudio,
+    isPlaying,
+    advance,
+    activeHowl,
+    processSentence,
+    audioSpeed,
+    isAutoplayBlockedError,
+    applyPlaybackRateToHowl,
+    startRateWatchdog,
+    clearRateWatchdog,
+  ]);
 
   const playAudio = useCallback(async () => {
     const sentence = sentences[currentIndex];
@@ -1250,6 +1410,16 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
       howl.play();
     }
   }, [sentences, currentIndex, playSentenceWithHowl, voice, speed, configTTSProvider, ttsModel]);
+
+  // Keep the current playback rate applied to the active Howl. Some browsers (notably
+  // iOS Safari with HTML5 audio) can reset playbackRate after initial load/play.
+  useEffect(() => {
+    if (!activeHowl) return;
+    applyPlaybackRateToHowl(activeHowl);
+    if (isPlaying) {
+      startRateWatchdog(activeHowl);
+    }
+  }, [activeHowl, audioSpeed, applyPlaybackRateToHowl, isPlaying, startRateWatchdog]);
 
   // Place useBackgroundState after playAudio is defined
   const isBackgrounded = useBackgroundState({
@@ -1408,9 +1578,12 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
   const stopAndPlayFromIndex = useCallback((index: number) => {
     abortAudio();
 
+    // Same autoplay-unlock issue as togglePlay when starting from a fresh load.
+    unlockPlaybackOnUserGesture();
+
     setCurrentIndex(index);
     setIsPlaying(true);
-  }, [abortAudio]);
+  }, [abortAudio, unlockPlaybackOnUserGesture]);
 
   /**
    * Sets the speed and restarts the playback
