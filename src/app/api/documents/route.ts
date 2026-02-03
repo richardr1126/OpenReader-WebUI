@@ -2,13 +2,13 @@ import { createHash } from 'crypto';
 import { readFile, stat, unlink, utimes, writeFile } from 'fs/promises';
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
-import { DOCUMENTS_V1_DIR, isDocumentsV1Ready, scanDocumentsFS } from '@/lib/server/docstore';
+import { DOCUMENTS_V1_DIR, UNCLAIMED_USER_ID, ensureDocumentsV1Ready, isDocumentsV1Ready } from '@/lib/server/docstore';
 import type { BaseDocument, DocumentType, SyncedDocument } from '@/types/documents';
 import { db } from '@/db';
 import { documents } from '@/db/schema';
-import { eq, or, and, inArray, count } from 'drizzle-orm';
-import { isAuthEnabled } from '@/lib/server/auth-config';
+import { eq, and, inArray, count } from 'drizzle-orm';
 import { requireAuthContext } from '@/lib/server/auth';
+import { ensureDbIndexed } from '@/lib/server/db-indexing';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,6 +36,7 @@ function toDocumentTypeFromName(name: string): DocumentType {
 
 export async function POST(req: NextRequest) {
   try {
+    await ensureDocumentsV1Ready();
     if (!(await isDocumentsV1Ready())) {
       return NextResponse.json(
         { error: 'Documents storage is not migrated; run /api/migrations/v1 first.' },
@@ -45,6 +46,7 @@ export async function POST(req: NextRequest) {
 
     const ctxOrRes = await requireAuthContext(req);
     if (ctxOrRes instanceof Response) return ctxOrRes;
+    const storageUserId = ctxOrRes.userId ?? UNCLAIMED_USER_ID;
 
     const data = await req.json();
     const documentsData = data.documents as SyncedDocument[];
@@ -73,28 +75,18 @@ export async function POST(req: NextRequest) {
 
       // DB Upsert
       // With composite PK (id, userId), we check if THIS user already has this document
-      if (isAuthEnabled() && db) {
-        const userId = ctxOrRes.userId;
-        if (!userId) {
-          return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-        }
-
-        const [existing] = await db.select().from(documents).where(
-          and(eq(documents.id, id), eq(documents.userId, userId))
-        );
-
-        if (!existing) {
-          await db.insert(documents).values({
-            id,
-            userId,
-            name: safeName,
-            type: doc.type,
-            size: content.length,
-            lastModified: doc.lastModified,
-            filePath: targetFileName
-          });
-        }
-      }
+      await db
+        .insert(documents)
+        .values({
+          id,
+          userId: storageUserId,
+          name: safeName,
+          type: doc.type,
+          size: content.length,
+          lastModified: doc.lastModified,
+          filePath: targetFileName,
+        })
+        .onConflictDoNothing();
 
       stored.push({ oldId: doc.id, id, name: safeName });
     }
@@ -108,6 +100,7 @@ export async function POST(req: NextRequest) {
 
 export async function GET(req: NextRequest) {
   try {
+    await ensureDocumentsV1Ready();
     if (!(await isDocumentsV1Ready())) {
       return NextResponse.json(
         { error: 'Documents storage is not migrated; run /api/migrations/v1 first.' },
@@ -117,6 +110,10 @@ export async function GET(req: NextRequest) {
 
     const ctxOrRes = await requireAuthContext(req);
     if (ctxOrRes instanceof Response) return ctxOrRes;
+    const storageUserId = ctxOrRes.userId ?? UNCLAIMED_USER_ID;
+    const allowedUserIds = ctxOrRes.authEnabled ? [storageUserId, UNCLAIMED_USER_ID] : [UNCLAIMED_USER_ID];
+
+    await ensureDbIndexed();
 
     const url = new URL(req.url);
     const list = url.searchParams.get('list') === 'true';
@@ -130,30 +127,15 @@ export async function GET(req: NextRequest) {
 
     const targetIds = idsParam ? idsParam.split(',').filter(Boolean) : null;
 
-    // Query database (or filesystem) for documents the user is allowed to access
+    // Query database for documents the user is allowed to access
     let allowedDocs: { id: string; name: string; type: string; size: number; lastModified: number; filePath: string }[] = [];
 
-    if (!isAuthEnabled()) {
-      const fsDocs = await scanDocumentsFS();
-      allowedDocs = fsDocs.map(d => ({ ...d }));
-      if (targetIds) {
-        allowedDocs = allowedDocs.filter(d => targetIds!.includes(d.id));
-      }
-    } else {
-      const userId = ctxOrRes.userId;
-      if (!userId) {
-        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-      }
-
-      if (!db) throw new Error("DB not initialized");
-      const rows = await db.select().from(documents).where(
-        and(
-          or(eq(documents.userId, userId), eq(documents.userId, 'unclaimed')),
-          targetIds ? inArray(documents.id, targetIds) : undefined
-        )
-      );
-      allowedDocs = rows as unknown as { id: string; name: string; type: string; size: number; lastModified: number; filePath: string }[];
-    }
+    const conditions = [
+      inArray(documents.userId, allowedUserIds),
+      ...(targetIds ? [inArray(documents.id, targetIds)] : []),
+    ];
+    const rows = await db.select().from(documents).where(and(...conditions));
+    allowedDocs = rows as unknown as { id: string; name: string; type: string; size: number; lastModified: number; filePath: string }[];
 
     const results: (BaseDocument | SyncedDocument)[] = [];
 
@@ -200,6 +182,7 @@ export async function GET(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   try {
+    await ensureDocumentsV1Ready();
     if (!(await isDocumentsV1Ready())) {
       return NextResponse.json(
         { error: 'Documents storage is not migrated; run /api/migrations/v1 first.' },
@@ -210,6 +193,9 @@ export async function DELETE(req: NextRequest) {
     // Auth check - require session
     const ctxOrRes = await requireAuthContext(req);
     if (ctxOrRes instanceof Response) return ctxOrRes;
+    const storageUserId = ctxOrRes.userId ?? UNCLAIMED_USER_ID;
+
+    await ensureDbIndexed();
 
     const url = new URL(req.url);
     const idsParam = url.searchParams.get('ids');
@@ -220,20 +206,9 @@ export async function DELETE(req: NextRequest) {
     if (idsParam) {
       targetIds = idsParam.split(',').filter(Boolean);
     } else {
-      if (!isAuthEnabled()) {
-        const fsDocs = await scanDocumentsFS();
-        targetIds = fsDocs.map((d) => d.id);
-      } else {
-        const userId = ctxOrRes.userId;
-        if (!userId) {
-          return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-        }
-
-        // Existing behavior was "nuke everything"; keep it scoped to "my" docs.
-        if (!db) throw new Error("DB not initialized");
-        const userDocs = await db.select({ id: documents.id }).from(documents).where(eq(documents.userId, userId));
-        targetIds = userDocs.map((d: { id: string | null }) => d.id!).filter(Boolean) as string[];
-      }
+      // Existing behavior was "nuke everything"; keep it scoped to "my" docs.
+      const userDocs = await db.select({ id: documents.id }).from(documents).where(eq(documents.userId, storageUserId));
+      targetIds = userDocs.map((d: { id: string | null }) => d.id!).filter(Boolean) as string[];
     }
 
     if (targetIds.length === 0) {
@@ -242,32 +217,12 @@ export async function DELETE(req: NextRequest) {
 
     const deletedRows: { id: string; filePath: string }[] = [];
 
-    if (!isAuthEnabled()) {
-      // FS cleanup only
-      // Since we don't track ownership, we just delete the files requested.
-      // This implies in no-auth mode, any user can delete any file if they know the ID.
-      const fsDocs = await scanDocumentsFS();
-      for (const doc of fsDocs) {
-        if (targetIds.includes(doc.id)) {
-          deletedRows.push({ id: doc.id, filePath: doc.filePath });
-        }
-      }
-    } else {
-      const userId = ctxOrRes.userId;
-      if (!userId) {
-        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-      }
-
-      if (!db) throw new Error("DB not initialized");
-      const rows = await db.delete(documents)
-        .where(and(
-          eq(documents.userId, userId),
-          inArray(documents.id, targetIds)
-        ))
-        .returning({ id: documents.id, filePath: documents.filePath });
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      rows.forEach((r: any) => deletedRows.push({ id: r.id!, filePath: r.filePath }));
-    }
+    const rows = await db
+      .delete(documents)
+      .where(and(eq(documents.userId, storageUserId), inArray(documents.id, targetIds)))
+      .returning({ id: documents.id, filePath: documents.filePath });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    rows.forEach((r: any) => deletedRows.push({ id: r.id!, filePath: r.filePath }));
 
     // If driver doesn't support returning (e.g. older SQLite without properly configured returning), we might fallback.
     // But Drizzle usually handles this.
@@ -279,10 +234,8 @@ export async function DELETE(req: NextRequest) {
       // Chech reference count for this ID
       // If 0 remaining, delete file
       let refCount = 0;
-      if (isAuthEnabled() && db) {
-        const [ref] = await db.select({ count: count() }).from(documents).where(eq(documents.id, row.id!));
-        refCount = ref?.count ?? 0;
-      }
+      const [ref] = await db.select({ count: count() }).from(documents).where(eq(documents.id, row.id!));
+      refCount = Number(ref?.count ?? 0);
 
       if (refCount === 0) {
         const filePath = path.join(SYNC_DIR, row.filePath);

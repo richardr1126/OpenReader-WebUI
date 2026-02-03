@@ -20,15 +20,6 @@ function loadEnvFiles() {
 
 loadEnvFiles();
 
-const authEnabled = Boolean(process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL);
-
-if (!authEnabled) {
-  // When auth is disabled, the app must not touch sqlite/postgres at all.
-  // That includes running migrations which can create/open DB files.
-  console.log('[migrate] Skipping (auth disabled). Missing BETTER_AUTH_SECRET and/or BETTER_AUTH_URL.');
-  process.exit(0);
-}
-
 const extraArgs = process.argv.slice(2);
 
 const hasConfigArg = extraArgs.includes('--config');

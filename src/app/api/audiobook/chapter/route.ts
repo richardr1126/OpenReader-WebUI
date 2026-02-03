@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createReadStream, existsSync } from 'fs';
 import { readdir, unlink } from 'fs/promises';
-import { join, resolve } from 'path';
-import { AUDIOBOOKS_V1_DIR, getUserAudiobookDir, UNCLAIMED_USER_ID, isAudiobooksV1Ready } from '@/lib/server/docstore';
+import { join } from 'path';
+import { AUDIOBOOKS_V1_DIR, getUserAudiobookDir, ensureAudiobooksV1Ready, isAudiobooksV1Ready } from '@/lib/server/docstore';
 import { findStoredChapterByIndex } from '@/lib/server/audiobook';
 import { db } from '@/db';
 import { audiobooks, audiobookChapters } from '@/db/schema';
-import { and, eq, or } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { requireAuthContext } from '@/lib/server/auth';
+import { ensureDbIndexed } from '@/lib/server/db-indexing';
+import { applyOpenReaderTestNamespacePath, getOpenReaderTestNamespace, getUnclaimedUserIdForNamespace } from '@/lib/server/test-namespace';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,27 +19,14 @@ export const dynamic = 'force-dynamic';
  * When auth is enabled, returns the user-specific directory.
  */
 function getAudiobooksRootDir(request: NextRequest, userId: string | null, authEnabled: boolean): string {
-  const raw = request.headers.get('x-openreader-test-namespace')?.trim();
-  
-  const getTestNamespacePath = (baseDir: string): string => {
-    if (!raw) return baseDir;
-    const safe = raw.replace(/[^a-zA-Z0-9._-]/g, '');
-    if (!safe || safe === '.' || safe === '..' || safe.includes('..')) {
-      return baseDir;
-    }
-    const resolved = resolve(baseDir, safe);
-    if (!resolved.startsWith(resolve(baseDir) + '/')) {
-      return baseDir;
-    }
-    return resolved;
-  };
+  const namespace = getOpenReaderTestNamespace(request.headers);
 
   if (!authEnabled || !userId) {
-    return getTestNamespacePath(AUDIOBOOKS_V1_DIR);
+    return applyOpenReaderTestNamespacePath(AUDIOBOOKS_V1_DIR, namespace);
   }
 
   const userDir = getUserAudiobookDir(userId);
-  return getTestNamespacePath(userDir);
+  return applyOpenReaderTestNamespacePath(userDir, namespace);
 }
 
 export async function GET(request: NextRequest) {
@@ -60,6 +49,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    await ensureAudiobooksV1Ready();
     if (!(await isAudiobooksV1Ready())) {
       return NextResponse.json(
         { error: 'Audiobooks storage is not migrated; run /api/migrations/v1 first.' },
@@ -70,30 +60,23 @@ export async function GET(request: NextRequest) {
     const ctxOrRes = await requireAuthContext(request);
     if (ctxOrRes instanceof Response) return ctxOrRes;
     const { userId, authEnabled } = ctxOrRes;
+    const testNamespace = getOpenReaderTestNamespace(request.headers);
+    const unclaimedUserId = getUnclaimedUserIdForNamespace(testNamespace);
+    const storageUserId = userId ?? unclaimedUserId;
+    const allowedUserIds = authEnabled ? [storageUserId, unclaimedUserId] : [unclaimedUserId];
+
+    await ensureDbIndexed();
 
     // Verify ownership with composite PK - allow access to user's own OR unclaimed audiobooks
-    if (authEnabled && db && userId) {
-      const [existingBook] = await db.select().from(audiobooks).where(
-        and(
-          eq(audiobooks.id, bookId),
-          or(eq(audiobooks.userId, userId), eq(audiobooks.userId, UNCLAIMED_USER_ID))
-        )
-      );
-      if (!existingBook) {
-        return NextResponse.json({ error: 'Book not found' }, { status: 404 });
-      }
+    const [existingBook] = await db
+      .select({ userId: audiobooks.userId })
+      .from(audiobooks)
+      .where(and(eq(audiobooks.id, bookId), inArray(audiobooks.userId, allowedUserIds)));
+    if (!existingBook) {
+      return NextResponse.json({ error: 'Book not found' }, { status: 404 });
     }
 
-    // Get the audiobook directory - check user's directory first, then unclaimed
-    let intermediateDir = join(getAudiobooksRootDir(request, userId, authEnabled), `${bookId}-audiobook`);
-    
-    // If not found in user's directory and auth is enabled, check unclaimed directory
-    if (!existsSync(intermediateDir) && authEnabled && userId) {
-      const unclaimedDir = join(getAudiobooksRootDir(request, UNCLAIMED_USER_ID, authEnabled), `${bookId}-audiobook`);
-      if (existsSync(unclaimedDir)) {
-        intermediateDir = unclaimedDir;
-      }
-    }
+    const intermediateDir = join(getAudiobooksRootDir(request, existingBook.userId, authEnabled), `${bookId}-audiobook`);
 
     const chapter = await findStoredChapterByIndex(intermediateDir, chapterIndex, request.signal);
     if (!chapter || !existsSync(chapter.filePath)) {
@@ -160,6 +143,7 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
+    await ensureAudiobooksV1Ready();
     if (!(await isAudiobooksV1Ready())) {
       return NextResponse.json(
         { error: 'Audiobooks storage is not migrated; run /api/migrations/v1 first.' },
@@ -170,27 +154,30 @@ export async function DELETE(request: NextRequest) {
     const ctxOrRes = await requireAuthContext(request);
     if (ctxOrRes instanceof Response) return ctxOrRes;
     const { userId, authEnabled } = ctxOrRes;
+    const testNamespace = getOpenReaderTestNamespace(request.headers);
+    const storageUserId = userId ?? getUnclaimedUserIdForNamespace(testNamespace);
+
+    await ensureDbIndexed();
 
     // Verify ownership and delete from DB with composite PK
-    if (authEnabled && db && userId) {
-      const [existingBook] = await db.select().from(audiobooks).where(
-        and(eq(audiobooks.id, bookId), eq(audiobooks.userId, userId))
-      );
-      if (!existingBook) {
-        return NextResponse.json({ error: 'Book not found' }, { status: 404 });
-      }
-
-      // Delete from DB
-      await db.delete(audiobookChapters).where(
-        and(
-          eq(audiobookChapters.bookId, bookId),
-          eq(audiobookChapters.userId, userId),
-          eq(audiobookChapters.chapterIndex, chapterIndex)
-        ),
-      );
+    const [existingBook] = await db
+      .select({ userId: audiobooks.userId })
+      .from(audiobooks)
+      .where(and(eq(audiobooks.id, bookId), eq(audiobooks.userId, storageUserId)));
+    if (!existingBook) {
+      return NextResponse.json({ error: 'Book not found' }, { status: 404 });
     }
 
-    const intermediateDir = join(getAudiobooksRootDir(request, userId, authEnabled), `${bookId}-audiobook`);
+    // Delete from DB
+    await db.delete(audiobookChapters).where(
+      and(
+        eq(audiobookChapters.bookId, bookId),
+        eq(audiobookChapters.userId, storageUserId),
+        eq(audiobookChapters.chapterIndex, chapterIndex),
+      ),
+    );
+
+    const intermediateDir = join(getAudiobooksRootDir(request, storageUserId, authEnabled), `${bookId}-audiobook`);
     const chapterPrefix = `${String(chapterIndex + 1).padStart(4, '0')}__`;
     const files = await readdir(intermediateDir).catch(() => []);
     for (const file of files) {

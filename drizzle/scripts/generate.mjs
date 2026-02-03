@@ -20,18 +20,10 @@ function loadEnvFiles() {
 
 loadEnvFiles();
 
-const authEnabled = Boolean(process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL);
-
-if (!authEnabled) {
-  // When auth is disabled, the app must not touch sqlite/postgres at all.
-  console.log('[generate] Skipping (auth disabled). Missing BETTER_AUTH_SECRET and/or BETTER_AUTH_URL.');
-  process.exit(0);
-}
-
-if (!process.env.POSTGRES_URL) {
-  console.error('[generate] POSTGRES_URL is required to generate postgres migrations.');
-  process.exit(1);
-}
+// if (!process.env.POSTGRES_URL) {
+//   console.error('[generate] POSTGRES_URL is required to generate postgres migrations.');
+//   process.exit(1);
+// }
 
 const extraArgs = process.argv.slice(2);
 

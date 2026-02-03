@@ -3,9 +3,11 @@ import * as dotenv from 'dotenv';
 
 dotenv.config();
 
-const url = process.env.POSTGRES_URL;
+let url = process.env.POSTGRES_URL;
 if (!url) {
-  throw new Error('POSTGRES_URL is required for drizzle.config.pg.ts');
+  //throw new Error('POSTGRES_URL is required for drizzle.config.pg.ts');
+  console.warn('[drizzle.config.pg.ts] POSTGRES_URL is not set; using a placeholder URL.');
+  url = 'postgresql://placeholder:placeholder@localhost:5432/placeholder';
 }
 
 export default {

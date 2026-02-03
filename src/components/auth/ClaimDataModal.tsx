@@ -25,9 +25,7 @@ export default function ClaimDataModal() {
 
     try {
       const res = await fetch('/api/user/claim', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'scan' })
+        method: 'GET',
       });
       if (res.ok) {
         const data = await res.json();
@@ -52,8 +50,6 @@ export default function ClaimDataModal() {
     try {
       const res = await fetch('/api/user/claim', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'claim' })
       });
       if (res.ok) {
         const data = await res.json();

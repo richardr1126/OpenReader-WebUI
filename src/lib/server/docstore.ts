@@ -8,13 +8,13 @@ import { decodeChapterTitleTag, encodeChapterFileName, encodeChapterTitleTag, ff
 export const DOCSTORE_DIR = path.join(process.cwd(), 'docstore');
 export const DOCUMENTS_V1_DIR = path.join(DOCSTORE_DIR, 'documents_v1');
 export const AUDIOBOOKS_V1_DIR = path.join(DOCSTORE_DIR, 'audiobooks_v1');
-export const AUDIOBOOKS_USERS_DIR = path.join(DOCSTORE_DIR, 'audiobooks_users');
+export const AUDIOBOOKS_USERS_DIR = path.join(DOCSTORE_DIR, 'audiobooks_users_v1');
 
 export const UNCLAIMED_USER_ID = 'unclaimed';
 
 /**
  * Get the audiobook directory for a specific user when auth is enabled.
- * Returns path like: docstore/audiobooks_users/{userId}
+ * Returns path like: docstore/audiobooks_users_v1/{userId}
  */
 export function getUserAudiobookDir(userId: string): string {
   // Sanitize userId to prevent path traversal
@@ -27,7 +27,7 @@ export function getUserAudiobookDir(userId: string): string {
 
 /**
  * Get the unclaimed audiobooks directory for pre-auth content.
- * Returns path like: docstore/audiobooks_users/unclaimed
+ * Returns path like: docstore/audiobooks_users_v1/unclaimed
  */
 export function getUnclaimedAudiobookDir(): string {
   return path.join(AUDIOBOOKS_USERS_DIR, UNCLAIMED_USER_ID);
@@ -36,7 +36,7 @@ export function getUnclaimedAudiobookDir(): string {
 /**
  * Get the full path to a specific audiobook directory.
  * - When auth is disabled: docstore/audiobooks_v1/{bookId}-audiobook
- * - When auth is enabled: docstore/audiobooks_users/{userId}/{bookId}-audiobook
+ * - When auth is enabled: docstore/audiobooks_users_v1/{userId}/{bookId}-audiobook
  */
 export function getAudiobookPath(bookId: string, userId: string | null, authEnabled: boolean): string {
   if (!authEnabled || !userId) {
@@ -218,50 +218,6 @@ export type FSDocument = {
   lastModified: number;
   filePath: string;
 };
-
-export async function scanDocumentsFS(): Promise<FSDocument[]> {
-  if (!existsSync(DOCUMENTS_V1_DIR)) return [];
-
-  const results: FSDocument[] = [];
-  let files: string[] = [];
-  try {
-    files = await readdir(DOCUMENTS_V1_DIR);
-  } catch {
-    return [];
-  }
-
-  for (const file of files) {
-    // Expected format: id__filename or id.ext (legacy fallback?)
-    // Actually current format is id__encodedName
-    const match = /^([a-f0-9]{64})__(.+)$/i.exec(file);
-    if (!match) continue;
-
-    const id = match[1];
-    const encodedName = match[2];
-    const name = decodeURIComponent(encodedName);
-    const ext = path.extname(name).toLowerCase().replace('.', '');
-
-    // Validate file exists and get stats
-    try {
-      const filePath = path.join(DOCUMENTS_V1_DIR, file);
-      const stats = await stat(filePath);
-      if (!stats.isFile()) continue;
-
-      results.push({
-        id,
-        name,
-        type: ext,
-        size: stats.size,
-        lastModified: Math.floor(stats.mtimeMs),
-        filePath: file,
-      });
-    } catch {
-      continue;
-    }
-  }
-
-  return results;
-}
 
 export async function ensureDocumentsV1Ready(): Promise<boolean> {
   await mkdir(DOCSTORE_DIR, { recursive: true });

@@ -146,8 +146,6 @@ export class RateLimiter {
     }
 
     try {
-      if (!db) throw new Error("DB not initialized");
-
       const updatedAt = this.getUpdatedAtValue() as unknown as UserTtsCharsUpdatedAtValue;
 
       // Use a DB transaction to avoid partial increments across buckets and to avoid
@@ -254,13 +252,6 @@ export class RateLimiter {
     }
 
     const bucketResults: Array<{ currentCount: number; limit: number }> = [];
-    if (!db) {
-      const effective = pickEffectiveResult([]);
-      return {
-        ...effective,
-        resetTime: this.getResetTime(),
-      };
-    }
 
     for (const bucket of buckets) {
       const result = await safeDb().select({ charCount: userTtsChars.charCount })
@@ -288,8 +279,6 @@ export class RateLimiter {
    */
   async transferAnonymousUsage(anonymousUserId: string, authenticatedUserId: string): Promise<void> {
     if (!isAuthEnabled()) return;
-
-    if (!db) return;
 
     const today = new Date().toISOString().split('T')[0];
     const dateValue = today as unknown as UserTtsCharsDateValue;
@@ -332,7 +321,6 @@ export class RateLimiter {
     const cutoffDateStr = cutoffDate.toISOString().split('T')[0];
     const cutoffDateValue = cutoffDateStr as unknown as UserTtsCharsDateValue;
 
-    if (!db) return;
     // Assuming string comparison works for YYYY-MM-DD
     await safeDb().delete(userTtsChars).where(lt(userTtsChars.date, cutoffDateValue));
   }

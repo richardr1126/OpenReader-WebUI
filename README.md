@@ -74,7 +74,8 @@ OpenReader WebUI is an open source text to speech document reader web app built 
   > - `API_BASE` should point to your TTS API server's base URL (if running Kokoro-FastAPI locally in Docker, use `http://host.docker.internal:8880/v1`).
   > - `BETTER_AUTH_URL` should be your externally-facing URL for this app (for example `https://reader.example.com` or `http://localhost:3003`).
   > - To enable auth, set **both** `BETTER_AUTH_URL` and `BETTER_AUTH_SECRET` generated with `openssl rand -base64 32`.
-  > - If you set `POSTGRES_URL`, the container will attempt to run migrations against it. Ensure the database is accessible.
+  > - OpenReader always uses a backend DB for server-side metadata. By default it uses SQLite at `/app/docstore/sqlite3.db` (persisted when `/app/docstore` is mounted).
+  > - If you set `POSTGRES_URL`, the container uses Postgres instead of SQLite and will run migrations against it on startup. Ensure the database is accessible.
 
   <details>
   <summary><strong>Docker environment variables</strong> (Click to expand)</summary>
@@ -85,7 +86,7 @@ OpenReader WebUI is an open source text to speech document reader web app built 
   | `API_KEY` | Default TTS API key | `none` or your provider key |
   | `BETTER_AUTH_URL` | Enables auth when set with `BETTER_AUTH_SECRET` | External URL for this app, e.g. `http://localhost:3003` or `https://reader.example.com` |
   | `BETTER_AUTH_SECRET` | Enables auth when set with `BETTER_AUTH_URL` | Generate with `openssl rand -base64 32` |
-  | `POSTGRES_URL` | Use Postgres for auth storage instead of SQLite | If set, startup migrations target Postgres |
+  | `POSTGRES_URL` | Use Postgres for server DB (metadata + auth tables) instead of SQLite | If set, startup migrations target Postgres |
   | `GITHUB_CLIENT_ID` | Optional GitHub OAuth sign-in | Requires `GITHUB_CLIENT_SECRET` |
   | `GITHUB_CLIENT_SECRET` | Optional GitHub OAuth sign-in | Requires `GITHUB_CLIENT_ID` |
 
@@ -241,7 +242,7 @@ Optionally required for different features:
 3. Configure the environment:
 
    ```bash
-   cp template.env .env
+   cp .env.example .env
    # Edit .env with your configuration settings
    ```
 
@@ -258,10 +259,10 @@ Optionally required for different features:
    >
    > Note: The base URL for the TTS API should be accessible and relative to the Next.js server
 
-4. Run auth DB migrations:
+4. Run DB migrations:
 
    - **Production / Docker**: Migrations run automatically on startup via `pnpm start`.
-   - **Development**: Run explicitly:
+   - **Development**: When using `pnpm dev`, it needs to be run explicitly:
 
       ```bash
       pnpm migrate

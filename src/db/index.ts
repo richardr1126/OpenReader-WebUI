@@ -5,7 +5,6 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 import * as schema from './schema';
-import { isAuthEnabled } from '@/lib/server/auth-config';
 
 // Singleton logic not strictly needed if Next.js handles module caching, but good for safety
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -13,11 +12,6 @@ let dbInstance: any = null;
 
 export function getDrizzleDB() {
   if (dbInstance) return dbInstance;
-
-  // If auth is NOT enabled, we do not want to connect to any database
-  if (!isAuthEnabled()) {
-    return null;
-  }
 
   if (process.env.POSTGRES_URL) {
     const pool = new Pool({

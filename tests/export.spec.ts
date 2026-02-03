@@ -1,5 +1,7 @@
 import { test, expect, Page } from '@playwright/test';
 import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import util from 'util';
 import { execFile } from 'child_process';
 import { setupTest, uploadAndDisplay } from './helpers';
@@ -39,19 +41,52 @@ async function waitForChaptersHeading(page: Page) {
   await expect(page.getByRole('heading', { name: 'Chapters' })).toBeVisible({ timeout: 60_000 });
 }
 
-async function downloadFullAudiobook(page: Page, timeoutMs = 60_000) {
+type DownloadedAudiobook = {
+  filePath: string;
+  suggestedFilename: string;
+  cleanup: () => Promise<void>;
+};
+
+async function downloadFullAudiobook(page: Page, timeoutMs = 60_000): Promise<DownloadedAudiobook> {
   const fullDownloadButton = page.getByRole('button', { name: /Full Download/i });
   await expect(fullDownloadButton).toBeVisible({ timeout: timeoutMs });
   const [download] = await Promise.all([
     page.waitForEvent('download', { timeout: timeoutMs }),
     fullDownloadButton.click(),
   ]);
-  const tempFilePath = `./tmp_download_${Date.now()}.mp3`;
-  await download.saveAs(tempFilePath);
-  expect(fs.existsSync(tempFilePath)).toBeTruthy();
-  const stats = fs.statSync(tempFilePath);
+  const failure = await download.failure();
+  expect(failure).toBeNull();
+
+  const suggestedFilename = download.suggestedFilename();
+  let createdTempDir: string | null = null;
+  let filePath = await download.path();
+
+  // Some environments/browsers may not expose a stable download path; fall back to saving
+  // into a temp directory outside the repo (and clean up after assertions).
+  if (!filePath) {
+    createdTempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'openreader-audiobook-'));
+    const name = suggestedFilename || `download_${Date.now()}.mp3`;
+    filePath = path.join(createdTempDir, name);
+    await download.saveAs(filePath);
+  }
+
+  expect(fs.existsSync(filePath)).toBeTruthy();
+  const stats = fs.statSync(filePath);
   expect(stats.size).toBeGreaterThan(0);
-  return tempFilePath;
+  return {
+    filePath,
+    suggestedFilename,
+    cleanup: async () => {
+      try {
+        await fs.promises.unlink(filePath);
+      } catch {
+        // ignore
+      }
+      if (createdTempDir) {
+        await fs.promises.rm(createdTempDir, { recursive: true, force: true });
+      }
+    },
+  };
 }
 
 async function getAudioDurationSeconds(filePath: string) {
@@ -72,6 +107,19 @@ async function expectChaptersBackendState(page: Page, bookId: string) {
   expect(res.ok()).toBeTruthy();
   const json = await res.json();
   return json;
+}
+
+async function withDownloadedFullAudiobook<T>(
+  page: Page,
+  fn: (args: { filePath: string; suggestedFilename: string }) => Promise<T>,
+  timeoutMs = 60_000
+): Promise<T> {
+  const dl = await downloadFullAudiobook(page, timeoutMs);
+  try {
+    return await fn({ filePath: dl.filePath, suggestedFilename: dl.suggestedFilename });
+  } finally {
+    await dl.cleanup();
+  }
 }
 
 /**
@@ -160,16 +208,16 @@ test('exports full MP3 audiobook for PDF using mocked 10s TTS sample', async ({ 
   // Trigger full download from the FRONTEND button and capture via Playwright's download API.
   // The button label can be "Full Download (MP3)" or "Full Download (M4B)" depending on
   // the server-side detected format, so match more loosely on the accessible name.
-  const downloadedPath = await downloadFullAudiobook(page);
-
-  // Use ffprobe (same toolchain as the server) to validate the combined audio duration.
-  // The TTS route is mocked to return a 10s sample.mp3 for each page, so with at least
-  // two chapters we should be close to ~20 seconds of audio.
-  const durationSeconds = await getAudioDurationSeconds(downloadedPath);
-  // Duration must be within a reasonable window around 20 seconds to allow
-  // for encoding variations and container overhead.
-  expect(durationSeconds).toBeGreaterThan(18);
-  expect(durationSeconds).toBeLessThan(22);
+  await withDownloadedFullAudiobook(page, async ({ filePath }) => {
+    // Use ffprobe (same toolchain as the server) to validate the combined audio duration.
+    // The TTS route is mocked to return a 10s sample.mp3 for each page, so with at least
+    // two chapters we should be close to ~20 seconds of audio.
+    const durationSeconds = await getAudioDurationSeconds(filePath);
+    // Duration must be within a reasonable window around 20 seconds to allow
+    // for encoding variations and container overhead.
+    expect(durationSeconds).toBeGreaterThan(18);
+    expect(durationSeconds).toBeLessThan(22);
+  });
 
   // Also check the chapter metadata API for consistency
   const json = await expectChaptersBackendState(page, bookId);
@@ -238,11 +286,11 @@ test('exports partial MP3 audiobook for EPUB using mocked 10s TTS sample', async
   await expect(chapterActionsButtons).toHaveCount(chapterCountAfterCancel, { timeout: 60_000 });
 
   // The Full Download button should still be available for the partially generated audiobook
-  const downloadedPath = await downloadFullAudiobook(page);
-
-  const durationSeconds = await getAudioDurationSeconds(downloadedPath);
-  expect(durationSeconds).toBeGreaterThan(25);
-  expect(durationSeconds).toBeLessThan(300);
+  await withDownloadedFullAudiobook(page, async ({ filePath }) => {
+    const durationSeconds = await getAudioDurationSeconds(filePath);
+    expect(durationSeconds).toBeGreaterThan(25);
+    expect(durationSeconds).toBeLessThan(300);
+  });
 
   // Backend should still reflect the same number of chapters as when we first
   // observed the stabilized post-cancellation state.
@@ -272,12 +320,12 @@ test('exports a single MP3 audiobook PDF page via chapters menu', async ({ page 
   await expect(chapterActionsButtons.first()).toBeVisible({ timeout: 90_000 });
 
   // Download via frontend button
-  const downloadedPath = await downloadFullAudiobook(page);
-
-  const durationSeconds = await getAudioDurationSeconds(downloadedPath);
-  // For EPUB we just assert a sane non-trivial duration; at least one 10s mocked chapter.
-  expect(durationSeconds).toBeGreaterThan(9);
-  expect(durationSeconds).toBeLessThan(300);
+  await withDownloadedFullAudiobook(page, async ({ filePath }) => {
+    const durationSeconds = await getAudioDurationSeconds(filePath);
+    // For EPUB we just assert a sane non-trivial duration; at least one 10s mocked chapter.
+    expect(durationSeconds).toBeGreaterThan(9);
+    expect(durationSeconds).toBeLessThan(300);
+  });
 
   await resetAudiobookIfPresent(page);
 });
@@ -372,12 +420,12 @@ test('regenerates a single MP3 audiobook PDF page and exports full audiobook', a
   await expect(chapterActionsButtons).toHaveCount(chapterCountBefore, { timeout: 20_000 });
 
   // Full Download should still work and produce a valid combined audiobook
-  const downloadedPath = await downloadFullAudiobook(page);
-
-  const durationSeconds = await getAudioDurationSeconds(downloadedPath);
-  // With two mocked 10s chapters we expect roughly 20s; allow a small window.
-  expect(durationSeconds).toBeGreaterThan(18);
-  expect(durationSeconds).toBeLessThan(22);
+  await withDownloadedFullAudiobook(page, async ({ filePath }) => {
+    const durationSeconds = await getAudioDurationSeconds(filePath);
+    // With two mocked 10s chapters we expect roughly 20s; allow a small window.
+    expect(durationSeconds).toBeGreaterThan(18);
+    expect(durationSeconds).toBeLessThan(22);
+  });
 
   // Backend should still report the same number of chapters and valid durations
   const json = await expectChaptersBackendState(page, bookId);
@@ -448,10 +496,11 @@ test('resumes audiobook when a chapter is missing and full download succeeds (PD
   // UI should also stop showing a missing placeholder after resume completes.
   await expect(page.getByText(/Missing •/)).toHaveCount(0, { timeout: 120_000 });
 
-  const downloadedPath = await downloadFullAudiobook(page);
-  const durationSeconds = await getAudioDurationSeconds(downloadedPath);
-  expect(durationSeconds).toBeGreaterThan(18);
-  expect(durationSeconds).toBeLessThan(22);
+  await withDownloadedFullAudiobook(page, async ({ filePath }) => {
+    const durationSeconds = await getAudioDurationSeconds(filePath);
+    expect(durationSeconds).toBeGreaterThan(18);
+    expect(durationSeconds).toBeLessThan(22);
+  });
 
   const jsonAfterResume = await expectChaptersBackendState(page, bookId);
   expect(jsonAfterResume.exists).toBe(true);
