@@ -1053,7 +1053,7 @@ export async function saveSummary(summary: Omit<SummaryRow, 'id'>): Promise<stri
 
 export async function getSummary(
   docId: string,
-  docType: 'pdf' | 'epub' | 'html',
+  _docType: 'pdf' | 'epub' | 'html',
   pageNumber?: number | null
 ): Promise<SummaryRow | null> {
   return withDB(async () => {

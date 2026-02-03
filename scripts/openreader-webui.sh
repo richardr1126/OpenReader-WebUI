@@ -10,14 +10,20 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
 # Load GROQ_API_KEY
-source "$SCRIPT_DIR/.env"
-export GROQ_API_KEY
+if [ -f "$SCRIPT_DIR/.env" ]; then
+    source "$SCRIPT_DIR/.env"
+    export GROQ_API_KEY
+else
+    echo "ERROR: $SCRIPT_DIR/.env file not found"
+    echo "Please create the .env file with your GROQ_API_KEY"
+    exit 1
+fi
 
 # Stop existing service
 fuser -k 3003/tcp 2>/dev/null || true
 
 # Wait for port to be released
-for i in {1..10}; do
+for _ in {1..10}; do
     if ! fuser 3003/tcp 2>/dev/null; then
         break
     fi

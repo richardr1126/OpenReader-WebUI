@@ -19,7 +19,7 @@ http://localhost:3003
 
 ## Architecture
 
-```
+```text
 OpenReader WebUI (:3003)
         ↓
 Built-in /api/groq-tts route

@@ -145,7 +145,7 @@ export async function POST(req: NextRequest) {
 
     console.log('Received summarize request:', { provider, modelId, mode, textLength: text?.length, isChunk, isFinalPass });
 
-    if (!text) {
+    if (!text || !text.trim()) {
       const errorBody: SummarizeError = {
         code: 'MISSING_TEXT',
         message: 'No text provided for summarization',

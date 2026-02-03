@@ -14,7 +14,7 @@ export type ConcurrencyResult<R> =
  *
  * @param items - Array of items to process
  * @param processor - Async function to process each item
- * @param maxConcurrent - Maximum number of concurrent processors
+ * @param maxConcurrent - Maximum number of concurrent processors (must be >= 1)
  * @param signal - Optional AbortSignal for cancellation
  * @returns Array of results in the same order as input items
  */
@@ -24,6 +24,11 @@ export async function processWithConcurrencyLimit<T, R>(
   maxConcurrent: number,
   signal?: AbortSignal
 ): Promise<ConcurrencyResult<R>[]> {
+  // Validate maxConcurrent to prevent crashes
+  if (maxConcurrent < 1 || !Number.isFinite(maxConcurrent)) {
+    throw new Error(`maxConcurrent must be >= 1, got ${maxConcurrent}`);
+  }
+
   const results: ConcurrencyResult<R>[] = new Array(items.length);
   let currentIndex = 0;
 
@@ -45,6 +50,13 @@ export async function processWithConcurrencyLimit<T, R>(
 
   const workerCount = Math.min(maxConcurrent, items.length);
   await Promise.all(Array(workerCount).fill(null).map(() => worker()));
+
+  // Fill any undefined slots (from aborted operations) with rejected results
+  for (let i = 0; i < items.length; i++) {
+    if (results[i] === undefined) {
+      results[i] = { status: 'rejected', reason: new Error('Operation aborted') };
+    }
+  }
 
   return results;
 }

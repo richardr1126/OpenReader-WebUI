@@ -17,6 +17,14 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json();
 
+    // Validate input text
+    if (!body.input || typeof body.input !== 'string' || !body.input.trim()) {
+      return NextResponse.json(
+        { error: 'Missing or empty input text' },
+        { status: 400 }
+      );
+    }
+
     // Set default model if not provided or not a canopylabs model
     let model = body.model || '';
     if (!model.startsWith('canopylabs/')) {
@@ -36,6 +44,10 @@ export async function POST(req: NextRequest) {
       response_format: responseFormat,
     };
 
+    // Create abort controller with 30-second timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
+
     const response = await fetch(`${GROQ_BASE}/audio/speech`, {
       method: 'POST',
       headers: {
@@ -43,12 +55,21 @@ export async function POST(req: NextRequest) {
         'Authorization': `Bearer ${apiKey}`,
       },
       body: JSON.stringify(groqBody),
+      signal: controller.signal,
     });
+
+    clearTimeout(timeoutId);
 
     if (!response.ok) {
       const errorText = await response.text();
+      console.error('Groq API error:', errorText);
+      // Return sanitized error message to avoid exposing internal details
+      const sanitizedError = response.status === 401 ? 'Invalid API key' :
+                            response.status === 429 ? 'Rate limit exceeded' :
+                            response.status >= 500 ? 'Groq service error' :
+                            'Failed to generate speech';
       return NextResponse.json(
-        { error: errorText },
+        { error: sanitizedError },
         { status: response.status }
       );
     }
@@ -64,8 +85,15 @@ export async function POST(req: NextRequest) {
     });
   } catch (error) {
     console.error('Groq TTS error:', error);
+    // Handle timeout specifically
+    if (error instanceof Error && error.name === 'AbortError') {
+      return NextResponse.json(
+        { error: 'Request timed out' },
+        { status: 504 }
+      );
+    }
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed to generate speech' },
+      { error: 'Failed to generate speech' },
       { status: 500 }
     );
   }

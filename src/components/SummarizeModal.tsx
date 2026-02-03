@@ -93,6 +93,10 @@ export function SummarizeModal({
   }, [isOpen]);
 
   const handleGenerate = async () => {
+    // Preserve previous state in case of error
+    const previousSummary = summary;
+    const previousSavedSummary = savedSummary;
+
     setIsGenerating(true);
     setError(null);
     setSummary('');
@@ -133,6 +137,9 @@ export function SummarizeModal({
     } catch (err) {
       console.error('Error generating summary:', err);
       setError(err instanceof Error ? err.message : 'Failed to generate summary');
+      // Restore previous summary on error
+      setSummary(previousSummary);
+      setSavedSummary(previousSavedSummary);
     } finally {
       setIsGenerating(false);
       setChunkProgress(null);

@@ -79,7 +79,8 @@ async function callSummarizeAPI(
   text: string,
   mode: SummarizeMode,
   options: SummarizeOptions,
-  flags?: { isChunk?: boolean; isFinalPass?: boolean }
+  flags?: { isChunk?: boolean; isFinalPass?: boolean },
+  maxLength?: number
 ): Promise<SummarizeResponse> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -92,7 +93,7 @@ async function callSummarizeAPI(
   const response = await fetch('/api/summarize', {
     method: 'POST',
     headers,
-    body: JSON.stringify({ text, mode, ...flags }),
+    body: JSON.stringify({ text, mode, maxLength, ...flags }),
   });
 
   const data = await response.json();
@@ -112,7 +113,7 @@ export async function generateSummary(
 
   // Direct summarization for small texts or non-whole-book modes
   if (mode !== 'whole_book' || !needsChunking(text, contextLimit)) {
-    return callSummarizeAPI(text, mode, options);
+    return callSummarizeAPI(text, mode, options, undefined, maxLength);
   }
 
   // Hierarchical summarization for large documents

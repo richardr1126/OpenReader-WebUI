@@ -17,6 +17,72 @@ type AudioBufferValue = TTSAudioBuffer;
 const TTS_CACHE_MAX_SIZE_BYTES = Number(process.env.TTS_CACHE_MAX_SIZE_BYTES || 256 * 1024 * 1024); // 256MB
 const TTS_CACHE_TTL_MS = Number(process.env.TTS_CACHE_TTL_MS || 1000 * 60 * 30); // 30 minutes
 
+// Default provider endpoints - these are the only allowed baseUrls in production
+// unless TTS_ALLOWED_BASE_URLS is configured
+const PROVIDER_DEFAULT_ENDPOINTS: Record<string, string> = {
+  openai: 'https://api.openai.com/v1',
+  groq: 'https://api.groq.com/openai/v1',
+  deepinfra: 'https://api.deepinfra.com/v1/openai',
+};
+
+// Parse allowed base URLs from environment variable (comma-separated)
+function getAllowedBaseUrls(): string[] {
+  const envUrls = process.env.TTS_ALLOWED_BASE_URLS;
+  if (!envUrls) return [];
+  return envUrls.split(',').map(url => url.trim()).filter(Boolean);
+}
+
+// Validate baseUrl against allowlist in production
+function validateBaseUrl(baseUrl: string, provider: string): string | null {
+  // Empty baseUrl is always allowed - will use provider defaults
+  if (!baseUrl) {
+    return null;
+  }
+
+  // In development, allow any baseUrl
+  if (process.env.NODE_ENV !== 'production') {
+    return baseUrl;
+  }
+
+  // Parse and normalize the URL
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(baseUrl);
+  } catch {
+    return null; // Invalid URL
+  }
+
+  // Only allow https in production
+  if (parsedUrl.protocol !== 'https:') {
+    return null;
+  }
+
+  const normalizedUrl = parsedUrl.origin + parsedUrl.pathname.replace(/\/$/, '');
+
+  // Check against provider defaults
+  const providerDefault = PROVIDER_DEFAULT_ENDPOINTS[provider];
+  if (providerDefault && normalizedUrl === providerDefault) {
+    return baseUrl;
+  }
+
+  // Check against configured allowlist
+  const allowedUrls = getAllowedBaseUrls();
+  for (const allowed of allowedUrls) {
+    try {
+      const allowedParsed = new URL(allowed);
+      const normalizedAllowed = allowedParsed.origin + allowedParsed.pathname.replace(/\/$/, '');
+      if (normalizedUrl === normalizedAllowed || normalizedUrl.startsWith(normalizedAllowed + '/')) {
+        return baseUrl;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  // URL not in allowlist - return null to use provider default
+  return null;
+}
+
 const ttsAudioCache = new LRUCache<string, AudioBufferValue>({
   maxSize: TTS_CACHE_MAX_SIZE_BYTES,
   sizeCalculation: (value) => value.byteLength,
@@ -240,7 +306,13 @@ export async function POST(req: NextRequest) {
 
     // Get API key and base URL based on provider
     let apiKey = req.headers.get('x-openai-key') || '';
-    let baseUrl = req.headers.get('x-openai-base-url') || '';
+    const requestedBaseUrl = req.headers.get('x-openai-base-url') || '';
+
+    // Validate and sanitize baseUrl - in production, only allow configured endpoints
+    const validatedBaseUrl = validateBaseUrl(requestedBaseUrl, provider);
+    if (requestedBaseUrl && !validatedBaseUrl && process.env.NODE_ENV === 'production') {
+      console.warn(`[TTS] Rejected untrusted baseUrl: ${requestedBaseUrl} for provider: ${provider}`);
+    }
 
     if (!apiKey) {
       switch (provider) {
@@ -256,6 +328,8 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Use validated baseUrl or fall back to provider defaults
+    let baseUrl = validatedBaseUrl || '';
     if (!baseUrl) {
       switch (provider) {
         case 'groq':
