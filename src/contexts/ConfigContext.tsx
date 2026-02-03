@@ -36,6 +36,12 @@ interface ConfigContextType {
   pdfWordHighlightEnabled: boolean;
   epubHighlightEnabled: boolean;
   epubWordHighlightEnabled: boolean;
+  // Summary/AI settings
+  summaryProvider: string;
+  summaryModel: string;
+  summaryApiKey: string;
+  summaryBaseUrl: string;
+  summaryContextLimit: number;
 }
 
 const ConfigContext = createContext<ConfigContextType | undefined>(undefined);
@@ -176,6 +182,11 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     pdfWordHighlightEnabled,
     epubHighlightEnabled,
     epubWordHighlightEnabled,
+    summaryProvider,
+    summaryModel,
+    summaryApiKey,
+    summaryBaseUrl,
+    summaryContextLimit,
   } = config || APP_CONFIG_DEFAULTS;
 
   /**
@@ -275,7 +286,12 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
       pdfHighlightEnabled,
       pdfWordHighlightEnabled,
       epubHighlightEnabled,
-      epubWordHighlightEnabled
+      epubWordHighlightEnabled,
+      summaryProvider,
+      summaryModel,
+      summaryApiKey,
+      summaryBaseUrl,
+      summaryContextLimit,
     }}>
       {children}
     </ConfigContext.Provider>

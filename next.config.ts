@@ -6,6 +6,9 @@ const nextConfig: NextConfig = {
       canvas: './empty-module.ts',
     },
   },
+  experimental: {
+    middlewareClientMaxBodySize: '100mb',
+  },
 };
 
 export default nextConfig;

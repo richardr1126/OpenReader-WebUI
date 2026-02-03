@@ -10,10 +10,14 @@
     "test": "playwright test"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.15",
+    "@ai-sdk/groq": "^3.0.10",
+    "@ai-sdk/openai": "^3.0.12",
     "@headlessui/react": "^2.2.9",
     "@types/howler": "^2.2.12",
     "@types/uuid": "^10.0.0",
     "@vercel/analytics": "^1.6.1",
+    "ai": "^6.0.39",
     "cmpstr": "^3.2.0",
     "compromise": "^14.14.5",
     "core-js": "^3.48.0",
@@ -50,6 +54,7 @@
     "tailwindcss": "^3.4.19",
     "typescript": "^5.9.3"
   },
+  "packageManager": "pnpm@10.13.1+sha512.37ebf1a5c7a30d5fabe0c5df44ee8da4c965ca0c5af3dbab28c3a1681b70a256218d05c81c9c0dcf767ef6b8551eb5b960042b9ed4300c59242336377e01cfad",
   "pnpm": {
     "overrides": {
       "lodash": "^4.17.23",

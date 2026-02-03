@@ -16,19 +16,24 @@ import { AudiobookExportModal } from '@/components/AudiobookExportModal';
 import { DownloadIcon } from '@/components/icons/Icons';
 import type { TTSAudiobookChapter } from '@/types/tts';
 import type { AudiobookGenerationSettings } from '@/types/client';
+import { SummarizeButton } from '@/components/SummarizeButton';
+import { SummarizeModal } from '@/components/SummarizeModal';
+import type { SummarizeMode } from '@/types/summary';
 import { resolveDocumentId } from '@/lib/dexie';
+import { processWithConcurrencyLimit } from '@/lib/concurrency';
 
 const isDev = process.env.NEXT_PUBLIC_NODE_ENV !== 'production' || process.env.NODE_ENV == null;
 
 export default function EPUBPage() {
   const { id } = useParams();
   const router = useRouter();
-  const { setCurrentDocument, currDocName, clearCurrDoc, createFullAudioBook: createEPUBAudioBook, regenerateChapter: regenerateEPUBChapter } = useEPUB();
+  const { setCurrentDocument, currDocName, clearCurrDoc, createFullAudioBook: createEPUBAudioBook, regenerateChapter: regenerateEPUBChapter, bookRef, renditionRef, extractPageText, currDocPages } = useEPUB();
   const { stop } = useTTS();
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isAudiobookModalOpen, setIsAudiobookModalOpen] = useState(false);
+  const [isSummarizeModalOpen, setIsSummarizeModalOpen] = useState(false);
   const [containerHeight, setContainerHeight] = useState<string>('auto');
   const [padPct, setPadPct] = useState<number>(100); // 0..100 (100 = full width, 0 = max padding)
   const [maxPadPx, setMaxPadPx] = useState<number>(0);
@@ -113,6 +118,53 @@ export default function EPUBPage() {
     return regenerateEPUBChapter(chapterIndex, bookId, settings.format, signal, settings);
   }, [regenerateEPUBChapter]);
 
+  const handleExtractTextForSummary = useCallback(async (mode: SummarizeMode): Promise<string> => {
+    const book = bookRef.current;
+    const rendition = renditionRef.current;
+
+    if (!book || !rendition) {
+      throw new Error('EPUB document not loaded');
+    }
+
+    if (mode === 'whole_book') {
+      // Extract text from all spine sections with concurrency limit to prevent memory exhaustion
+      const spineItems: { href: string }[] = [];
+      const spine = book.spine;
+
+      spine.each((item: { href?: string }) => {
+        const url = item.href || '';
+        if (url) {
+          spineItems.push({ href: url });
+        }
+      });
+
+      // Use concurrency limit of 3 to prevent memory spikes on large books
+      const results = await processWithConcurrencyLimit(
+        spineItems,
+        async (item) => {
+          try {
+            const section = await book.load(item.href) as Document;
+            return section.body?.textContent?.trim() || '';
+          } catch (err) {
+            console.warn('Failed to extract text from section:', item.href, err);
+            return '';
+          }
+        },
+        3 // Max concurrent extractions
+      );
+
+      const textParts = results
+        .filter((r): r is { status: 'fulfilled'; value: string } => r.status === 'fulfilled')
+        .map(r => r.value)
+        .filter(text => text);
+
+      return textParts.join('\n\n');
+    } else {
+      // Extract current page text
+      return extractPageText(book, rendition, false);
+    }
+  }, [bookRef, renditionRef, extractPageText]);
+
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen">
@@ -157,6 +209,7 @@ export default function EPUBPage() {
               min={0}
               max={100}
             />
+            <SummarizeButton onClick={() => setIsSummarizeModalOpen(true)} disabled={!bookRef.current} />
             {isDev && (
               <button
                 onClick={() => setIsAudiobookModalOpen(true)}
@@ -198,6 +251,14 @@ export default function EPUBPage() {
           onRegenerateChapter={handleRegenerateChapter}
         />
       )}
+      <SummarizeModal
+        isOpen={isSummarizeModalOpen}
+        setIsOpen={setIsSummarizeModalOpen}
+        docId={id as string}
+        docType="epub"
+        totalPages={currDocPages}
+        onExtractText={handleExtractTextForSummary}
+      />
       <TTSPlayer />
       <DocumentSettings epub isOpen={isSettingsOpen} setIsOpen={setIsSettingsOpen} />
     </>

@@ -19,6 +19,10 @@ const ORPHEUS_VOICES = ['tara', 'leah', 'jess', 'leo', 'dan', 'mia', 'zac'];
 
 const SESAME_VOICES = ['conversational_a', 'conversational_b', 'read_speech_a', 'read_speech_b', 'read_speech_c', 'read_speech_d', 'none'];
 
+// Groq Orpheus TTS voices
+const GROQ_ORPHEUS_ENGLISH_VOICES = ['autumn', 'diana', 'hannah', 'austin', 'daniel', 'troy'];
+const GROQ_ORPHEUS_ARABIC_VOICES = ['fahad', 'sultan', 'lulwa', 'noura'];
+
 function getDefaultVoices(provider: string, model: string): string[] {
   // For OpenAI provider
   if (provider === 'openai') {
@@ -58,7 +62,15 @@ function getDefaultVoices(provider: string, model: string): string[] {
     // Default Deepinfra voices
     return CUSTOM_OPENAI_VOICES;
   }
-  
+
+  // For Groq provider
+  if (provider === 'groq') {
+    if (model === 'canopylabs/orpheus-arabic-saudi') {
+      return GROQ_ORPHEUS_ARABIC_VOICES;
+    }
+    return GROQ_ORPHEUS_ENGLISH_VOICES;
+  }
+
   // Default fallback
   return OPENAI_VOICES;
 }
@@ -100,6 +112,11 @@ export async function GET(req: NextRequest) {
 
     // For OpenAI provider, use default voices (no API call needed)
     if (provider === 'openai') {
+      return NextResponse.json({ voices: getDefaultVoices(provider, model) });
+    }
+
+    // For Groq provider, use default voices
+    if (provider === 'groq') {
       return NextResponse.json({ voices: getDefaultVoices(provider, model) });
     }
 

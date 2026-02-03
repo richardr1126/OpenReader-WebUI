@@ -1,6 +1,6 @@
 import { spawn } from 'child_process';
 import path from 'path';
-import { readdir } from 'fs/promises';
+import { readdir, readFile } from 'fs/promises';
 
 export type StoredChapter = {
   index: number;
@@ -166,11 +166,24 @@ export async function listStoredChapters(dir: string, signal?: AbortSignal): Pro
 
     const filePath = path.join(dir, file);
 
+    // Try reading cached duration first to avoid ffprobe calls
+    const durationPath = path.join(dir, `${decodedFromName.index}.duration`);
     let durationSec: number | undefined;
     try {
-      const probe = await ffprobeAudio(filePath, signal);
-      durationSec = probe.durationSec;
+      const cached = await readFile(durationPath, 'utf8');
+      const parsed = parseFloat(cached);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        durationSec = parsed;
+      }
     } catch {}
+
+    // Only ffprobe if no cached duration
+    if (durationSec === undefined) {
+      try {
+        const probe = await ffprobeAudio(filePath, signal);
+        durationSec = probe.durationSec;
+      } catch {}
+    }
 
     results.push({
       index: decodedFromName.index,
@@ -208,11 +221,25 @@ export async function findStoredChapterByIndex(
   if (!decoded) return null;
 
   const filePath = path.join(dir, candidate);
+
+  // Try reading cached duration first
+  const durationPath = path.join(dir, `${decoded.index}.duration`);
   let durationSec: number | undefined;
   try {
-    const probe = await ffprobeAudio(filePath, signal);
-    durationSec = probe.durationSec;
+    const cached = await readFile(durationPath, 'utf8');
+    const parsed = parseFloat(cached);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      durationSec = parsed;
+    }
   } catch {}
+
+  // Only ffprobe if no cached duration
+  if (durationSec === undefined) {
+    try {
+      const probe = await ffprobeAudio(filePath, signal);
+      durationSec = probe.durationSec;
+    } catch {}
+  }
 
   return {
     index: decoded.index,

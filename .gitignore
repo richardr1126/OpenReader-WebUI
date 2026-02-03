@@ -44,6 +44,9 @@ next-env.d.ts
 # documents
 /docstore
 
+# auth token storage
+/.data
+
 # Playwright
 node_modules/
 /tests/results/

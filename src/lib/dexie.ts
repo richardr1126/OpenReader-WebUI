@@ -9,6 +9,7 @@ import {
   BaseDocument,
   DocumentListDocument,
 } from '@/types/documents';
+import type { SummaryRow } from '@/types/summary';
 import { sha256HexFromBytes, sha256HexFromString } from '@/lib/sha256';
 
 const DB_NAME = 'openreader-db';
@@ -21,6 +22,7 @@ const HTML_TABLE = 'html-documents' as const;
 const CONFIG_TABLE = 'config' as const;
 const APP_CONFIG_TABLE = 'app-config' as const;
 const LAST_LOCATION_TABLE = 'last-locations' as const;
+const SUMMARIES_TABLE = 'summaries' as const;
 const DOCUMENT_ID_MAP_TABLE = 'document-id-map' as const;
 
 export interface LastLocationRow {
@@ -46,6 +48,7 @@ type OpenReaderDB = Dexie & {
   [CONFIG_TABLE]: EntityTable<ConfigRow, 'key'>;
   [APP_CONFIG_TABLE]: EntityTable<AppConfigRow, 'id'>;
   [LAST_LOCATION_TABLE]: EntityTable<LastLocationRow, 'docId'>;
+  [SUMMARIES_TABLE]: EntityTable<SummaryRow, 'id'>;
   [DOCUMENT_ID_MAP_TABLE]: EntityTable<DocumentIdMapRow, 'oldId'>;
 };
 
@@ -191,14 +194,16 @@ function buildAppConfigFromRaw(raw: RawConfigMap): AppConfigRow {
   return config;
 }
 
-// Version 6: add document-id-map table; keep v5 upgrade to migrate scattered config keys
-// and drop the legacy config table in a single upgrade step.
+// Version 6: add summaries table for AI-generated document summaries and document-id-map table.
+// Previous version 5 introduced app-config and last-locations tables, migrated scattered config keys,
+// and dropped the legacy config table.
 db.version(DB_VERSION).stores({
   [PDF_TABLE]: 'id, type, name, lastModified, size, folderId',
   [EPUB_TABLE]: 'id, type, name, lastModified, size, folderId',
   [HTML_TABLE]: 'id, type, name, lastModified, size, folderId',
   [APP_CONFIG_TABLE]: 'id',
   [LAST_LOCATION_TABLE]: 'docId',
+  [SUMMARIES_TABLE]: 'id, docId, [docId+pageNumber]',
   [DOCUMENT_ID_MAP_TABLE]: 'oldId, id, createdAt',
   // `null` here means: drop the old 'config' table after upgrade runs,
   // but Dexie still lets us read it inside the upgrade transaction.
@@ -324,6 +329,7 @@ async function applyDocumentIdMapping(oldId: string, newId: string): Promise<voi
         db[LAST_LOCATION_TABLE],
         db[APP_CONFIG_TABLE],
         db[DOCUMENT_ID_MAP_TABLE],
+        db[SUMMARIES_TABLE],
       ],
       async () => {
         await recordDocumentIdMapping(oldId, nextId);
@@ -400,6 +406,24 @@ async function applyDocumentIdMapping(oldId: string, newId: string): Promise<voi
           if (mapped !== appConfig.documentListState) {
             await db[APP_CONFIG_TABLE].update('singleton', { documentListState: mapped });
           }
+        }
+
+        // Remap summaries to use the new document ID
+        const oldSummaries = await db[SUMMARIES_TABLE].where('docId').equals(oldId).toArray();
+        for (const summary of oldSummaries) {
+          const newSummaryId = `${nextId}-${summary.scope}-${summary.pageNumber ?? 'all'}`;
+          // Check if a summary with the new ID already exists
+          const existing = await db[SUMMARIES_TABLE].get(newSummaryId);
+          if (!existing) {
+            // Create new summary with updated docId and id
+            await db[SUMMARIES_TABLE].put({
+              ...summary,
+              id: newSummaryId,
+              docId: nextId,
+            });
+          }
+          // Delete the old summary
+          await db[SUMMARIES_TABLE].delete(summary.id);
         }
       },
     );
@@ -1008,4 +1032,54 @@ export async function importDocumentsFromLibrary(
   }
 }
 
+// Summary helpers (for AI-generated document summaries)
 
+export async function saveSummary(summary: Omit<SummaryRow, 'id'>): Promise<string> {
+  return withDB(async () => {
+    const id = `${summary.docId}-${summary.scope}-${summary.pageNumber ?? 'all'}`;
+    const now = Date.now();
+    const existing = await db[SUMMARIES_TABLE].get(id);
+    const row: SummaryRow = {
+      ...summary,
+      id,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    };
+    await db[SUMMARIES_TABLE].put(row);
+    console.log('Saved summary:', id);
+    return id;
+  });
+}
+
+export async function getSummary(
+  docId: string,
+  _docType: 'pdf' | 'epub' | 'html',
+  pageNumber?: number | null
+): Promise<SummaryRow | null> {
+  return withDB(async () => {
+    const scope = pageNumber != null ? 'page' : 'book';
+    const id = `${docId}-${scope}-${pageNumber ?? 'all'}`;
+    const row = await db[SUMMARIES_TABLE].get(id);
+    return row ?? null;
+  });
+}
+
+export async function getSummariesForDocument(docId: string): Promise<SummaryRow[]> {
+  return withDB(async () => {
+    return db[SUMMARIES_TABLE].where('docId').equals(docId).toArray();
+  });
+}
+
+export async function deleteSummary(id: string): Promise<void> {
+  await withDB(async () => {
+    await db[SUMMARIES_TABLE].delete(id);
+    console.log('Deleted summary:', id);
+  });
+}
+
+export async function deleteSummariesForDocument(docId: string): Promise<void> {
+  await withDB(async () => {
+    await db[SUMMARIES_TABLE].where('docId').equals(docId).delete();
+    console.log('Deleted all summaries for document:', docId);
+  });
+}
