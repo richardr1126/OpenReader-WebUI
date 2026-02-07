@@ -5,6 +5,7 @@ Scripts for running OpenReader WebUI with Groq Orpheus TTS.
 ## Files
 
 - `openreader-webui.sh` - Main startup script
+- `groq-tts-proxy.py` - FastAPI proxy that adds `/v1/audio/voices` endpoint for Groq
 - `.env` - Environment variables (contains `GROQ_API_KEY`)
 
 ## Usage
@@ -22,15 +23,10 @@ http://localhost:3003
 ```text
 OpenReader WebUI (:3003)
         ↓
-Built-in /api/groq-tts route
+Groq TTS Proxy (localhost:8880)
         ↓
 Groq API (canopylabs/orpheus-v1-english)
 ```
-
-## API Endpoints
-
-- `POST /api/groq-tts` - Generate speech from text
-- `GET /api/groq-tts/voices` - List available voices
 
 ## Available Voices
 

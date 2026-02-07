@@ -1,7 +1,7 @@
 #!/bin/bash
 # OpenReader WebUI - TTS Document Reader
 # URL: http://localhost:3003
-# Uses Groq Orpheus TTS via built-in /api/groq-tts route
+# Uses Groq Orpheus TTS via local proxy
 
 set -e
 
@@ -19,7 +19,8 @@ else
     exit 1
 fi
 
-# Stop existing service
+# Stop existing services
+fuser -k 8880/tcp 2>/dev/null || true
 fuser -k 3003/tcp 2>/dev/null || true
 
 # Wait for port to be released
@@ -37,16 +38,31 @@ if fuser 3003/tcp 2>/dev/null; then
     exit 1
 fi
 
+# Start Groq TTS proxy (adds /voices endpoint for OpenReader)
+nohup python3 "$SCRIPT_DIR/groq-tts-proxy.py" > /tmp/groq-proxy.log 2>&1 &
+disown
+sleep 2
+
+# Verify proxy is running
+if ! curl -s http://localhost:8880/ > /dev/null; then
+    echo "ERROR: Groq TTS proxy failed to start"
+    exit 1
+fi
+
 # Build and run OpenReader WebUI
 cd "$PROJECT_DIR"
 pnpm install
 pnpm build
+
+# Set environment variables for the app
+export API_KEY=none
+export API_BASE=http://localhost:8880/v1
 
 # Start the app
 nohup pnpm start > /tmp/openreader.log 2>&1 &
 disown
 
 echo "OpenReader WebUI started at http://localhost:3003"
-echo "Groq TTS available at /api/groq-tts"
+echo "Groq TTS proxy running on port 8880"
 echo "Available voices: troy, austin, daniel, autumn, diana, hannah"
-echo "Logs: /tmp/openreader.log"
+echo "Logs: /tmp/openreader.log and /tmp/groq-proxy.log"
