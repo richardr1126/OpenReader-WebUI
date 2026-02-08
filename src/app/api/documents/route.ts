@@ -1,38 +1,19 @@
 import { createHash } from 'crypto';
-import { readFile, stat, unlink, utimes, writeFile } from 'fs/promises';
+import { mkdir, readFile, stat, unlink, writeFile } from 'fs/promises';
+import { existsSync } from 'fs';
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
-import { DOCUMENTS_V1_DIR, UNCLAIMED_USER_ID, ensureDocumentsV1Ready, isDocumentsV1Ready } from '@/lib/server/docstore';
+import { DOCUMENTS_V1_DIR, ensureDocumentsV1Ready, isDocumentsV1Ready } from '@/lib/server/docstore';
 import type { BaseDocument, DocumentType, SyncedDocument } from '@/types/documents';
 import { db } from '@/db';
 import { documents } from '@/db/schema';
 import { eq, and, inArray, count } from 'drizzle-orm';
 import { requireAuthContext } from '@/lib/server/auth';
 import { ensureDbIndexed } from '@/lib/server/db-indexing';
+import { isEnoent, toDocumentTypeFromName, trySetFileMtime } from '@/lib/server/documents-utils';
+import { applyOpenReaderTestNamespacePath, getOpenReaderTestNamespace, getUnclaimedUserIdForNamespace } from '@/lib/server/test-namespace';
 
 export const dynamic = 'force-dynamic';
-
-const SYNC_DIR = DOCUMENTS_V1_DIR;
-
-async function trySetFileMtime(filePath: string, lastModifiedMs: number): Promise<void> {
-  if (!Number.isFinite(lastModifiedMs)) return;
-  const mtime = new Date(lastModifiedMs);
-  if (Number.isNaN(mtime.getTime())) return;
-
-  try {
-    await utimes(filePath, mtime, mtime);
-  } catch (error) {
-    console.warn('Failed to set document mtime:', filePath, error);
-  }
-}
-
-function toDocumentTypeFromName(name: string): DocumentType {
-  const ext = path.extname(name).toLowerCase();
-  if (ext === '.pdf') return 'pdf';
-  if (ext === '.epub') return 'epub';
-  if (ext === '.docx') return 'docx';
-  return 'html';
-}
 
 export async function POST(req: NextRequest) {
   try {
@@ -44,9 +25,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const testNamespace = getOpenReaderTestNamespace(req.headers);
+    const syncDir = applyOpenReaderTestNamespacePath(DOCUMENTS_V1_DIR, testNamespace);
+    const unclaimedUserId = getUnclaimedUserIdForNamespace(testNamespace);
+    await mkdir(syncDir, { recursive: true });
+
     const ctxOrRes = await requireAuthContext(req);
     if (ctxOrRes instanceof Response) return ctxOrRes;
-    const storageUserId = ctxOrRes.userId ?? UNCLAIMED_USER_ID;
+    const storageUserId = ctxOrRes.userId ?? unclaimedUserId;
 
     const data = await req.json();
     const documentsData = data.documents as SyncedDocument[];
@@ -63,7 +49,7 @@ export async function POST(req: NextRequest) {
       const safeName = baseName.replaceAll('\u0000', '').slice(0, 240) || `${id}.${doc.type}`;
 
       const targetFileName = `${id}__${encodeURIComponent(safeName)}`;
-      const targetPath = path.join(SYNC_DIR, targetFileName);
+      const targetPath = path.join(syncDir, targetFileName);
 
       // Write file if not exists
       try {
@@ -110,8 +96,13 @@ export async function GET(req: NextRequest) {
 
     const ctxOrRes = await requireAuthContext(req);
     if (ctxOrRes instanceof Response) return ctxOrRes;
-    const storageUserId = ctxOrRes.userId ?? UNCLAIMED_USER_ID;
-    const allowedUserIds = ctxOrRes.authEnabled ? [storageUserId, UNCLAIMED_USER_ID] : [UNCLAIMED_USER_ID];
+
+    const testNamespace = getOpenReaderTestNamespace(req.headers);
+    const syncDir = applyOpenReaderTestNamespacePath(DOCUMENTS_V1_DIR, testNamespace);
+    const unclaimedUserId = getUnclaimedUserIdForNamespace(testNamespace);
+
+    const storageUserId = ctxOrRes.userId ?? unclaimedUserId;
+    const allowedUserIds = ctxOrRes.authEnabled ? [storageUserId, unclaimedUserId] : [unclaimedUserId];
 
     await ensureDbIndexed();
 
@@ -128,14 +119,14 @@ export async function GET(req: NextRequest) {
     const targetIds = idsParam ? idsParam.split(',').filter(Boolean) : null;
 
     // Query database for documents the user is allowed to access
-    let allowedDocs: { id: string; name: string; type: string; size: number; lastModified: number; filePath: string }[] = [];
+    let allowedDocs: { id: string; userId: string; name: string; type: string; size: number; lastModified: number; filePath: string }[] = [];
 
     const conditions = [
       inArray(documents.userId, allowedUserIds),
       ...(targetIds ? [inArray(documents.id, targetIds)] : []),
     ];
     const rows = await db.select().from(documents).where(and(...conditions));
-    allowedDocs = rows as unknown as { id: string; name: string; type: string; size: number; lastModified: number; filePath: string }[];
+    allowedDocs = rows as unknown as { id: string; userId: string; name: string; type: string; size: number; lastModified: number; filePath: string }[];
 
     const results: (BaseDocument | SyncedDocument)[] = [];
 
@@ -145,12 +136,23 @@ export async function GET(req: NextRequest) {
           ? (doc.type as DocumentType)
           : toDocumentTypeFromName(doc.name);
 
+      // If the underlying file was deleted manually, keep the API self-healing:
+      // prune the DB row so clients stop listing ghost documents.
+      const absolutePath = doc.filePath ? path.join(syncDir, doc.filePath) : '';
+      if (!absolutePath || !existsSync(absolutePath)) {
+        await db
+          .delete(documents)
+          .where(and(eq(documents.id, doc.id), eq(documents.userId, doc.userId)));
+        continue;
+      }
+
       const metadata: BaseDocument = {
         id: doc.id!,
         name: doc.name,
         size: doc.size,
         lastModified: doc.lastModified,
         type,
+        scope: doc.userId === unclaimedUserId ? 'unclaimed' : 'user',
       };
 
       if (!includeData) {
@@ -159,16 +161,19 @@ export async function GET(req: NextRequest) {
       }
 
       try {
-        const filePath = path.join(SYNC_DIR, doc.filePath);
-        const content = await readFile(filePath);
+        const content = await readFile(absolutePath);
         results.push({
           ...metadata,
           data: Array.from(new Uint8Array(content)),
         });
       } catch (err) {
+        if (isEnoent(err)) {
+          await db
+            .delete(documents)
+            .where(and(eq(documents.id, doc.id), eq(documents.userId, doc.userId)));
+          continue;
+        }
         console.warn(`Failed to read content for document ${doc.id} at ${doc.filePath}`, err);
-        // Skip adding data if file is missing, or just skip item? 
-        // Best to skip item to avoid client errors on partial data
       }
     }
 
@@ -193,12 +198,46 @@ export async function DELETE(req: NextRequest) {
     // Auth check - require session
     const ctxOrRes = await requireAuthContext(req);
     if (ctxOrRes instanceof Response) return ctxOrRes;
-    const storageUserId = ctxOrRes.userId ?? UNCLAIMED_USER_ID;
+
+    const testNamespace = getOpenReaderTestNamespace(req.headers);
+    const syncDir = applyOpenReaderTestNamespacePath(DOCUMENTS_V1_DIR, testNamespace);
+    const unclaimedUserId = getUnclaimedUserIdForNamespace(testNamespace);
+
+    const storageUserId = ctxOrRes.userId ?? unclaimedUserId;
 
     await ensureDbIndexed();
 
     const url = new URL(req.url);
     const idsParam = url.searchParams.get('ids');
+    const scopeParam = (url.searchParams.get('scope') || '').toLowerCase().trim();
+
+    const wantsUnclaimed = scopeParam === 'unclaimed';
+    const wantsUser = scopeParam === '' || scopeParam === 'user';
+
+    if (!wantsUser && !wantsUnclaimed) {
+      return NextResponse.json(
+        { error: "Invalid scope. Expected 'user' (default) or 'unclaimed'." },
+        { status: 400 },
+      );
+    }
+
+    // Deleting the global unclaimed pool is a privileged operation when auth is enabled.
+    if (ctxOrRes.authEnabled && wantsUnclaimed && ctxOrRes.user?.isAnonymous) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+
+    const targetUserIds = Array.from(
+      new Set(
+        [
+          ...(wantsUser ? [storageUserId] : []),
+          ...(wantsUnclaimed ? [unclaimedUserId] : []),
+        ].filter(Boolean),
+      ),
+    );
+
+    if (targetUserIds.length === 0) {
+      return NextResponse.json({ success: true, deleted: 0 });
+    }
 
     // Determine which IDs to try to delete
     let targetIds: string[] = [];
@@ -206,9 +245,12 @@ export async function DELETE(req: NextRequest) {
     if (idsParam) {
       targetIds = idsParam.split(',').filter(Boolean);
     } else {
-      // Existing behavior was "nuke everything"; keep it scoped to "my" docs.
-      const userDocs = await db.select({ id: documents.id }).from(documents).where(eq(documents.userId, storageUserId));
-      targetIds = userDocs.map((d: { id: string | null }) => d.id!).filter(Boolean) as string[];
+      // Existing behavior was "nuke everything"; keep it scoped to the selected user buckets.
+      const rows = await db
+        .select({ id: documents.id })
+        .from(documents)
+        .where(inArray(documents.userId, targetUserIds));
+      targetIds = rows.map((d: { id: string | null }) => d.id!).filter(Boolean) as string[];
     }
 
     if (targetIds.length === 0) {
@@ -219,7 +261,7 @@ export async function DELETE(req: NextRequest) {
 
     const rows = await db
       .delete(documents)
-      .where(and(eq(documents.userId, storageUserId), inArray(documents.id, targetIds)))
+      .where(and(inArray(documents.userId, targetUserIds), inArray(documents.id, targetIds)))
       .returning({ id: documents.id, filePath: documents.filePath });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     rows.forEach((r: any) => deletedRows.push({ id: r.id!, filePath: r.filePath }));
@@ -238,7 +280,7 @@ export async function DELETE(req: NextRequest) {
       refCount = Number(ref?.count ?? 0);
 
       if (refCount === 0) {
-        const filePath = path.join(SYNC_DIR, row.filePath);
+        const filePath = path.join(syncDir, row.filePath);
         try {
           await unlink(filePath);
         } catch {

@@ -76,7 +76,26 @@ export default function RootLayout({ children }: { children: ReactNode }) {
               </div>
             )}
           </div>
-          <Toaster />
+          <Toaster
+            toastOptions={{
+              style: {
+                background: 'var(--offbase)',
+                color: 'var(--foreground)',
+              },
+              success: {
+                iconTheme: {
+                  primary: 'var(--accent)',
+                  secondary: 'var(--background)',
+                },
+              },
+              error: {
+                iconTheme: {
+                  primary: 'var(--accent)',
+                  secondary: 'var(--background)',
+                },
+              },
+            }}
+          />
         </Providers>
       </body>
     </html>

@@ -38,24 +38,14 @@ async function writeState(): Promise<void> {
   await fs.writeFile(STATE_PATH, JSON.stringify(state, null, 2));
 }
 
-async function hasUnclaimedDbRows(): Promise<boolean> {
-  const [docCount] = await db
-    .select({ count: count() })
-    .from(documents)
-    .where(eq(documents.userId, UNCLAIMED_USER_ID));
-  const [bookCount] = await db
-    .select({ count: count() })
-    .from(audiobooks)
-    .where(eq(audiobooks.userId, UNCLAIMED_USER_ID));
+async function hasFilesystemContent(mode: DbIndexState['mode']): Promise<{ documents: boolean; audiobooks: boolean }> {
+  let documentsPresent = false;
+  let audiobooksPresent = false;
 
-  return Number(docCount?.count ?? 0) > 0 || Number(bookCount?.count ?? 0) > 0;
-}
-
-async function hasFilesystemContent(mode: DbIndexState['mode']): Promise<boolean> {
   // Documents are always stored under documents_v1.
   try {
     const entries = await fs.readdir(DOCUMENTS_V1_DIR);
-    if (entries.some((name) => /^[a-f0-9]{64}__.+$/i.test(name))) return true;
+    documentsPresent = entries.some((name) => /^[a-f0-9]{64}__.+$/i.test(name));
   } catch {
     // ignore
   }
@@ -64,12 +54,12 @@ async function hasFilesystemContent(mode: DbIndexState['mode']): Promise<boolean
   const audiobookDir = mode === 'auth' ? getUnclaimedAudiobookDir() : AUDIOBOOKS_V1_DIR;
   try {
     const entries = await fs.readdir(audiobookDir, { withFileTypes: true });
-    if (entries.some((e) => e.isDirectory() && e.name.endsWith('-audiobook'))) return true;
+    audiobooksPresent = entries.some((e) => e.isDirectory() && e.name.endsWith('-audiobook'));
   } catch {
     // ignore
   }
 
-  return false;
+  return { documents: documentsPresent, audiobooks: audiobooksPresent };
 }
 
 async function isDocumentIndexed(id: string): Promise<boolean> {
@@ -234,9 +224,17 @@ export async function ensureDbIndexed(): Promise<void> {
     const hasState = existsSync(STATE_PATH) ? await readState() : null;
     if (hasState && hasState.mode === mode) {
       // If the DB was reset but the state file survived, don't get stuck "indexed" forever.
-      // Only skip if the DB has rows OR there is no content on disk to index.
-      const [dbHasRows, fsHasRows] = await Promise.all([hasUnclaimedDbRows(), hasFilesystemContent(mode)]);
-      if (dbHasRows || !fsHasRows) {
+      // Only skip if:
+      // - the DB already has rows for any on-disk content (per category), OR
+      // - there is no content on disk to index (per category).
+      //
+      // This avoids a bad state where (for example) audiobooks are indexed, but documents exist on disk
+      // and aren't counted/claimable because we early-exit based on "some DB rows exist".
+      const [counts, fsHas] = await Promise.all([getUnclaimedCounts(), hasFilesystemContent(mode)]);
+      const docsOk = counts.documents > 0 || !fsHas.documents;
+      const audiobooksOk = counts.audiobooks > 0 || !fsHas.audiobooks;
+
+      if (docsOk && audiobooksOk) {
         memoryIndexedMode = mode;
         return;
       }

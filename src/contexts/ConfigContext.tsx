@@ -121,10 +121,6 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
             toast.success('Library migration complete', {
               duration: 5000,
               icon: '📦',
-              style: {
-                background: 'var(--offbase)',
-                color: 'var(--foreground)',
-              },
             });
           }
         }

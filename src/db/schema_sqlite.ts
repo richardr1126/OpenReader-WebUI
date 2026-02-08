@@ -2,7 +2,7 @@ import { sqliteTable, text, integer, real, primaryKey, index } from 'drizzle-orm
 import { sql } from 'drizzle-orm';
 
 export const documents = sqliteTable('documents', {
-  id: text('id'),
+  id: text('id').notNull(),
   userId: text('user_id').notNull(),
   name: text('name').notNull(),
   type: text('type').notNull(), // pdf, epub, docx, html
@@ -12,6 +12,8 @@ export const documents = sqliteTable('documents', {
   createdAt: integer('created_at').default(sql`(cast(strftime('%s','now') as int) * 1000)`),
 }, (table) => ({
   pk: primaryKey({ columns: [table.id, table.userId] }),
+  userIdIdx: index('idx_documents_user_id').on(table.userId),
+  userIdLastModifiedIdx: index('idx_documents_user_id_last_modified').on(table.userId, table.lastModified),
 }));
 
 export const audiobooks = sqliteTable('audiobooks', {

@@ -1,7 +1,7 @@
 import { pgTable, text, integer, real, boolean, timestamp, date, bigint, primaryKey, index } from 'drizzle-orm/pg-core';
 
 export const documents = pgTable('documents', {
-  id: text('id'),
+  id: text('id').notNull(),
   userId: text('user_id').notNull(),
   name: text('name').notNull(),
   type: text('type').notNull(), // pdf, epub, docx, html
@@ -11,6 +11,8 @@ export const documents = pgTable('documents', {
   createdAt: timestamp('created_at').defaultNow(),
 }, (table) => ({
   pk: primaryKey({ columns: [table.id, table.userId] }),
+  userIdIdx: index('idx_documents_user_id').on(table.userId),
+  userIdLastModifiedIdx: index('idx_documents_user_id_last_modified').on(table.userId, table.lastModified),
 }));
 
 export const audiobooks = pgTable('audiobooks', {

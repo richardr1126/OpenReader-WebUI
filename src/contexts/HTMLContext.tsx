@@ -8,7 +8,8 @@ import {
   useCallback,
   useMemo,
 } from 'react';
-import { getHtmlDocument } from '@/lib/dexie';
+import { getDocumentMetadata } from '@/lib/client-documents';
+import { ensureCachedDocument } from '@/lib/document-cache';
 import { useTTS } from '@/contexts/TTSContext';
 
 interface HTMLContextType {
@@ -53,15 +54,22 @@ export function HTMLProvider({ children }: { children: ReactNode }) {
    */
   const setCurrentDocument = useCallback(async (id: string): Promise<void> => {
     try {
-      const doc = await getHtmlDocument(id);
-      if (doc) {
-        setCurrDocName(doc.name);
-        setCurrDocData(doc.data);
-        setCurrDocText(doc.data); // Use the same text for TTS
-        setTTSText(doc.data);
-      } else {
-        console.error('Document not found in IndexedDB');
+      const meta = await getDocumentMetadata(id);
+      if (!meta) {
+        console.error('Document not found on server');
+        return;
       }
+
+      const doc = await ensureCachedDocument(meta);
+      if (doc.type !== 'html') {
+        console.error('Document is not an HTML/TXT/MD document');
+        return;
+      }
+
+      setCurrDocName(doc.name);
+      setCurrDocData(doc.data);
+      setCurrDocText(doc.data); // Use the same text for TTS
+      setTTSText(doc.data);
     } catch (error) {
       console.error('Failed to get HTML document:', error);
       clearCurrDoc();

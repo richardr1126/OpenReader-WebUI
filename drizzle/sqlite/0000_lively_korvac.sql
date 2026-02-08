@@ -40,7 +40,7 @@ CREATE TABLE `audiobooks` (
 );
 --> statement-breakpoint
 CREATE TABLE `documents` (
-	`id` text,
+	`id` text NOT NULL,
 	`user_id` text NOT NULL,
 	`name` text NOT NULL,
 	`type` text NOT NULL,
@@ -51,6 +51,8 @@ CREATE TABLE `documents` (
 	PRIMARY KEY(`id`, `user_id`)
 );
 --> statement-breakpoint
+CREATE INDEX `idx_documents_user_id` ON `documents` (`user_id`);--> statement-breakpoint
+CREATE INDEX `idx_documents_user_id_last_modified` ON `documents` (`user_id`,`last_modified`);--> statement-breakpoint
 CREATE TABLE `session` (
 	`id` text PRIMARY KEY NOT NULL,
 	`expires_at` integer NOT NULL,

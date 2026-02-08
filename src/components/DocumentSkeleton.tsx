@@ -6,10 +6,6 @@ export function DocumentSkeleton() {
     const timer = setTimeout(() => {
       toast('There might be an issue with the file import. Please try again.', {
         icon: '⚠️',
-        style: {
-          background: 'var(--background)',
-          color: 'var(--accent)',
-        },
         duration: 5000,
       });
     }, 3000);

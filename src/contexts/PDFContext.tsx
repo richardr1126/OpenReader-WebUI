@@ -27,7 +27,8 @@ import {
 
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 
-import { getPdfDocument } from '@/lib/dexie';
+import { getDocumentMetadata } from '@/lib/client-documents';
+import { ensureCachedDocument } from '@/lib/document-cache';
 import { useTTS } from '@/contexts/TTSContext';
 import { useConfig } from '@/contexts/ConfigContext';
 import { normalizeTextForTts } from '@/lib/nlp';
@@ -334,13 +335,22 @@ export function PDFProvider({ children }: { children: ReactNode }) {
       setCurrDocName(undefined);
       setCurrDocData(undefined);
 
-      const doc = await getPdfDocument(id);
-      if (doc) {
-        setCurrDocName(doc.name);
-        // IMPORTANT: keep an immutable copy. pdf.js may transfer/detach the
-        // buffer passed into the worker; we always pass clones to react-pdf.
-        setCurrDocData(doc.data.slice(0));
+      const meta = await getDocumentMetadata(id);
+      if (!meta) {
+        console.error('Document not found on server');
+        return;
       }
+
+      const doc = await ensureCachedDocument(meta);
+      if (doc.type !== 'pdf') {
+        console.error('Document is not a PDF');
+        return;
+      }
+
+      setCurrDocName(doc.name);
+      // IMPORTANT: keep an immutable copy. pdf.js may transfer/detach the
+      // buffer passed into the worker; we always pass clones to react-pdf.
+      setCurrDocData(doc.data.slice(0));
     } catch (error) {
       console.error('Failed to get document:', error);
     }

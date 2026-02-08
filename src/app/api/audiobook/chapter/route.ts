@@ -10,6 +10,7 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { requireAuthContext } from '@/lib/server/auth';
 import { ensureDbIndexed } from '@/lib/server/db-indexing';
 import { applyOpenReaderTestNamespacePath, getOpenReaderTestNamespace, getUnclaimedUserIdForNamespace } from '@/lib/server/test-namespace';
+import { pruneAudiobookChapterIfMissingFile, pruneAudiobookIfMissingDir } from '@/lib/server/audiobook-prune';
 
 export const dynamic = 'force-dynamic';
 
@@ -77,9 +78,16 @@ export async function GET(request: NextRequest) {
     }
 
     const intermediateDir = join(getAudiobooksRootDir(request, existingBook.userId, authEnabled), `${bookId}-audiobook`);
+    const dirExists = existsSync(intermediateDir);
+    if (!dirExists) {
+      await pruneAudiobookIfMissingDir(bookId, existingBook.userId, false);
+      return NextResponse.json({ error: 'Chapter not found' }, { status: 404 });
+    }
 
     const chapter = await findStoredChapterByIndex(intermediateDir, chapterIndex, request.signal);
-    if (!chapter || !existsSync(chapter.filePath)) {
+    const chapterFileExists = !!chapter?.filePath && existsSync(chapter.filePath);
+    if (!chapterFileExists) {
+      await pruneAudiobookChapterIfMissingFile(bookId, existingBook.userId, chapterIndex, false);
       return NextResponse.json({ error: 'Chapter not found' }, { status: 404 });
     }
 

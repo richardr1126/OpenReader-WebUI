@@ -39,7 +39,7 @@ CREATE TABLE "audiobooks" (
 );
 --> statement-breakpoint
 CREATE TABLE "documents" (
-	"id" text,
+	"id" text NOT NULL,
 	"user_id" text NOT NULL,
 	"name" text NOT NULL,
 	"type" text NOT NULL,
@@ -92,4 +92,6 @@ CREATE TABLE "verification" (
 --> statement-breakpoint
 ALTER TABLE "account" ADD CONSTRAINT "account_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "session" ADD CONSTRAINT "session_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "idx_documents_user_id" ON "documents" USING btree ("user_id");--> statement-breakpoint
+CREATE INDEX "idx_documents_user_id_last_modified" ON "documents" USING btree ("user_id","last_modified");--> statement-breakpoint
 CREATE INDEX "idx_user_tts_chars_date" ON "user_tts_chars" USING btree ("date");

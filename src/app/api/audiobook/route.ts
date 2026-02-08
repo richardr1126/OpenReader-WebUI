@@ -14,6 +14,7 @@ import { eq, and, inArray } from 'drizzle-orm';
 import { requireAuthContext } from '@/lib/server/auth';
 import { ensureDbIndexed } from '@/lib/server/db-indexing';
 import { applyOpenReaderTestNamespacePath, getOpenReaderTestNamespace, getUnclaimedUserIdForNamespace } from '@/lib/server/test-namespace';
+import { pruneAudiobookIfMissingDir } from '@/lib/server/audiobook-prune';
 
 export const dynamic = 'force-dynamic';
 
@@ -438,6 +439,7 @@ export async function GET(request: NextRequest) {
     );
 
     if (!existsSync(intermediateDir)) {
+      await pruneAudiobookIfMissingDir(bookId, existingBook.userId, false);
       return NextResponse.json({ error: 'Book not found' }, { status: 404 });
     }
 

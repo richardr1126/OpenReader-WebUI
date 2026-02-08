@@ -16,7 +16,9 @@ import type { NavItem } from 'epubjs';
 import type { SpineItem } from 'epubjs/types/section';
 import type { Book, Rendition } from 'epubjs';
 
-import { getEpubDocument, setLastDocumentLocation } from '@/lib/dexie';
+import { setLastDocumentLocation } from '@/lib/dexie';
+import { getDocumentMetadata } from '@/lib/client-documents';
+import { ensureCachedDocument } from '@/lib/document-cache';
 import { useTTS } from '@/contexts/TTSContext';
 import { createRangeCfi } from '@/lib/epub';
 import { useParams } from 'next/navigation';
@@ -223,21 +225,25 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
    */
   const setCurrentDocument = useCallback(async (id: string): Promise<void> => {
     try {
-      const doc = await getEpubDocument(id);
-      if (doc) {
-        console.log('Retrieved document size:', doc.size);
-        console.log('Retrieved ArrayBuffer size:', doc.data.byteLength);
-
-        if (doc.data.byteLength === 0) {
-          console.error('Retrieved ArrayBuffer is empty');
-          throw new Error('Empty document data');
-        }
-
-        setCurrDocName(doc.name);
-        setCurrDocData(doc.data);  // Store ArrayBuffer directly
-      } else {
-        console.error('Document not found in IndexedDB');
+      const meta = await getDocumentMetadata(id);
+      if (!meta) {
+        console.error('Document not found on server');
+        return;
       }
+
+      const doc = await ensureCachedDocument(meta);
+      if (doc.type !== 'epub') {
+        console.error('Document is not an EPUB');
+        return;
+      }
+
+      if (doc.data.byteLength === 0) {
+        console.error('Retrieved ArrayBuffer is empty');
+        throw new Error('Empty document data');
+      }
+
+      setCurrDocName(doc.name);
+      setCurrDocData(doc.data); // Store ArrayBuffer directly
     } catch (error) {
       console.error('Failed to get EPUB document:', error);
       clearCurrDoc(); // Clean up on error

@@ -84,6 +84,38 @@ export async function claimAnonymousData(userId: string) {
 }
 
 /**
+ * Transfer documents from one userId to another.
+ *
+ * This is used when an anonymous user upgrades to an authenticated account.
+ * The underlying blob storage is shared (by sha), so this only moves metadata rows.
+ *
+ * @returns number of document rows transferred
+ */
+export async function transferUserDocuments(
+  fromUserId: string,
+  toUserId: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  options?: { db?: any },
+): Promise<number> {
+  if (!isAuthEnabled() || !fromUserId || !toUserId) return 0;
+  if (fromUserId === toUserId) return 0;
+
+  const database = options?.db ?? db;
+
+  const rows = await database.select().from(documents).where(eq(documents.userId, fromUserId));
+  if (rows.length === 0) return 0;
+
+  await database
+    .insert(documents)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .values(rows.map((row: any) => ({ ...row, userId: toUserId })))
+    .onConflictDoNothing();
+
+  await database.delete(documents).where(eq(documents.userId, fromUserId));
+  return rows.length;
+}
+
+/**
  * Transfer audiobooks from one user to another.
  * Used when an anonymous user creates a real account.
  * @returns number of audiobooks transferred

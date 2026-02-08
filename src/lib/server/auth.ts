@@ -7,7 +7,7 @@ import type { NextRequest } from 'next/server';
 import { db } from "@/db";
 import { rateLimiter } from "@/lib/server/rate-limiter";
 import { isAuthEnabled } from "@/lib/server/auth-config";
-import { transferUserAudiobooks } from "@/lib/server/claim-data";
+import { transferUserAudiobooks, transferUserDocuments } from "@/lib/server/claim-data";
 
 import * as schema from "@/db/schema"; // Import the dynamic schema
 
@@ -84,6 +84,17 @@ const createAuth = () => betterAuth({
             }
           } catch (error) {
             console.error("Error transferring audiobooks during account linking:", error);
+            // Don't throw here to prevent blocking the account linking process
+          }
+
+          // Transfer documents from anonymous user to new authenticated user
+          try {
+            const transferred = await transferUserDocuments(anonymousUser.user.id, newUser.user.id);
+            if (transferred > 0) {
+              console.log(`Successfully transferred ${transferred} document(s) from anonymous user ${anonymousUser.user.id} to user ${newUser.user.id}`);
+            }
+          } catch (error) {
+            console.error("Error transferring documents during account linking:", error);
             // Don't throw here to prevent blocking the account linking process
           }
         } catch (error) {

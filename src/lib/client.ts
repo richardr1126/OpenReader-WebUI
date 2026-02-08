@@ -79,33 +79,6 @@ export const withRetry = async <T>(
   throw lastError || new Error('Operation failed after retries');
 };
 
-// --- Documents API ---
-
-export const convertDocxToPdf = async (file: File): Promise<Blob> => {
-  const formData = new FormData();
-  formData.append('file', file);
-
-  const response = await fetch('/api/documents/docx-to-pdf', {
-    method: 'POST',
-    body: formData,
-  });
-
-  if (!response.ok) {
-    throw new Error('Failed to convert DOCX to PDF');
-  }
-
-  return await response.blob();
-};
-
-export const deleteServerDocuments = async (): Promise<void> => {
-  const response = await fetch('/api/documents', {
-    method: 'DELETE',
-  });
-  if (!response.ok) {
-    throw new Error('Failed to delete server documents');
-  }
-};
-
 // --- Audiobook API ---
 
 

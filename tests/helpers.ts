@@ -1,4 +1,4 @@
-import { Page, expect } from '@playwright/test';
+import { Page, expect, type TestInfo, type Locator } from '@playwright/test';
 import fs from 'fs';
 import path from 'path';
 
@@ -60,7 +60,12 @@ export async function uploadAndDisplay(page: Page, fileName: string) {
   const lower = fileName.toLowerCase();
 
   if (lower.endsWith('.docx')) {
-    await expect(page.getByText('Converting DOCX to PDF...')).toBeVisible();
+    // Best-effort: conversion can complete before we observe this UI state.
+    try {
+      await expect(page.getByText('Converting DOCX to PDF...')).toBeVisible({ timeout: 5000 });
+    } catch {
+      // ignore
+    }
     const pdfName = fileName.replace(/\.docx$/i, '.pdf');
     await page.getByRole('link', { name: new RegExp(escapeRegExp(pdfName), 'i') }).click();
     await page.waitForSelector('.react-pdf__Document', { timeout: 15000 });
@@ -115,7 +120,14 @@ export async function pauseTTSAndVerify(page: Page) {
 /**
  * Common test setup function
  */
-export async function setupTest(page: Page) {
+export async function setupTest(page: Page, testInfo?: TestInfo) {
+  if (testInfo) {
+    // Isolate server-side storage per Playwright worker to avoid cross-test flake
+    // when running with multiple workers (server-first document storage).
+    const namespace = `${testInfo.project.name}-worker${testInfo.workerIndex}`;
+    await page.context().setExtraHTTPHeaders({ 'x-openreader-test-namespace': namespace });
+  }
+
   // Mock the TTS API so tests don't hit the real TTS service.
   await ensureTtsRouteMock(page);
 
@@ -140,12 +152,19 @@ export async function setupTest(page: Page) {
   try {
     await expect(privacyBtn).toBeVisible({ timeout: 5000 });
     await privacyBtn.click();
+    // HeadlessUI keeps dialogs in the DOM during leave transitions; "hidden" is enough
+    // (we mainly need to ensure it no longer blocks pointer events).
+    await page.getByRole('dialog', { name: /privacy/i }).waitFor({ state: 'hidden', timeout: 15000 });
+    await expect(page.locator('.overlay-dim:visible')).toHaveCount(0);
   } catch {
     // ignore
   }
 
   // Settings modal should appear after privacy acceptance on first visit.
-  await expect(page.getByRole('button', { name: 'Save' })).toBeVisible({ timeout: 10000 });
+  const saveBtn = page.getByRole('button', { name: 'Save' });
+  await expect(saveBtn).toBeVisible({ timeout: 10000 });
+  // SettingsModal can briefly disable Save while it mirrors a custom model into the input field.
+  await expect(saveBtn).toBeEnabled({ timeout: 15000 });
 
   // If running in CI, select the "Custom OpenAI-Like" model and "Deepinfra" provider
   if (process.env.CI) {
@@ -154,7 +173,43 @@ export async function setupTest(page: Page) {
   }
 
   // Click the "done" button to dismiss the welcome message
-  await page.getByRole('button', { name: 'Save' }).click();
+  await saveBtn.click();
+  await page.getByRole('dialog', { name: 'Settings' }).waitFor({ state: 'hidden', timeout: 15000 });
+  await expect(page.locator('.overlay-dim:visible')).toHaveCount(0);
+}
+
+/**
+ * More reliable than Playwright's `locator.dragTo` when a drop immediately opens a modal
+ * (which can intercept pointer events mid-gesture and cause flakiness).
+ *
+ * This uses DOM drag events directly; our app's doc list DnD logic only needs the events,
+ * not a real OS-level drag interaction.
+ */
+export async function dispatchHtml5DragAndDrop(page: Page, source: Locator, target: Locator): Promise<void> {
+  const sourceHandle = await source.elementHandle();
+  const targetHandle = await target.elementHandle();
+  if (!sourceHandle) throw new Error('drag source element not found');
+  if (!targetHandle) throw new Error('drag target element not found');
+
+  await page.evaluate(
+    async ([src, dst]) => {
+      const dt = typeof DataTransfer !== 'undefined' ? new DataTransfer() : ({} as DataTransfer);
+      const fire = (el: Element, type: string) => {
+        const event = new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt });
+        el.dispatchEvent(event);
+      };
+
+      fire(src, 'dragstart');
+      // Let React flush state updates (draggedDoc) before dispatching drop events.
+      await Promise.resolve();
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      fire(dst, 'dragenter');
+      fire(dst, 'dragover');
+      fire(dst, 'drop');
+      fire(src, 'dragend');
+    },
+    [sourceHandle, targetHandle],
+  );
 }
 
 
@@ -236,9 +291,11 @@ export async function openSettingsDocumentsTab(page: Page) {
 // Delete all local documents through Settings and close dialogs
 export async function deleteAllLocalDocuments(page: Page) {
   await openSettingsDocumentsTab(page);
-  await page.getByRole('button', { name: 'Delete local' }).click();
+  // When auth is enabled in tests, button label is "Delete  all user docs".
+  // In our tests, auth is enabled and sessions start anonymous, so label is "Delete anonymous docs".
+  await page.getByRole('button', { name: 'Delete anonymous docs' }).click();
 
-  const heading = page.getByRole('heading', { name: 'Delete Local Documents' });
+  const heading = page.getByRole('heading', { name: 'Delete Anonymous Docs' });
   await expect(heading).toBeVisible({ timeout: 10000 });
 
   const confirmBtn = heading.locator('xpath=ancestor::*[@role="dialog"][1]//button[normalize-space()="Delete"]');

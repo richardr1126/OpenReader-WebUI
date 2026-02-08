@@ -1,12 +1,11 @@
 import { DocumentListDocument } from '@/types/documents';
 import { PDFIcon, EPUBIcon, FileIcon } from '@/components/icons/Icons';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { getEpubDocument, getHtmlDocument, getPdfDocument } from '@/lib/dexie';
 import {
   extractEpubCoverToDataUrl,
-  extractRawTextSnippet,
   renderPdfFirstPageToDataUrl,
 } from '@/lib/documentPreview';
+import { downloadDocumentContent, getDocumentContentSnippet } from '@/lib/client-documents';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -74,45 +73,49 @@ export function DocumentPreview({ doc }: DocumentPreviewProps) {
     }
 
     let cancelled = false;
+    const controller = new AbortController();
 
-	    const run = async () => {
-	      setIsGenerating(true);
-	      try {
-	        const targetWidth = 240;
+    const run = async () => {
+      setIsGenerating(true);
+      try {
+        const targetWidth = 240;
 
-	        if (doc.type === 'pdf') {
-	          const pdfDoc = await getPdfDocument(doc.id);
-	          if (!pdfDoc?.data) return;
-	          const dataUrl = await renderPdfFirstPageToDataUrl(pdfDoc.data, targetWidth);
-	          if (cancelled) return;
-	          imagePreviewCache.set(previewKey, dataUrl);
-	          setImagePreview(dataUrl);
-	          setTextPreview(null);
-	          return;
-	        }
+        if (doc.type === 'pdf') {
+          const data = await downloadDocumentContent(doc.id, { signal: controller.signal });
+          if (cancelled) return;
+          const dataUrl = await renderPdfFirstPageToDataUrl(data, targetWidth);
+          if (cancelled) return;
+          imagePreviewCache.set(previewKey, dataUrl);
+          setImagePreview(dataUrl);
+          setTextPreview(null);
+          return;
+        }
 
-	        if (doc.type === 'epub') {
-	          const epubDoc = await getEpubDocument(doc.id);
-	          if (!epubDoc?.data) return;
-	          const cover = await extractEpubCoverToDataUrl(epubDoc.data, targetWidth);
-	          if (cancelled) return;
-	          if (cover) {
-	            imagePreviewCache.set(previewKey, cover);
-	            setImagePreview(cover);
-	            setTextPreview(null);
-	          }
-	          return;
-	        }
+        if (doc.type === 'epub') {
+          const data = await downloadDocumentContent(doc.id, { signal: controller.signal });
+          if (cancelled) return;
+          const cover = await extractEpubCoverToDataUrl(data, targetWidth);
+          if (cancelled) return;
+          if (cover) {
+            imagePreviewCache.set(previewKey, cover);
+            setImagePreview(cover);
+            setTextPreview(null);
+          }
+          return;
+        }
 
-	        if (doc.type === 'html') {
-	          const htmlDoc = await getHtmlDocument(doc.id);
-	          if (cancelled) return;
-	          const snippet = extractRawTextSnippet(htmlDoc?.data ?? '');
-	          textPreviewCache.set(previewKey, snippet);
-	          setTextPreview(snippet);
-	          setImagePreview(null);
-	          return;
-	        }
+        if (doc.type === 'html') {
+          const snippet = await getDocumentContentSnippet(doc.id, {
+            maxChars: 1600,
+            maxBytes: 128 * 1024,
+            signal: controller.signal,
+          });
+          if (cancelled) return;
+          textPreviewCache.set(previewKey, snippet);
+          setTextPreview(snippet);
+          setImagePreview(null);
+          return;
+        }
       } catch {
         // fall back to icon
       } finally {
@@ -125,6 +128,7 @@ export function DocumentPreview({ doc }: DocumentPreviewProps) {
     run();
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [doc.id, doc.type, isVisible, previewKey]);
 

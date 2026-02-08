@@ -10,6 +10,7 @@ import { HTMLProvider } from '@/contexts/HTMLContext';
 import { AuthRateLimitProvider } from '@/contexts/AuthRateLimitContext';
 import { PrivacyModal } from '@/components/PrivacyModal';
 import { AuthLoader } from '@/components/auth/AuthLoader';
+import { DexieMigrationModal } from '@/components/documents/DexieMigrationModal';
 
 interface ProvidersProps {
   children: ReactNode;
@@ -31,6 +32,7 @@ export function Providers({ children, authEnabled, authBaseUrl }: ProvidersProps
                       <>
                         {children}
                         <PrivacyModal authEnabled={authEnabled} />
+                        <DexieMigrationModal />
                       </>
                     </HTMLProvider>
                   </EPUBProvider>

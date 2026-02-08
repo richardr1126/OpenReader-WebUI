@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "af57dff3-a6ec-418e-9fa1-8197d6839e48",
+  "id": "9c9e61fc-1f90-463a-99dc-232397f316e7",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "account": {
@@ -277,7 +277,7 @@
           "name": "id",
           "type": "text",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         },
         "user_id": {
@@ -331,7 +331,23 @@
           "default": "(cast(strftime('%s','now') as int) * 1000)"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "idx_documents_user_id": {
+          "name": "idx_documents_user_id",
+          "columns": [
+            "user_id"
+          ],
+          "isUnique": false
+        },
+        "idx_documents_user_id_last_modified": {
+          "name": "idx_documents_user_id_last_modified",
+          "columns": [
+            "user_id",
+            "last_modified"
+          ],
+          "isUnique": false
+        }
+      },
       "foreignKeys": {},
       "compositePrimaryKeys": {
         "documents_id_user_id_pk": {

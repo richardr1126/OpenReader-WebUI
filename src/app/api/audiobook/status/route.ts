@@ -12,6 +12,7 @@ import { audiobooks } from '@/db/schema';
 import { eq, and, inArray } from 'drizzle-orm';
 import { ensureDbIndexed } from '@/lib/server/db-indexing';
 import { applyOpenReaderTestNamespacePath, getOpenReaderTestNamespace, getUnclaimedUserIdForNamespace } from '@/lib/server/test-namespace';
+import { pruneAudiobookChaptersNotOnDisk, pruneAudiobookIfMissingDir } from '@/lib/server/audiobook-prune';
 
 export const dynamic = 'force-dynamic';
 
@@ -82,6 +83,7 @@ export async function GET(request: NextRequest) {
     const intermediateDir = join(getAudiobooksRootDir(request, existingBook.userId, authEnabled), `${bookId}-audiobook`);
 
     if (!existsSync(intermediateDir)) {
+      await pruneAudiobookIfMissingDir(bookId, existingBook.userId, false);
       return NextResponse.json({
         chapters: [],
         exists: false,
@@ -92,6 +94,11 @@ export async function GET(request: NextRequest) {
     }
 
     const stored = await listStoredChapters(intermediateDir, request.signal);
+    await pruneAudiobookChaptersNotOnDisk(
+      bookId,
+      existingBook.userId,
+      stored.map((c) => c.index),
+    );
     const chapters: TTSAudiobookChapter[] = stored.map((chapter) => ({
       index: chapter.index,
       title: chapter.title,

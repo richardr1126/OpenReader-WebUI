@@ -603,10 +603,6 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
 
     toast.success(isEPUB ? 'Skipping blank section' : `Skipping blank page ${currDocPageNumber}`, {
       id: isEPUB ? `epub-section-skip` : `page-${currDocPageNumber}`,
-      iconTheme: {
-        primary: 'var(--accent)',
-        secondary: 'var(--background)',
-      },
       style: {
         background: 'var(--background)',
         color: 'var(--accent)',
@@ -761,10 +757,6 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
         console.warn('Error processing text:', error);
         setIsProcessing(false);
         toast.error('Failed to process text', {
-          style: {
-            background: 'var(--background)',
-            color: 'var(--accent)',
-          },
           duration: 3000,
         });
       });
@@ -1028,10 +1020,6 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
         if (!preload) {
           toast.error('Daily TTS limit reached.', {
             id: 'tts-limit-error',
-            style: {
-              background: 'var(--background)',
-              color: 'var(--accent)',
-            },
             duration: 5000,
           });
         }
@@ -1045,10 +1033,6 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
       if (!preload) {
         toast.error('TTS failed. Skipped sentence and paused.', {
           id: 'tts-api-error',
-          style: {
-            background: 'var(--background)',
-            color: 'var(--accent)',
-          },
           duration: 7000,
         });
       }
@@ -1224,10 +1208,6 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
 
             toast.error('Playback was blocked by your browser. Tap play again to start.', {
               id: 'tts-playback-blocked',
-              style: {
-                background: 'var(--background)',
-                color: 'var(--accent)',
-              },
               duration: 4000,
             });
             return;
@@ -1245,10 +1225,6 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
 
             toast.error('Audio playback failed. Skipped sentence and paused.', {
               id: 'tts-playback-error',
-              style: {
-                background: 'var(--background)',
-                color: 'var(--accent)',
-              },
               duration: 4000,
             });
 
@@ -1302,10 +1278,6 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
 
               toast.error('Audio loading failed after retries. Moving to next sentence...', {
                 id: 'audio-load-error',
-                style: {
-                  background: 'var(--background)',
-                  color: 'var(--accent)',
-                },
                 duration: 2000,
               });
 
@@ -1320,10 +1292,6 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
 
               toast.error('Audio loading failed after retries. Moving to next sentence...', {
                 id: 'audio-load-error',
-                style: {
-                  background: 'var(--background)',
-                  color: 'var(--accent)',
-                },
                 duration: 2000,
               });
 

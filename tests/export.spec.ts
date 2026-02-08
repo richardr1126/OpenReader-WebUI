@@ -179,9 +179,9 @@ async function resetAudiobookIfPresent(page: Page) {
   await expect(page.getByRole('button', { name: 'Start Generation' })).toBeVisible({ timeout: 60_000 });
 }
 
-test('exports full MP3 audiobook for PDF using mocked 10s TTS sample', async ({ page }) => {
+test('exports full MP3 audiobook for PDF using mocked 10s TTS sample', async ({ page }, testInfo) => {
   // Ensure TTS is mocked and app is ready
-  await setupTest(page);
+  await setupTest(page, testInfo);
 
   // Upload and open the sample PDF in the viewer
   await uploadAndDisplay(page, 'sample.pdf');
@@ -231,8 +231,8 @@ test('exports full MP3 audiobook for PDF using mocked 10s TTS sample', async ({ 
   await resetAudiobookIfPresent(page);
 });
 
-test('exports partial MP3 audiobook for EPUB using mocked 10s TTS sample', async ({ page }) => {
-  await setupTest(page);
+test('exports partial MP3 audiobook for EPUB using mocked 10s TTS sample', async ({ page }, testInfo) => {
+  await setupTest(page, testInfo);
 
   // Upload and open the sample EPUB in the viewer
   await uploadAndDisplay(page, 'sample.epub');
@@ -302,8 +302,8 @@ test('exports partial MP3 audiobook for EPUB using mocked 10s TTS sample', async
   await resetAudiobookIfPresent(page);
 });
 
-test('exports a single MP3 audiobook PDF page via chapters menu', async ({ page }) => {
-  await setupTest(page);
+test('exports a single MP3 audiobook PDF page via chapters menu', async ({ page }, testInfo) => {
+  await setupTest(page, testInfo);
   await uploadAndDisplay(page, 'sample.pdf');
 
   const bookId = await getBookIdFromUrl(page, 'pdf');
@@ -330,8 +330,8 @@ test('exports a single MP3 audiobook PDF page via chapters menu', async ({ page 
   await resetAudiobookIfPresent(page);
 });
 
-test('resets all MP3 audiobook PDF pages', async ({ page }) => {
-  await setupTest(page);
+test('resets all MP3 audiobook PDF pages', async ({ page }, testInfo) => {
+  await setupTest(page, testInfo);
   await uploadAndDisplay(page, 'sample.pdf');
 
   const bookId = await getBookIdFromUrl(page, 'pdf');
@@ -366,8 +366,8 @@ test('resets all MP3 audiobook PDF pages', async ({ page }) => {
   expect(json.chapters.length).toBe(0);
 });
 
-test('regenerates a single MP3 audiobook PDF page and exports full audiobook', async ({ page }) => {
-  await setupTest(page);
+test('regenerates a single MP3 audiobook PDF page and exports full audiobook', async ({ page }, testInfo) => {
+  await setupTest(page, testInfo);
   await uploadAndDisplay(page, 'sample.pdf');
 
   // Extract bookId from /pdf/[id] URL (for backend verification later)
@@ -439,8 +439,8 @@ test('regenerates a single MP3 audiobook PDF page and exports full audiobook', a
   await resetAudiobookIfPresent(page);
 });
 
-test('resumes audiobook when a chapter is missing and full download succeeds (PDF)', async ({ page }) => {
-  await setupTest(page);
+test('resumes audiobook when a chapter is missing and full download succeeds (PDF)', async ({ page }, testInfo) => {
+  await setupTest(page, testInfo);
   await uploadAndDisplay(page, 'sample.pdf');
 
   const bookId = await getBookIdFromUrl(page, 'pdf');

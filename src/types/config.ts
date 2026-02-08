@@ -31,6 +31,7 @@ export interface AppConfigValues {
   firstVisit: boolean;
   documentListState: DocumentListState;
   privacyAccepted: boolean;
+  documentsMigrationPrompted: boolean;
 }
 
 export const APP_CONFIG_DEFAULTS: AppConfigValues = {
@@ -65,6 +66,7 @@ export const APP_CONFIG_DEFAULTS: AppConfigValues = {
     viewMode: 'grid',
   },
   privacyAccepted: false,
+  documentsMigrationPrompted: false,
 };
 
 export interface AppConfigRow extends AppConfigValues {
