@@ -4,7 +4,7 @@ export const DOCSTORE_DIR = path.join(process.cwd(), 'docstore');
 export const DEFAULT_LIBRARY_DIR = path.join(DOCSTORE_DIR, 'library');
 
 export function parseLibraryRoots(): string[] {
-  const raw = process.env.OPENREADER_LIBRARY_DIRS ?? process.env.OPENREADER_LIBRARY_DIR ?? '';
+  const raw = process.env.IMPORT_LIBRARY_DIRS ?? process.env.IMPORT_LIBRARY_DIR ?? '';
 
   const roots = raw
     .split(/[,:;]/g)

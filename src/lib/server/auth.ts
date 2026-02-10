@@ -41,6 +41,15 @@ function getTrustedOrigins(): string[] {
   return Array.from(origins);
 }
 
+function envFlagEnabled(name: string, defaultValue: boolean): boolean {
+  const raw = process.env[name];
+  if (!raw || raw.trim() === '') return defaultValue;
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on') return true;
+  if (normalized === '0' || normalized === 'false' || normalized === 'no' || normalized === 'off') return false;
+  return defaultValue;
+}
+
 const createAuth = () => betterAuth({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   database: drizzleAdapter(db as any, {
@@ -65,9 +74,9 @@ const createAuth = () => betterAuth({
     },
   },
   rateLimit: {
-    // Disable rate limiting when running tests to support parallel test workers
-    // In production, better-auth's default rate limiting applies
-    enabled: process.env.DISABLE_AUTH_RATE_LIMIT !== 'true',
+    // Better Auth built-in rate limiting is enabled by default.
+    // Set DISABLE_AUTH_RATE_LIMIT=true to disable it.
+    enabled: !envFlagEnabled('DISABLE_AUTH_RATE_LIMIT', false),
   },
   socialProviders: {
     ...(process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET && {

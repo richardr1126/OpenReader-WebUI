@@ -8,7 +8,7 @@ import type { TTSRequestPayload } from '@/types/client';
 import type { TTSError, TTSAudioBuffer } from '@/types/tts';
 import { headers } from 'next/headers';
 import { auth } from '@/lib/server/auth';
-import { rateLimiter, RATE_LIMITS } from '@/lib/server/rate-limiter';
+import { rateLimiter, RATE_LIMITS, isTtsRateLimitEnabled } from '@/lib/server/rate-limiter';
 import { isAuthEnabled } from '@/lib/server/auth-config';
 import { getClientIp } from '@/lib/server/request-ip';
 import { getOrCreateDeviceId, setDeviceIdCookie } from '@/lib/server/device-id';
@@ -142,7 +142,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(errorBody, { status: 400 });
     }
 
-    // Auth and rate limiting check (only when auth is enabled)
+    // Auth and TTS char rate limiting check (only when auth is enabled)
     let didCreateDeviceIdCookie = false;
     let deviceIdToSet: string | null = null;
 
@@ -159,62 +159,63 @@ export async function POST(req: NextRequest) {
       }
 
       const isAnonymous = Boolean(session.user.isAnonymous);
-      const charCount = text.length;
-
-      const ip = getClientIp(req);
-      const device = isAnonymous ? getOrCreateDeviceId(req) : null;
-      if (device?.didCreate) {
-        didCreateDeviceIdCookie = true;
-        deviceIdToSet = device.deviceId;
-      }
-
-      // Check rate limit
-      const rateLimitResult = await rateLimiter.checkAndIncrementLimit(
-        { id: session.user.id, isAnonymous },
-        charCount,
-        {
-          deviceId: device?.deviceId ?? null,
-          ip,
+      if (isTtsRateLimitEnabled()) {
+        const charCount = text.length;
+        const ip = getClientIp(req);
+        const device = isAnonymous ? getOrCreateDeviceId(req) : null;
+        if (device?.didCreate) {
+          didCreateDeviceIdCookie = true;
+          deviceIdToSet = device.deviceId;
         }
-      );
 
-      if (!rateLimitResult.allowed) {
-        const resetTime = rateLimitResult.resetTime.toISOString();
-        const retryAfterSeconds = Math.max(
-          0,
-          Math.ceil((rateLimitResult.resetTime.getTime() - Date.now()) / 1000)
+        // Check rate limit
+        const rateLimitResult = await rateLimiter.checkAndIncrementLimit(
+          { id: session.user.id, isAnonymous },
+          charCount,
+          {
+            deviceId: device?.deviceId ?? null,
+            ip,
+          }
         );
 
-        const problem: ProblemDetails = {
-          type: PROBLEM_TYPES.dailyQuotaExceeded,
-          title: 'Daily quota exceeded',
-          status: 429,
-          detail: 'Daily character limit exceeded',
-          code: 'USER_DAILY_QUOTA_EXCEEDED',
-          currentCount: rateLimitResult.currentCount,
-          limit: rateLimitResult.limit,
-          remainingChars: rateLimitResult.remainingChars,
-          resetTime,
-          userType: isAnonymous ? 'anonymous' : 'authenticated',
-          upgradeHint: isAnonymous
-            ? `Sign up to increase your limit from ${formatLimitForHint(RATE_LIMITS.ANONYMOUS)} to ${formatLimitForHint(RATE_LIMITS.AUTHENTICATED)} characters per day`
-            : undefined,
-          instance: req.nextUrl.pathname,
-        };
+        if (!rateLimitResult.allowed) {
+          const resetTime = rateLimitResult.resetTime.toISOString();
+          const retryAfterSeconds = Math.max(
+            0,
+            Math.ceil((rateLimitResult.resetTime.getTime() - Date.now()) / 1000)
+          );
 
-        const response = new NextResponse(JSON.stringify(problem), {
-          status: 429,
-          headers: {
-            'Content-Type': 'application/problem+json',
-            'Retry-After': String(retryAfterSeconds),
-          },
-        });
+          const problem: ProblemDetails = {
+            type: PROBLEM_TYPES.dailyQuotaExceeded,
+            title: 'Daily quota exceeded',
+            status: 429,
+            detail: 'Daily character limit exceeded',
+            code: 'USER_DAILY_QUOTA_EXCEEDED',
+            currentCount: rateLimitResult.currentCount,
+            limit: rateLimitResult.limit,
+            remainingChars: rateLimitResult.remainingChars,
+            resetTime,
+            userType: isAnonymous ? 'anonymous' : 'authenticated',
+            upgradeHint: isAnonymous
+              ? `Sign up to increase your limit from ${formatLimitForHint(RATE_LIMITS.ANONYMOUS)} to ${formatLimitForHint(RATE_LIMITS.AUTHENTICATED)} characters per day`
+              : undefined,
+            instance: req.nextUrl.pathname,
+          };
 
-        if (didCreateDeviceIdCookie && deviceIdToSet) {
-          setDeviceIdCookie(response, deviceIdToSet);
+          const response = new NextResponse(JSON.stringify(problem), {
+            status: 429,
+            headers: {
+              'Content-Type': 'application/problem+json',
+              'Retry-After': String(retryAfterSeconds),
+            },
+          });
+
+          if (didCreateDeviceIdCookie && deviceIdToSet) {
+            setDeviceIdCookie(response, deviceIdToSet);
+          }
+
+          return response;
         }
-
-        return response;
       }
     }
 

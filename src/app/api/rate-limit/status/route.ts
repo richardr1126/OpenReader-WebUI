@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { auth } from '@/lib/server/auth';
-import { rateLimiter, RATE_LIMITS } from '@/lib/server/rate-limiter';
+import { rateLimiter, RATE_LIMITS, isTtsRateLimitEnabled } from '@/lib/server/rate-limiter';
 import { headers } from 'next/headers';
 import { isAuthEnabled } from '@/lib/server/auth-config';
 import { getClientIp } from '@/lib/server/request-ip';
@@ -18,6 +18,8 @@ function getUtcResetTimeIso(): string {
 
 export async function GET(req: NextRequest) {
   try {
+    const ttsRateLimitEnabled = isTtsRateLimitEnabled();
+
     // If auth is not enabled, return unlimited status
     if (!isAuthEnabled() || !auth) {
       const resetTime = getUtcResetTimeIso();
@@ -45,8 +47,8 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({
         allowed: true,
         currentCount: 0,
-        limit: RATE_LIMITS.ANONYMOUS,
-        remainingChars: RATE_LIMITS.ANONYMOUS,
+        limit: ttsRateLimitEnabled ? RATE_LIMITS.ANONYMOUS : Number.MAX_SAFE_INTEGER,
+        remainingChars: ttsRateLimitEnabled ? RATE_LIMITS.ANONYMOUS : Number.MAX_SAFE_INTEGER,
         resetTime,
         userType: 'unauthenticated',
         authEnabled: true
@@ -56,7 +58,7 @@ export async function GET(req: NextRequest) {
     const isAnonymous = Boolean(session.user.isAnonymous);
 
     const ip = getClientIp(req);
-    const device = isAnonymous ? getOrCreateDeviceId(req) : null;
+    const device = isAnonymous && ttsRateLimitEnabled ? getOrCreateDeviceId(req) : null;
 
     const result = await rateLimiter.getCurrentUsage(
       {

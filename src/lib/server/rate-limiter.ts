@@ -3,14 +3,40 @@ import { userTtsChars } from '@/db/schema';
 import { isAuthEnabled } from '@/lib/server/auth-config';
 import { eq, and, lt, sql } from 'drizzle-orm';
 
+function readPositiveIntEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw || raw.trim() === '') return fallback;
+
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    console.warn(`[rate-limiter] Invalid ${name}=${raw}; using default ${fallback}`);
+    return fallback;
+  }
+
+  return Math.floor(parsed);
+}
+
+function readBooleanEnv(name: string, fallback: boolean): boolean {
+  const raw = process.env[name];
+  if (!raw || raw.trim() === '') return fallback;
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on') return true;
+  if (normalized === '0' || normalized === 'false' || normalized === 'no' || normalized === 'off') return false;
+  return fallback;
+}
+
+export function isTtsRateLimitEnabled(): boolean {
+  return readBooleanEnv('TTS_ENABLE_RATE_LIMIT', false);
+}
+
 // Rate limits configuration - character counts per day
 export const RATE_LIMITS = {
-  ANONYMOUS: 50_000,    // 50K characters per day for anonymous users
-  AUTHENTICATED: 500_000, // 500K characters per day for authenticated users
+  ANONYMOUS: readPositiveIntEnv('TTS_DAILY_LIMIT_ANONYMOUS', 50_000),
+  AUTHENTICATED: readPositiveIntEnv('TTS_DAILY_LIMIT_AUTHENTICATED', 500_000),
   // IP-based backstop limits to make it harder to reset limits by creating new accounts
   // or clearing storage/cookies
-  IP_ANONYMOUS: Number(process.env.TTS_IP_DAILY_LIMIT_ANONYMOUS || 100_000),
-  IP_AUTHENTICATED: Number(process.env.TTS_IP_DAILY_LIMIT_AUTHENTICATED || 1_000_000),
+  IP_ANONYMOUS: readPositiveIntEnv('TTS_IP_DAILY_LIMIT_ANONYMOUS', 100_000),
+  IP_AUTHENTICATED: readPositiveIntEnv('TTS_IP_DAILY_LIMIT_AUTHENTICATED', 1_000_000),
 } as const;
 
 // Helper to ensure DB is strictly typed when we know it exists
@@ -126,7 +152,7 @@ export class RateLimiter {
    * Check if a user can use TTS and increment their char count if allowed
    */
   async checkAndIncrementLimit(user: UserInfo, charCount: number, backstops?: RateLimitBackstops): Promise<RateLimitResult> {
-    if (!isAuthEnabled()) {
+    if (!isAuthEnabled() || !isTtsRateLimitEnabled()) {
       return {
         allowed: true,
         currentCount: 0,
@@ -227,7 +253,7 @@ export class RateLimiter {
    * Get current usage for a user without incrementing
    */
   async getCurrentUsage(user: UserInfo, backstops?: RateLimitBackstops): Promise<RateLimitResult> {
-    if (!isAuthEnabled()) {
+    if (!isAuthEnabled() || !isTtsRateLimitEnabled()) {
       return {
         allowed: true,
         currentCount: 0,
@@ -283,7 +309,7 @@ export class RateLimiter {
    * Transfer char counts when anonymous user creates an account
    */
   async transferAnonymousUsage(anonymousUserId: string, authenticatedUserId: string): Promise<void> {
-    if (!isAuthEnabled()) return;
+    if (!isAuthEnabled() || !isTtsRateLimitEnabled()) return;
 
     const today = new Date().toISOString().split('T')[0];
     const dateValue = today as unknown as UserTtsCharsDateValue;
