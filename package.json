@@ -3,15 +3,19 @@
   "version": "v1.3.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --turbopack -p 3003",
+    "dev": "node scripts/openreader-entrypoint.mjs -- pnpm dev:raw",
+    "dev:raw": "next dev --turbopack -p 3003",
     "build": "next build",
-    "start": "node drizzle/scripts/migrate.mjs && next start -p 3003",
+    "start": "node scripts/openreader-entrypoint.mjs -- pnpm start:raw",
+    "start:raw": "next start -p 3003",
     "lint": "next lint",
     "test": "playwright test",
     "migrate": "node drizzle/scripts/migrate.mjs",
     "generate": "node drizzle/scripts/generate.mjs"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.985.0",
+    "@aws-sdk/s3-request-presigner": "^3.985.0",
     "@headlessui/react": "^2.2.9",
     "@types/howler": "^2.2.12",
     "@types/uuid": "^10.0.0",

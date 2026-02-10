@@ -6,11 +6,12 @@ import { existsSync } from 'fs';
 import { randomUUID, createHash } from 'crypto';
 import { pathToFileURL } from 'url';
 import { requireAuthContext } from '@/lib/server/auth';
-import { ensureDocumentsV1Ready, isDocumentsV1Ready, DOCUMENTS_V1_DIR } from '@/lib/server/docstore';
 import { db } from '@/db';
 import { documents } from '@/db/schema';
-import { safeDocumentName, trySetFileMtime } from '@/lib/server/documents-utils';
-import { applyOpenReaderTestNamespacePath, getOpenReaderTestNamespace, getUnclaimedUserIdForNamespace } from '@/lib/server/test-namespace';
+import { safeDocumentName } from '@/lib/server/documents-utils';
+import { getOpenReaderTestNamespace, getUnclaimedUserIdForNamespace } from '@/lib/server/test-namespace';
+import { isS3Configured } from '@/lib/server/s3';
+import { putDocumentBlob } from '@/lib/server/documents-blobstore';
 
 const DOCSTORE_DIR = path.join(process.cwd(), 'docstore');
 const TEMP_DIR = path.join(DOCSTORE_DIR, 'tmp');
@@ -66,18 +67,15 @@ async function waitForPdfReady(dir: string, timeoutMs = 20000, intervalMs = 100)
 
 export async function POST(req: NextRequest) {
   try {
-    await ensureDocumentsV1Ready();
-    if (!(await isDocumentsV1Ready())) {
+    if (!isS3Configured()) {
       return NextResponse.json(
-        { error: 'Documents storage is not migrated; run /api/migrations/v1 first.' },
-        { status: 409 },
+        { error: 'Documents storage is not configured. Set S3_* environment variables.' },
+        { status: 503 },
       );
     }
 
     const testNamespace = getOpenReaderTestNamespace(req.headers);
-    const documentsDir = applyOpenReaderTestNamespacePath(DOCUMENTS_V1_DIR, testNamespace);
     const unclaimedUserId = getUnclaimedUserIdForNamespace(testNamespace);
-    await mkdir(documentsDir, { recursive: true });
 
     const ctxOrRes = await requireAuthContext(req);
     if (ctxOrRes instanceof Response) return ctxOrRes;
@@ -96,7 +94,7 @@ export async function POST(req: NextRequest) {
     }
 
     const docxBytes = Buffer.from(await file.arrayBuffer());
-    // IMPORTANT: use sha of the source DOCX bytes for a stable ID across conversions.
+    // Keep stable IDs tied to source bytes.
     const id = createHash('sha256').update(docxBytes).digest('hex');
 
     const tempId = randomUUID();
@@ -113,18 +111,19 @@ export async function POST(req: NextRequest) {
       const pdfPath = await waitForPdfReady(jobDir);
       const pdfContent = await readFile(pdfPath);
 
-      const derivedName = safeDocumentName(`${path.parse(file.name).name}.pdf`, `${id}.pdf`);
-      const targetFileName = `${id}__${encodeURIComponent(derivedName)}`;
-      const targetPath = path.join(documentsDir, targetFileName);
-
       try {
-        await stat(targetPath);
-      } catch {
-        await writeFile(targetPath, pdfContent);
+        await putDocumentBlob(id, pdfContent, 'application/pdf', testNamespace);
+      } catch (error) {
+        // Idempotent behavior: if blob already exists for this sha, continue.
+        const maybe = error as { name?: string; $metadata?: { httpStatusCode?: number } } | undefined;
+        const isPreconditionFailed = maybe?.$metadata?.httpStatusCode === 412 || maybe?.name === 'PreconditionFailed';
+        if (!isPreconditionFailed) {
+          throw error;
+        }
       }
 
+      const derivedName = safeDocumentName(`${path.parse(file.name).name}.pdf`, `${id}.pdf`);
       const lastModified = Number.isFinite(file.lastModified) ? file.lastModified : Date.now();
-      await trySetFileMtime(targetPath, lastModified);
 
       await db
         .insert(documents)
@@ -135,9 +134,18 @@ export async function POST(req: NextRequest) {
           type: 'pdf',
           size: pdfContent.length,
           lastModified,
-          filePath: targetFileName,
+          filePath: id,
         })
-        .onConflictDoNothing();
+        .onConflictDoUpdate({
+          target: [documents.id, documents.userId],
+          set: {
+            name: derivedName,
+            type: 'pdf',
+            size: pdfContent.length,
+            lastModified,
+            filePath: id,
+          },
+        });
 
       return NextResponse.json({
         stored: {

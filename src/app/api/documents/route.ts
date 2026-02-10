@@ -1,211 +1,206 @@
-import { createHash } from 'crypto';
-import { mkdir, readFile, stat, unlink, writeFile } from 'fs/promises';
-import { existsSync } from 'fs';
 import { NextRequest, NextResponse } from 'next/server';
-import path from 'path';
-import { DOCUMENTS_V1_DIR, ensureDocumentsV1Ready, isDocumentsV1Ready } from '@/lib/server/docstore';
-import type { BaseDocument, DocumentType, SyncedDocument } from '@/types/documents';
+import { and, count, eq, inArray } from 'drizzle-orm';
 import { db } from '@/db';
 import { documents } from '@/db/schema';
-import { eq, and, inArray, count } from 'drizzle-orm';
 import { requireAuthContext } from '@/lib/server/auth';
-import { ensureDbIndexed } from '@/lib/server/db-indexing';
-import { isEnoent, toDocumentTypeFromName, trySetFileMtime } from '@/lib/server/documents-utils';
-import { applyOpenReaderTestNamespacePath, getOpenReaderTestNamespace, getUnclaimedUserIdForNamespace } from '@/lib/server/test-namespace';
+import { safeDocumentName, toDocumentTypeFromName } from '@/lib/server/documents-utils';
+import { deleteDocumentBlob, headDocumentBlob, isMissingBlobError, isValidDocumentId } from '@/lib/server/documents-blobstore';
+import { getOpenReaderTestNamespace, getUnclaimedUserIdForNamespace } from '@/lib/server/test-namespace';
+import { isS3Configured } from '@/lib/server/s3';
+import type { BaseDocument, DocumentType } from '@/types/documents';
 
 export const dynamic = 'force-dynamic';
 
+type RegisterDocument = {
+  id: string;
+  name: string;
+  type: DocumentType;
+  size: number;
+  lastModified: number;
+};
+
+function s3NotConfiguredResponse(): NextResponse {
+  return NextResponse.json(
+    { error: 'Documents storage is not configured. Set S3_* environment variables.' },
+    { status: 503 },
+  );
+}
+
+function normalizeDocumentType(rawType: unknown, safeName: string): DocumentType {
+  if (rawType === 'pdf' || rawType === 'epub' || rawType === 'docx' || rawType === 'html') {
+    return rawType;
+  }
+  return toDocumentTypeFromName(safeName);
+}
+
+function normalizeLastModified(value: unknown): number {
+  return Number.isFinite(value) && Number(value) > 0 ? Number(value) : Date.now();
+}
+
+function parseDocumentPayload(body: unknown): RegisterDocument[] {
+  if (!body || typeof body !== 'object') return [];
+  const rawDocs = (body as { documents?: unknown }).documents;
+  if (!Array.isArray(rawDocs)) return [];
+
+  const docs: RegisterDocument[] = [];
+  for (const rawDoc of rawDocs) {
+    if (!rawDoc || typeof rawDoc !== 'object') continue;
+    const rec = rawDoc as Record<string, unknown>;
+    const id = typeof rec.id === 'string' ? rec.id.trim().toLowerCase() : '';
+    if (!isValidDocumentId(id)) continue;
+    const fallbackName = `${id}.${typeof rec.type === 'string' ? rec.type : 'txt'}`;
+    const name = safeDocumentName(typeof rec.name === 'string' ? rec.name : '', fallbackName);
+    const type = normalizeDocumentType(rec.type, name);
+    const lastModified = normalizeLastModified(rec.lastModified);
+    const size = Number.isFinite(rec.size) && Number(rec.size) >= 0 ? Number(rec.size) : 0;
+    docs.push({ id, name, type, size, lastModified });
+  }
+  return docs;
+}
+
 export async function POST(req: NextRequest) {
   try {
-    await ensureDocumentsV1Ready();
-    if (!(await isDocumentsV1Ready())) {
-      return NextResponse.json(
-        { error: 'Documents storage is not migrated; run /api/migrations/v1 first.' },
-        { status: 409 },
-      );
-    }
-
-    const testNamespace = getOpenReaderTestNamespace(req.headers);
-    const syncDir = applyOpenReaderTestNamespacePath(DOCUMENTS_V1_DIR, testNamespace);
-    const unclaimedUserId = getUnclaimedUserIdForNamespace(testNamespace);
-    await mkdir(syncDir, { recursive: true });
+    if (!isS3Configured()) return s3NotConfiguredResponse();
 
     const ctxOrRes = await requireAuthContext(req);
     if (ctxOrRes instanceof Response) return ctxOrRes;
+
+    const testNamespace = getOpenReaderTestNamespace(req.headers);
+    const unclaimedUserId = getUnclaimedUserIdForNamespace(testNamespace);
     const storageUserId = ctxOrRes.userId ?? unclaimedUserId;
 
-    const data = await req.json();
-    const documentsData = data.documents as SyncedDocument[];
-    const stored: Array<{ oldId: string; id: string; name: string }> = [];
+    const body = await req.json().catch(() => null);
+    const documentsData = parseDocumentPayload(body);
+    if (documentsData.length === 0) {
+      return NextResponse.json({ error: 'No valid documents provided' }, { status: 400 });
+    }
 
-    // Ensure directory exists (redundant with isDocumentsV1Ready but safe)
-    // const SYNC_DIR = DOCUMENTS_V1_DIR; 
+    const stored: BaseDocument[] = [];
 
     for (const doc of documentsData) {
-      const content = Buffer.from(new Uint8Array(doc.data));
-      const id = createHash('sha256').update(content).digest('hex');
-
-      const baseName = path.basename(doc.name || `${id}.${doc.type}`);
-      const safeName = baseName.replaceAll('\u0000', '').slice(0, 240) || `${id}.${doc.type}`;
-
-      const targetFileName = `${id}__${encodeURIComponent(safeName)}`;
-      const targetPath = path.join(syncDir, targetFileName);
-
-      // Write file if not exists
+      let headSize = doc.size;
       try {
-        await stat(targetPath);
-      } catch {
-        await writeFile(targetPath, content);
+        const head = await headDocumentBlob(doc.id, testNamespace);
+        if (head.contentLength > 0) headSize = head.contentLength;
+      } catch (error) {
+        if (isMissingBlobError(error)) {
+          return NextResponse.json(
+            {
+              error: `Blob missing for document ${doc.id}. Upload bytes first using /api/documents/blob/upload/presign.`,
+            },
+            { status: 409 },
+          );
+        }
+        throw error;
       }
-      await trySetFileMtime(targetPath, doc.lastModified);
 
-      // DB Upsert
-      // With composite PK (id, userId), we check if THIS user already has this document
       await db
         .insert(documents)
         .values({
-          id,
+          id: doc.id,
           userId: storageUserId,
-          name: safeName,
+          name: doc.name,
           type: doc.type,
-          size: content.length,
+          size: headSize,
           lastModified: doc.lastModified,
-          filePath: targetFileName,
+          filePath: doc.id,
         })
-        .onConflictDoNothing();
+        .onConflictDoUpdate({
+          target: [documents.id, documents.userId],
+          set: {
+            name: doc.name,
+            type: doc.type,
+            size: headSize,
+            lastModified: doc.lastModified,
+            filePath: doc.id,
+          },
+        });
 
-      stored.push({ oldId: doc.id, id, name: safeName });
+      stored.push({
+        id: doc.id,
+        name: doc.name,
+        type: doc.type,
+        size: headSize,
+        lastModified: doc.lastModified,
+        scope: storageUserId === unclaimedUserId ? 'unclaimed' : 'user',
+      });
     }
 
     return NextResponse.json({ success: true, stored });
   } catch (error) {
-    console.error('Error saving documents:', error);
-    return NextResponse.json({ error: 'Failed to save documents' }, { status: 500 });
+    console.error('Error registering documents:', error);
+    return NextResponse.json({ error: 'Failed to register documents' }, { status: 500 });
   }
 }
 
 export async function GET(req: NextRequest) {
   try {
-    await ensureDocumentsV1Ready();
-    if (!(await isDocumentsV1Ready())) {
-      return NextResponse.json(
-        { error: 'Documents storage is not migrated; run /api/migrations/v1 first.' },
-        { status: 409 },
-      );
-    }
+    if (!isS3Configured()) return s3NotConfiguredResponse();
 
     const ctxOrRes = await requireAuthContext(req);
     if (ctxOrRes instanceof Response) return ctxOrRes;
 
     const testNamespace = getOpenReaderTestNamespace(req.headers);
-    const syncDir = applyOpenReaderTestNamespacePath(DOCUMENTS_V1_DIR, testNamespace);
     const unclaimedUserId = getUnclaimedUserIdForNamespace(testNamespace);
-
     const storageUserId = ctxOrRes.userId ?? unclaimedUserId;
     const allowedUserIds = ctxOrRes.authEnabled ? [storageUserId, unclaimedUserId] : [unclaimedUserId];
 
-    await ensureDbIndexed();
-
     const url = new URL(req.url);
-    const list = url.searchParams.get('list') === 'true';
-    const format = url.searchParams.get('format');
     const idsParam = url.searchParams.get('ids');
+    const targetIds = idsParam
+      ? idsParam
+          .split(',')
+          .map((id) => id.trim().toLowerCase())
+          .filter((id) => isValidDocumentId(id))
+      : null;
 
-    // If list=true, force metadata only.
-    // If format=metadata, force metadata only.
-    // Otherwise include data.
-    const includeData = !list && format !== 'metadata';
-
-    const targetIds = idsParam ? idsParam.split(',').filter(Boolean) : null;
-
-    // Query database for documents the user is allowed to access
-    let allowedDocs: { id: string; userId: string; name: string; type: string; size: number; lastModified: number; filePath: string }[] = [];
+    if (idsParam && (!targetIds || targetIds.length === 0)) {
+      return NextResponse.json({ documents: [] });
+    }
 
     const conditions = [
       inArray(documents.userId, allowedUserIds),
-      ...(targetIds ? [inArray(documents.id, targetIds)] : []),
+      ...(targetIds && targetIds.length > 0 ? [inArray(documents.id, targetIds)] : []),
     ];
-    const rows = await db.select().from(documents).where(and(...conditions));
-    allowedDocs = rows as unknown as { id: string; userId: string; name: string; type: string; size: number; lastModified: number; filePath: string }[];
+    const rows = (await db.select().from(documents).where(and(...conditions))) as Array<{
+      id: string;
+      userId: string;
+      name: string;
+      type: string;
+      size: number;
+      lastModified: number;
+      filePath: string;
+    }>;
 
-    const results: (BaseDocument | SyncedDocument)[] = [];
-
-    for (const doc of allowedDocs) {
-      const type: DocumentType =
-        doc.type === 'pdf' || doc.type === 'epub' || doc.type === 'docx' || doc.type === 'html'
-          ? (doc.type as DocumentType)
-          : toDocumentTypeFromName(doc.name);
-
-      // If the underlying file was deleted manually, keep the API self-healing:
-      // prune the DB row so clients stop listing ghost documents.
-      const absolutePath = doc.filePath ? path.join(syncDir, doc.filePath) : '';
-      if (!absolutePath || !existsSync(absolutePath)) {
-        await db
-          .delete(documents)
-          .where(and(eq(documents.id, doc.id), eq(documents.userId, doc.userId)));
-        continue;
-      }
-
-      const metadata: BaseDocument = {
-        id: doc.id!,
+    const results: BaseDocument[] = rows.map((doc) => {
+      const type = normalizeDocumentType(doc.type, doc.name);
+      return {
+        id: doc.id,
         name: doc.name,
-        size: doc.size,
-        lastModified: doc.lastModified,
+        size: Number(doc.size),
+        lastModified: Number(doc.lastModified),
         type,
         scope: doc.userId === unclaimedUserId ? 'unclaimed' : 'user',
       };
-
-      if (!includeData) {
-        results.push(metadata);
-        continue;
-      }
-
-      try {
-        const content = await readFile(absolutePath);
-        results.push({
-          ...metadata,
-          data: Array.from(new Uint8Array(content)),
-        });
-      } catch (err) {
-        if (isEnoent(err)) {
-          await db
-            .delete(documents)
-            .where(and(eq(documents.id, doc.id), eq(documents.userId, doc.userId)));
-          continue;
-        }
-        console.warn(`Failed to read content for document ${doc.id} at ${doc.filePath}`, err);
-      }
-    }
+    });
 
     return NextResponse.json({ documents: results });
   } catch (error) {
-    console.error('Error loading documents:', error);
+    console.error('Error loading document metadata:', error);
     return NextResponse.json({ error: 'Failed to load documents' }, { status: 500 });
   }
 }
 
-
 export async function DELETE(req: NextRequest) {
   try {
-    await ensureDocumentsV1Ready();
-    if (!(await isDocumentsV1Ready())) {
-      return NextResponse.json(
-        { error: 'Documents storage is not migrated; run /api/migrations/v1 first.' },
-        { status: 409 },
-      );
-    }
+    if (!isS3Configured()) return s3NotConfiguredResponse();
 
-    // Auth check - require session
     const ctxOrRes = await requireAuthContext(req);
     if (ctxOrRes instanceof Response) return ctxOrRes;
 
     const testNamespace = getOpenReaderTestNamespace(req.headers);
-    const syncDir = applyOpenReaderTestNamespacePath(DOCUMENTS_V1_DIR, testNamespace);
     const unclaimedUserId = getUnclaimedUserIdForNamespace(testNamespace);
-
     const storageUserId = ctxOrRes.userId ?? unclaimedUserId;
-
-    await ensureDbIndexed();
 
     const url = new URL(req.url);
     const idsParam = url.searchParams.get('ids');
@@ -221,7 +216,6 @@ export async function DELETE(req: NextRequest) {
       );
     }
 
-    // Deleting the global unclaimed pool is a privileged operation when auth is enabled.
     if (ctxOrRes.authEnabled && wantsUnclaimed && ctxOrRes.user?.isAnonymous) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
@@ -239,58 +233,45 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ success: true, deleted: 0 });
     }
 
-    // Determine which IDs to try to delete
     let targetIds: string[] = [];
-
     if (idsParam) {
-      targetIds = idsParam.split(',').filter(Boolean);
+      targetIds = idsParam
+        .split(',')
+        .map((id) => id.trim().toLowerCase())
+        .filter((id) => isValidDocumentId(id));
     } else {
-      // Existing behavior was "nuke everything"; keep it scoped to the selected user buckets.
-      const rows = await db
+      const rows = (await db
         .select({ id: documents.id })
         .from(documents)
-        .where(inArray(documents.userId, targetUserIds));
-      targetIds = rows.map((d: { id: string | null }) => d.id!).filter(Boolean) as string[];
+        .where(inArray(documents.userId, targetUserIds))) as Array<{ id: string }>;
+      targetIds = rows.map((row) => row.id);
     }
 
     if (targetIds.length === 0) {
       return NextResponse.json({ success: true, deleted: 0 });
     }
 
-    const deletedRows: { id: string; filePath: string }[] = [];
-
-    const rows = await db
+    const deletedRows = (await db
       .delete(documents)
       .where(and(inArray(documents.userId, targetUserIds), inArray(documents.id, targetIds)))
-      .returning({ id: documents.id, filePath: documents.filePath });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    rows.forEach((r: any) => deletedRows.push({ id: r.id!, filePath: r.filePath }));
+      .returning({ id: documents.id })) as Array<{ id: string }>;
 
-    // If driver doesn't support returning (e.g. older SQLite without properly configured returning), we might fallback.
-    // But Drizzle usually handles this.
+    const uniqueIds = Array.from(new Set(deletedRows.map((row) => row.id)));
+    for (const id of uniqueIds) {
+      const [ref] = await db.select({ count: count() }).from(documents).where(eq(documents.id, id));
+      const refCount = Number(ref?.count ?? 0);
+      if (refCount > 0) continue;
 
-    let deletedCount = 0;
-
-    for (const row of deletedRows) {
-      deletedCount++;
-      // Chech reference count for this ID
-      // If 0 remaining, delete file
-      let refCount = 0;
-      const [ref] = await db.select({ count: count() }).from(documents).where(eq(documents.id, row.id!));
-      refCount = Number(ref?.count ?? 0);
-
-      if (refCount === 0) {
-        const filePath = path.join(syncDir, row.filePath);
-        try {
-          await unlink(filePath);
-        } catch {
-          // Ignore if missing
+      try {
+        await deleteDocumentBlob(id, testNamespace);
+      } catch (error) {
+        if (!isMissingBlobError(error)) {
+          throw error;
         }
       }
     }
 
-    return NextResponse.json({ success: true, deleted: deletedCount });
-
+    return NextResponse.json({ success: true, deleted: deletedRows.length });
   } catch (error) {
     console.error('Error deleting documents:', error);
     return NextResponse.json({ error: 'Failed to delete documents' }, { status: 500 });

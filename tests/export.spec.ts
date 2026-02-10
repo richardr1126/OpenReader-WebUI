@@ -251,7 +251,8 @@ test('exports partial MP3 audiobook for EPUB using mocked 10s TTS sample', async
   await startGeneration(page);
 
   // Progress card should appear with a Cancel button while chapters are being generated
-  const cancelButton = page.getByRole('button', { name: 'Cancel' });
+  const generationCard = page.locator('div', { hasText: 'Generating Audiobook' }).first();
+  const cancelButton = generationCard.getByRole('button', { name: 'Cancel' });
   await expect(cancelButton).toBeVisible({ timeout: 60_000 });
 
   await expect(page.getByRole('heading', { name: 'Chapters' })).toBeVisible({ timeout: 60_000 });
@@ -266,8 +267,10 @@ test('exports partial MP3 audiobook for EPUB using mocked 10s TTS sample', async
   // Now cancel the in-flight generation
   await cancelButton.click();
 
-  // After cancellation, the inline progress card's Cancel button should be gone
-  await expect(page.getByRole('button', { name: 'Cancel' })).toHaveCount(0);
+  // Cancellation is asynchronous: wait for generation to settle before asserting
+  // that the inline progress card has disappeared.
+  await expect(page.getByRole('button', { name: 'Resume' })).toBeVisible({ timeout: 30_000 });
+  await expect(generationCard).toHaveCount(0, { timeout: 30_000 });
 
   // After cancellation, wait for the chapter count to stabilize. In-flight TTS
   // requests may still complete after we click cancel, so we poll until the

@@ -5,7 +5,8 @@ import {
   extractEpubCoverToDataUrl,
   renderPdfFirstPageToDataUrl,
 } from '@/lib/documentPreview';
-import { downloadDocumentContent, getDocumentContentSnippet } from '@/lib/client-documents';
+import { getDocumentContentSnippet } from '@/lib/client-documents';
+import { ensureCachedDocument } from '@/lib/document-cache';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -36,6 +37,16 @@ export function DocumentPreview({ doc }: DocumentPreviewProps) {
   const [isGenerating, setIsGenerating] = useState(false);
 
   const previewKey = useMemo(() => `${doc.type}:${doc.id}`, [doc.id, doc.type]);
+  const cacheMeta = useMemo(
+    () => ({
+      id: doc.id,
+      name: doc.name,
+      type: doc.type,
+      size: doc.size,
+      lastModified: doc.lastModified,
+    }),
+    [doc.id, doc.lastModified, doc.name, doc.size, doc.type],
+  );
 
   useEffect(() => {
     const el = containerRef.current;
@@ -81,7 +92,9 @@ export function DocumentPreview({ doc }: DocumentPreviewProps) {
         const targetWidth = 240;
 
         if (doc.type === 'pdf') {
-          const data = await downloadDocumentContent(doc.id, { signal: controller.signal });
+          const cached = await ensureCachedDocument(cacheMeta, { signal: controller.signal });
+          if (cached.type !== 'pdf') return;
+          const data = cached.data;
           if (cancelled) return;
           const dataUrl = await renderPdfFirstPageToDataUrl(data, targetWidth);
           if (cancelled) return;
@@ -92,7 +105,9 @@ export function DocumentPreview({ doc }: DocumentPreviewProps) {
         }
 
         if (doc.type === 'epub') {
-          const data = await downloadDocumentContent(doc.id, { signal: controller.signal });
+          const cached = await ensureCachedDocument(cacheMeta, { signal: controller.signal });
+          if (cached.type !== 'epub') return;
+          const data = cached.data;
           if (cancelled) return;
           const cover = await extractEpubCoverToDataUrl(data, targetWidth);
           if (cancelled) return;
@@ -130,7 +145,7 @@ export function DocumentPreview({ doc }: DocumentPreviewProps) {
       cancelled = true;
       controller.abort();
     };
-  }, [doc.id, doc.type, isVisible, previewKey]);
+  }, [cacheMeta, doc.id, doc.type, isVisible, previewKey]);
 
   const gradientClass = isPDF
     ? 'from-red-500/80 via-red-400/60 to-red-600/80'

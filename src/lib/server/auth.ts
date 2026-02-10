@@ -13,6 +13,34 @@ import * as schema from "@/db/schema"; // Import the dynamic schema
 
 // ...
 
+function tryGetOrigin(url: string | undefined): string | null {
+  if (!url) return null;
+  try {
+    return new URL(url).origin;
+  } catch {
+    return null;
+  }
+}
+
+function getTrustedOrigins(): string[] {
+  const origins = new Set<string>();
+  const baseOrigin = tryGetOrigin(process.env.BASE_URL);
+  if (baseOrigin) origins.add(baseOrigin);
+
+  // Comma-separated list for local multi-host setups (e.g., localhost + LAN IP).
+  const extra = (process.env.AUTH_TRUSTED_ORIGINS || '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  for (const candidate of extra) {
+    const origin = tryGetOrigin(candidate);
+    if (origin) origins.add(origin);
+  }
+
+  return Array.from(origins);
+}
+
 const createAuth = () => betterAuth({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   database: drizzleAdapter(db as any, {
@@ -25,8 +53,9 @@ const createAuth = () => betterAuth({
       verification: schema.verification,
     }
   }),
-  secret: process.env.BETTER_AUTH_SECRET!,
-  baseURL: process.env.BETTER_AUTH_URL || "http://localhost:3003",
+  secret: process.env.AUTH_SECRET!,
+  baseURL: process.env.BASE_URL!,
+  trustedOrigins: getTrustedOrigins(),
   emailAndPassword: {
     enabled: true,
     requireEmailVerification: false, // Set to true in production

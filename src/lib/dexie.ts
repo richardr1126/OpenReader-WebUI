@@ -5,11 +5,12 @@ import {
   EPUBDocument,
   HTMLDocument,
   DocumentListState,
-  SyncedDocument,
   BaseDocument,
   DocumentListDocument,
 } from '@/types/documents';
 import { sha256HexFromBytes, sha256HexFromString } from '@/lib/sha256';
+import { downloadDocumentContent, listDocuments, uploadDocumentSources, type UploadSource } from '@/lib/client-documents';
+import { cacheStoredDocumentFromBytes } from '@/lib/document-cache';
 
 const DB_NAME = 'openreader-db';
 // Managed via Dexie (version bumped from the original manual IndexedDB)
@@ -657,15 +658,26 @@ export async function syncDocumentsToServer(
   const epubDocs = await getAllEpubDocuments();
   const htmlDocs = await getAllHtmlDocuments();
 
-  const documents: SyncedDocument[] = [];
+  const uploads: Array<{ oldId: string; source: UploadSource }> = [];
   const totalDocs = pdfDocs.length + epubDocs.length + htmlDocs.length;
   let processedDocs = 0;
 
+  const textEncoder = new TextEncoder();
+
   for (const doc of pdfDocs) {
-    documents.push({
-      ...doc,
-      type: 'pdf',
-      data: Array.from(new Uint8Array(doc.data)),
+    const bytes = new Uint8Array(doc.data);
+    const id = await sha256HexFromBytes(bytes);
+    uploads.push({
+      oldId: doc.id,
+      source: {
+        id,
+        name: doc.name,
+        type: 'pdf',
+        size: bytes.byteLength,
+        lastModified: doc.lastModified,
+        contentType: 'application/pdf',
+        body: bytes,
+      },
     });
     processedDocs++;
     if (onProgress) {
@@ -674,10 +686,19 @@ export async function syncDocumentsToServer(
   }
 
   for (const doc of epubDocs) {
-    documents.push({
-      ...doc,
-      type: 'epub',
-      data: Array.from(new Uint8Array(doc.data)),
+    const bytes = new Uint8Array(doc.data);
+    const id = await sha256HexFromBytes(bytes);
+    uploads.push({
+      oldId: doc.id,
+      source: {
+        id,
+        name: doc.name,
+        type: 'epub',
+        size: bytes.byteLength,
+        lastModified: doc.lastModified,
+        contentType: 'application/epub+zip',
+        body: bytes,
+      },
     });
     processedDocs++;
     if (onProgress) {
@@ -685,13 +706,20 @@ export async function syncDocumentsToServer(
     }
   }
 
-  const encoder = new TextEncoder();
   for (const doc of htmlDocs) {
-    const encoded = encoder.encode(doc.data);
-    documents.push({
-      ...doc,
-      type: 'html',
-      data: Array.from(encoded),
+    const encoded = textEncoder.encode(doc.data);
+    const id = await sha256HexFromBytes(encoded);
+    uploads.push({
+      oldId: doc.id,
+      source: {
+        id,
+        name: doc.name,
+        type: 'html',
+        size: encoded.byteLength,
+        lastModified: doc.lastModified,
+        contentType: 'text/plain; charset=utf-8',
+        body: encoded,
+      },
     });
     processedDocs++;
     if (onProgress) {
@@ -703,25 +731,11 @@ export async function syncDocumentsToServer(
     onProgress(50, 'Uploading to server...');
   }
 
-  const response = await fetch('/api/documents', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ documents }),
-    signal,
-  });
+  await uploadDocumentSources(uploads.map((entry) => entry.source), { signal });
 
-  if (!response.ok) {
-    throw new Error('Failed to sync documents to server');
-  }
-
-  const payload = (await response.json().catch(() => null)) as
-    | { stored?: Array<{ oldId: string; id: string }> }
-    | null;
-  const stored = payload?.stored ?? [];
-  for (const mapping of stored) {
-    if (!mapping || typeof mapping.oldId !== 'string' || typeof mapping.id !== 'string') continue;
-    if (mapping.oldId === mapping.id) continue;
-    await applyDocumentIdMapping(mapping.oldId, mapping.id);
+  for (const entry of uploads) {
+    if (entry.oldId === entry.source.id) continue;
+    await applyDocumentIdMapping(entry.oldId, entry.source.id);
   }
 
   if (onProgress) {
@@ -736,52 +750,77 @@ export async function syncSelectedDocumentsToServer(
   onProgress?: (progress: number, status?: string) => void,
   signal?: AbortSignal,
 ): Promise<{ lastSync: number }> {
-    // Re-use logic from syncDocumentsToServer but only for specific documents
-    // Actually, syncDocumentsToServer fetches all docs from DB.
-    // We need to fetch the *full content* of the selected docs from DB.
-    
-    const fullDocs: SyncedDocument[] = [];
-    let processed = 0;
-    
-    for (const doc of documents) {
-        if (doc.type === 'pdf') {
-            const data = await getPdfDocument(doc.id);
-            if (data) fullDocs.push({ ...data, type: 'pdf', data: Array.from(new Uint8Array(data.data)) });
-        } else if (doc.type === 'epub') {
-            const data = await getEpubDocument(doc.id);
-            if (data) fullDocs.push({ ...data, type: 'epub', data: Array.from(new Uint8Array(data.data)) });
-        } else {
-            const data = await getHtmlDocument(doc.id);
-            if (data) {
-                const encoder = new TextEncoder();
-                fullDocs.push({ ...data, type: 'html', data: Array.from(encoder.encode(data.data)) });
-            }
-        }
-        processed++;
-        if (onProgress) onProgress((processed / documents.length) * 50, `Preparing ${processed}/${documents.length}...`);
+  const uploads: Array<{ oldId: string; source: UploadSource }> = [];
+  const textEncoder = new TextEncoder();
+  let processed = 0;
+
+  for (const doc of documents) {
+    if (doc.type === 'pdf') {
+      const data = await getPdfDocument(doc.id);
+      if (data) {
+        const bytes = new Uint8Array(data.data);
+        const id = await sha256HexFromBytes(bytes);
+        uploads.push({
+          oldId: data.id,
+          source: {
+            id,
+            name: data.name,
+            type: 'pdf',
+            size: bytes.byteLength,
+            lastModified: data.lastModified,
+            contentType: 'application/pdf',
+            body: bytes,
+          },
+        });
+      }
+    } else if (doc.type === 'epub') {
+      const data = await getEpubDocument(doc.id);
+      if (data) {
+        const bytes = new Uint8Array(data.data);
+        const id = await sha256HexFromBytes(bytes);
+        uploads.push({
+          oldId: data.id,
+          source: {
+            id,
+            name: data.name,
+            type: 'epub',
+            size: bytes.byteLength,
+            lastModified: data.lastModified,
+            contentType: 'application/epub+zip',
+            body: bytes,
+          },
+        });
+      }
+    } else {
+      const data = await getHtmlDocument(doc.id);
+      if (data) {
+        const bytes = textEncoder.encode(data.data);
+        const id = await sha256HexFromBytes(bytes);
+        uploads.push({
+          oldId: data.id,
+          source: {
+            id,
+            name: data.name,
+            type: 'html',
+            size: bytes.byteLength,
+            lastModified: data.lastModified,
+            contentType: 'text/plain; charset=utf-8',
+            body: bytes,
+          },
+        });
+      }
     }
-    
-    if (onProgress) onProgress(50, 'Uploading to server...');
 
-  const response = await fetch('/api/documents', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ documents: fullDocs }),
-    signal,
-  });
-
-  if (!response.ok) {
-    throw new Error('Failed to sync documents to server');
+    processed++;
+    if (onProgress) onProgress((processed / documents.length) * 50, `Preparing ${processed}/${documents.length}...`);
   }
 
-  const payload = (await response.json().catch(() => null)) as
-    | { stored?: Array<{ oldId: string; id: string }> }
-    | null;
-  const stored = payload?.stored ?? [];
-  for (const mapping of stored) {
-    if (!mapping || typeof mapping.oldId !== 'string' || typeof mapping.id !== 'string') continue;
-    if (mapping.oldId === mapping.id) continue;
-    await applyDocumentIdMapping(mapping.oldId, mapping.id);
+  if (onProgress) onProgress(50, 'Uploading to server...');
+  await uploadDocumentSources(uploads.map((entry) => entry.source), { signal });
+
+  for (const entry of uploads) {
+    if (entry.oldId === entry.source.id) continue;
+    await applyDocumentIdMapping(entry.oldId, entry.source.id);
   }
 
   if (onProgress) {
@@ -800,22 +839,8 @@ export async function loadDocumentsFromServer(
     onProgress(10, 'Starting download...');
   }
 
-  const response = await fetch('/api/documents', { signal });
-  if (!response.ok) {
-    throw new Error('Failed to fetch documents from server');
-  }
-
-  if (onProgress) {
-    onProgress(30, 'Download complete');
-  }
-
-  const { documents } = (await response.json()) as { documents: SyncedDocument[] };
-
-  if (onProgress) {
-    onProgress(40, 'Parsing documents...');
-  }
-
-  await saveSyncedDocumentsLocally(documents, onProgress);
+  const documents = await listDocuments({ signal });
+  await downloadAndCacheServerDocuments(documents, onProgress, signal);
 
   if (onProgress) {
     onProgress(100, 'Load complete!');
@@ -832,26 +857,9 @@ export async function loadSelectedDocumentsFromServer(
   if (onProgress) {
     onProgress(10, 'Starting download...');
   }
-  
-  // Use new filtered API
-  const idsParam = selectedIds.join(',');
-  const response = await fetch(`/api/documents?ids=${encodeURIComponent(idsParam)}`, { signal });
-  
-  if (!response.ok) {
-    throw new Error('Failed to fetch documents from server');
-  }
 
-  if (onProgress) {
-    onProgress(30, 'Download complete');
-  }
-
-  const { documents } = (await response.json()) as { documents: SyncedDocument[] };
-
-  if (onProgress) {
-    onProgress(40, 'Parsing documents...');
-  }
-
-  await saveSyncedDocumentsLocally(documents, onProgress);
+  const documents = await listDocuments({ ids: selectedIds, signal });
+  await downloadAndCacheServerDocuments(documents, onProgress, signal);
 
   if (onProgress) {
     onProgress(100, 'Load complete!');
@@ -860,52 +868,23 @@ export async function loadSelectedDocumentsFromServer(
   return { lastSync: Date.now() };
 }
 
-async function saveSyncedDocumentsLocally(documents: SyncedDocument[], onProgress?: (progress: number, status?: string) => void) {
-  const textDecoder = new TextDecoder();
+async function downloadAndCacheServerDocuments(
+  documents: BaseDocument[],
+  onProgress?: (progress: number, status?: string) => void,
+  signal?: AbortSignal,
+) {
+  if (onProgress) onProgress(30, 'List complete');
+  if (documents.length === 0) {
+    if (onProgress) onProgress(95, 'No documents to import');
+    return;
+  }
 
   for (let i = 0; i < documents.length; i++) {
     const doc = documents[i];
-
-    if (doc.type === 'pdf') {
-      const uint8Array = new Uint8Array(doc.data);
-      const documentData: PDFDocument = {
-        id: doc.id,
-        type: 'pdf',
-        name: doc.name,
-        size: doc.size,
-        lastModified: doc.lastModified,
-        data: uint8Array.buffer,
-      };
-      await addPdfDocument(documentData);
-    } else if (doc.type === 'epub') {
-      const uint8Array = new Uint8Array(doc.data);
-      const documentData: EPUBDocument = {
-        id: doc.id,
-        type: 'epub',
-        name: doc.name,
-        size: doc.size,
-        lastModified: doc.lastModified,
-        data: uint8Array.buffer,
-      };
-      await addEpubDocument(documentData);
-    } else if (doc.type === 'html') {
-      const uint8Array = new Uint8Array(doc.data);
-      const decoded = textDecoder.decode(uint8Array);
-      const documentData: HTMLDocument = {
-        id: doc.id,
-        type: 'html',
-        name: doc.name,
-        size: doc.size,
-        lastModified: doc.lastModified,
-        data: decoded,
-      };
-      await addHtmlDocument(documentData);
-    } else {
-      console.warn(`Unknown document type: ${doc.type}`);
-    }
-
+    const bytes = await downloadDocumentContent(doc.id, { signal });
+    await cacheStoredDocumentFromBytes(doc, bytes);
     if (onProgress) {
-      onProgress(40 + ((i + 1) / documents.length) * 50, `Processing document ${i + 1}/${documents.length}...`);
+      onProgress(30 + ((i + 1) / documents.length) * 65, `Downloading ${i + 1}/${documents.length}: ${doc.name}`);
     }
   }
 }
@@ -1007,5 +986,3 @@ export async function importDocumentsFromLibrary(
     onProgress(100, 'Library import complete!');
   }
 }
-
-

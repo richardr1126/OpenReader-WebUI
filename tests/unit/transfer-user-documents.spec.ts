@@ -7,8 +7,8 @@ import { transferUserDocuments } from '../../src/lib/server/claim-data';
 
 test.describe('transferUserDocuments', () => {
   test('moves document rows to new user without PK conflicts', async () => {
-    process.env.BETTER_AUTH_URL = 'http://localhost:3003';
-    process.env.BETTER_AUTH_SECRET = 'test-secret';
+    process.env.BASE_URL = 'http://localhost:3003';
+    process.env.AUTH_SECRET = 'test-secret';
 
     const sqlite = new Database(':memory:');
     sqlite.exec(`
@@ -72,4 +72,3 @@ test.describe('transferUserDocuments', () => {
     expect(ids).toEqual(['doc-a', 'doc-b']);
   });
 });
-

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { existsSync } from 'fs';
 import { join } from 'path';
-import { AUDIOBOOKS_V1_DIR, getUserAudiobookDir, ensureAudiobooksV1Ready, isAudiobooksV1Ready } from '@/lib/server/docstore';
+import { getAudiobooksRootDir, ensureAudiobooksV1Ready, isAudiobooksV1Ready } from '@/lib/server/docstore';
 import { listStoredChapters } from '@/lib/server/audiobook';
 import type { AudiobookGenerationSettings } from '@/types/client';
 import type { TTSAudiobookFormat, TTSAudiobookChapter } from '@/types/tts';
@@ -11,26 +11,10 @@ import { db } from '@/db';
 import { audiobooks } from '@/db/schema';
 import { eq, and, inArray } from 'drizzle-orm';
 import { ensureDbIndexed } from '@/lib/server/db-indexing';
-import { applyOpenReaderTestNamespacePath, getOpenReaderTestNamespace, getUnclaimedUserIdForNamespace } from '@/lib/server/test-namespace';
+import { getOpenReaderTestNamespace, getUnclaimedUserIdForNamespace } from '@/lib/server/test-namespace';
 import { pruneAudiobookChaptersNotOnDisk, pruneAudiobookIfMissingDir } from '@/lib/server/audiobook-prune';
 
 export const dynamic = 'force-dynamic';
-
-/**
- * Get the base audiobooks directory, accounting for test namespaces.
- * When auth is disabled, returns AUDIOBOOKS_V1_DIR.
- * When auth is enabled, returns the user-specific directory.
- */
-function getAudiobooksRootDir(request: NextRequest, userId: string | null, authEnabled: boolean): string {
-  const namespace = getOpenReaderTestNamespace(request.headers);
-
-  if (!authEnabled || !userId) {
-    return applyOpenReaderTestNamespacePath(AUDIOBOOKS_V1_DIR, namespace);
-  }
-
-  const userDir = getUserAudiobookDir(userId);
-  return applyOpenReaderTestNamespacePath(userDir, namespace);
-}
 
 const SAFE_ID_REGEX = /^[a-zA-Z0-9._-]{1,128}$/;
 
@@ -80,7 +64,14 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    const intermediateDir = join(getAudiobooksRootDir(request, existingBook.userId, authEnabled), `${bookId}-audiobook`);
+    const intermediateDir = join(
+      getAudiobooksRootDir({
+        userId: existingBook.userId,
+        authEnabled,
+        namespace: testNamespace,
+      }),
+      `${bookId}-audiobook`,
+    );
 
     if (!existsSync(intermediateDir)) {
       await pruneAudiobookIfMissingDir(bookId, existingBook.userId, false);

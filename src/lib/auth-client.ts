@@ -12,22 +12,32 @@ function createAuthClientWithUrl(baseUrl: string) {
 // Cache for auth client instances by baseUrl
 const clientCache = new Map<string, ReturnType<typeof createAuthClientWithUrl>>();
 
+function resolveAuthClientBaseUrl(baseUrl: string | null): string {
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    // Always use same-origin in the browser so local hostname variants
+    // (localhost vs LAN IP) do not break cookie/session bootstrap.
+    return window.location.origin;
+  }
+
+  if (baseUrl) return baseUrl;
+
+  throw new Error(
+    'Cannot create auth client without baseUrl in a non-browser context. ' +
+    'Use useAuthConfig() in components to get the properly configured baseUrl.'
+  );
+}
+
 /**
  * Factory function to get auth client with specific baseUrl.
  * In components, prefer reading `baseUrl` from `useAuthConfig()` and then calling `getAuthClient(baseUrl)`.
- * @param baseUrl - The auth server base URL. If null, will throw an error.
+ * @param baseUrl - Server-provided auth URL; in the browser we use same-origin automatically.
  */
 export function getAuthClient(baseUrl: string | null) {
-  if (!baseUrl) {
-    throw new Error(
-      'Cannot create auth client without baseUrl. ' +
-      'Use useAuthConfig() in components to get the properly configured baseUrl.'
-    );
+  const resolvedBaseUrl = resolveAuthClientBaseUrl(baseUrl);
+
+  if (!clientCache.has(resolvedBaseUrl)) {
+    clientCache.set(resolvedBaseUrl, createAuthClientWithUrl(resolvedBaseUrl));
   }
 
-  if (!clientCache.has(baseUrl)) {
-    clientCache.set(baseUrl, createAuthClientWithUrl(baseUrl));
-  }
-
-  return clientCache.get(baseUrl)!;
+  return clientCache.get(resolvedBaseUrl)!;
 }

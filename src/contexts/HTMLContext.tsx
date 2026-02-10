@@ -7,6 +7,8 @@ import {
   ReactNode,
   useCallback,
   useMemo,
+  useEffect,
+  useRef,
 } from 'react';
 import { getDocumentMetadata } from '@/lib/client-documents';
 import { ensureCachedDocument } from '@/lib/document-cache';
@@ -30,12 +32,16 @@ const HTMLContext = createContext<HTMLContextType | undefined>(undefined);
  */
 export function HTMLProvider({ children }: { children: ReactNode }) {
   const { setText: setTTSText, stop } = useTTS();
+  const setTTSTextRef = useRef(setTTSText);
 
   // Current document state
   const [currDocData, setCurrDocData] = useState<string>();
   const [currDocName, setCurrDocName] = useState<string>();
   const [currDocText, setCurrDocText] = useState<string>();
 
+  useEffect(() => {
+    setTTSTextRef.current = setTTSText;
+  }, [setTTSText]);
 
   /**
    * Clears all current document state and stops any active TTS
@@ -69,12 +75,12 @@ export function HTMLProvider({ children }: { children: ReactNode }) {
       setCurrDocName(doc.name);
       setCurrDocData(doc.data);
       setCurrDocText(doc.data); // Use the same text for TTS
-      setTTSText(doc.data);
+      setTTSTextRef.current(doc.data);
     } catch (error) {
       console.error('Failed to get HTML document:', error);
       clearCurrDoc();
     }
-  }, [clearCurrDoc, setTTSText]);
+  }, [clearCurrDoc]);
 
 
 

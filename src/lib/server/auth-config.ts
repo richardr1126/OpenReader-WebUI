@@ -1,9 +1,9 @@
 /**
  * Centralized auth configuration check.
- * Auth is only enabled when BOTH BETTER_AUTH_SECRET and BETTER_AUTH_URL are set.
+ * Auth is only enabled when BOTH AUTH_SECRET and BASE_URL are set.
  */
 export function isAuthEnabled(): boolean {
-  return !!(process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL);
+  return !!(process.env.AUTH_SECRET && process.env.BASE_URL);
 }
 
 /**
@@ -13,5 +13,5 @@ export function getAuthBaseUrl(): string | null {
   if (!isAuthEnabled()) {
     return null;
   }
-  return process.env.BETTER_AUTH_URL || null;
+  return process.env.BASE_URL || null;
 }

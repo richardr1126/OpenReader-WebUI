@@ -50,6 +50,19 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
     });
   }, [refreshDocuments]);
 
+  useEffect(() => {
+    const handler = () => {
+      refreshDocuments().catch((err) => {
+        console.error('Failed to refresh documents after change event:', err);
+      });
+    };
+
+    window.addEventListener('openreader:documentsChanged', handler as EventListener);
+    return () => {
+      window.removeEventListener('openreader:documentsChanged', handler as EventListener);
+    };
+  }, [refreshDocuments]);
+
   const docsByType = useMemo(() => {
     const pdfDocs = (docs ?? []).filter((d) => d.type === 'pdf') as Array<BaseDocument & { type: 'pdf' }>;
     const epubDocs = (docs ?? []).filter((d) => d.type === 'epub') as Array<BaseDocument & { type: 'epub' }>;

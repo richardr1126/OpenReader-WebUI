@@ -111,13 +111,40 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
 
         if (response?.ok) {
           const data = await response.json();
-          const didMigrate =
+          const v2ApplyResponse = await fetch('/api/migrations/v2', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ dryRun: false, deleteLocal: false }),
+          }).catch(() => null);
+          const v2ApplyData = v2ApplyResponse?.ok ? await v2ApplyResponse.json().catch(() => null) : null;
+
+          const didMigrateV1 =
             data.documentsMigrated ||
             data.audiobooksMigrated ||
             (data.rekey?.renamed ?? 0) > 0 ||
             (data.rekey?.merged ?? 0) > 0;
 
-          if (didMigrate) {
+          if (v2ApplyData) {
+            const uploaded = Number(v2ApplyData.uploaded ?? 0);
+            const alreadyPresent = Number(v2ApplyData.alreadyPresent ?? 0);
+            const dbRowsUpdated = Number(v2ApplyData.dbRowsUpdated ?? 0);
+            const dbRowsSeeded = Number(v2ApplyData.dbRowsSeeded ?? 0);
+            const deletedLocal = Number(v2ApplyData.deletedLocal ?? 0);
+            const dbRowsMigrated = dbRowsUpdated + dbRowsSeeded;
+            const didMigrateV2 = uploaded > 0 || dbRowsMigrated > 0 || deletedLocal > 0;
+
+            if (didMigrateV2) {
+              toast.success(
+                `Legacy document migration complete: ${uploaded} uploaded, ${alreadyPresent} already in S3, ${dbRowsMigrated} DB row(s) migrated.`,
+                { duration: 6000, icon: '📦' },
+              );
+              window.dispatchEvent(new CustomEvent('openreader:documentsChanged', {
+                detail: { reason: 'migration-v2-complete' },
+              }));
+            }
+          }
+
+          if (didMigrateV1) {
             toast.success('Library migration complete', {
               duration: 5000,
               icon: '📦',

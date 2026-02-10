@@ -4,7 +4,7 @@ import { readFile, writeFile, mkdir, unlink, rm, rename, readdir } from 'fs/prom
 import { existsSync, createReadStream } from 'fs';
 import { basename, join } from 'path';
 import { randomUUID } from 'crypto';
-import { AUDIOBOOKS_V1_DIR, ensureAudiobooksV1Ready, isAudiobooksV1Ready, getUserAudiobookDir } from '@/lib/server/docstore';
+import { ensureAudiobooksV1Ready, isAudiobooksV1Ready, getAudiobooksRootDir } from '@/lib/server/docstore';
 import { encodeChapterFileName, encodeChapterTitleTag, listStoredChapters, ffprobeAudio, escapeFFMetadata } from '@/lib/server/audiobook';
 import type { TTSAudioBytes, TTSAudiobookFormat } from '@/types/tts';
 import type { AudiobookGenerationSettings } from '@/types/client';
@@ -13,34 +13,10 @@ import { audiobooks, audiobookChapters } from '@/db/schema';
 import { eq, and, inArray } from 'drizzle-orm';
 import { requireAuthContext } from '@/lib/server/auth';
 import { ensureDbIndexed } from '@/lib/server/db-indexing';
-import { applyOpenReaderTestNamespacePath, getOpenReaderTestNamespace, getUnclaimedUserIdForNamespace } from '@/lib/server/test-namespace';
+import { getOpenReaderTestNamespace, getUnclaimedUserIdForNamespace } from '@/lib/server/test-namespace';
 import { pruneAudiobookIfMissingDir } from '@/lib/server/audiobook-prune';
 
 export const dynamic = 'force-dynamic';
-
-/**
- * Apply test namespace to a directory path if present in request headers.
- */
-function applyTestNamespace(baseDir: string, request: NextRequest): string {
-  const namespace = getOpenReaderTestNamespace(request.headers);
-  return applyOpenReaderTestNamespacePath(baseDir, namespace);
-}
-
-/**
- * Get the base audiobooks directory, accounting for test namespaces.
- * When auth is disabled, returns AUDIOBOOKS_V1_DIR (possibly with test namespace).
- * When auth is enabled, returns the user-specific directory under AUDIOBOOKS_USERS_DIR.
- */
-function getAudiobooksRootDir(request: NextRequest, userId: string | null, authEnabled: boolean): string {
-  // When auth is disabled, use the flat audiobooks_v1 directory
-  if (!authEnabled || !userId) {
-    return applyTestNamespace(AUDIOBOOKS_V1_DIR, request);
-  }
-
-  // When auth is enabled, use user-specific directory
-  const userDir = getUserAudiobookDir(userId);
-  return applyTestNamespace(userDir, request);
-}
 
 interface ConversionRequest {
   chapterTitle: string;
@@ -207,7 +183,14 @@ export async function POST(request: NextRequest) {
       })
       .onConflictDoNothing();
 
-    const intermediateDir = join(getAudiobooksRootDir(request, userId, ctxOrRes.authEnabled), `${bookId}-audiobook`);
+    const intermediateDir = join(
+      getAudiobooksRootDir({
+        userId,
+        authEnabled: ctxOrRes.authEnabled,
+        namespace: testNamespace,
+      }),
+      `${bookId}-audiobook`,
+    );
 
     // Create intermediate directory
     await mkdir(intermediateDir, { recursive: true });
@@ -434,7 +417,11 @@ export async function GET(request: NextRequest) {
     }
 
     const intermediateDir = join(
-      getAudiobooksRootDir(request, existingBook.userId, authEnabled),
+      getAudiobooksRootDir({
+        userId: existingBook.userId,
+        authEnabled,
+        namespace: testNamespace,
+      }),
       `${bookId}-audiobook`,
     );
 
@@ -657,7 +644,14 @@ export async function DELETE(request: NextRequest) {
 
     await db.delete(audiobooks).where(and(eq(audiobooks.id, bookId), eq(audiobooks.userId, storageUserId)));
 
-    const intermediateDir = join(getAudiobooksRootDir(request, userId, authEnabled), `${bookId}-audiobook`);
+    const intermediateDir = join(
+      getAudiobooksRootDir({
+        userId,
+        authEnabled,
+        namespace: testNamespace,
+      }),
+      `${bookId}-audiobook`,
+    );
 
     // If directory doesn't exist, consider it already reset
     if (!existsSync(intermediateDir)) {

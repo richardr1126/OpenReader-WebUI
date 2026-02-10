@@ -57,8 +57,9 @@ export default function HTMLPage() {
   }, [isLoading, id, router, setCurrentDocument, stop]);
 
   useEffect(() => {
+    if (!isLoading) return;
     loadDocument();
-  }, [loadDocument]);
+  }, [loadDocument, isLoading]);
 
   // Compute available height = viewport - (header height + tts bar height)
   useEffect(() => {

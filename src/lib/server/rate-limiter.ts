@@ -111,6 +111,17 @@ export class RateLimiter {
     return this.isPostgres() ? new Date() : Date.now();
   }
 
+  // Use a transaction only when running with Postgres.
+  // better-sqlite3 transactions require sync callbacks and cannot be awaited.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private async runMutation<T>(fn: (conn: any) => Promise<T>): Promise<T> {
+    if (this.isPostgres()) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return safeDb().transaction(async (tx: any) => fn(tx));
+    }
+    return fn(safeDb());
+  }
+
   /**
    * Check if a user can use TTS and increment their char count if allowed
    */
@@ -147,16 +158,10 @@ export class RateLimiter {
 
     try {
       const updatedAt = this.getUpdatedAtValue() as unknown as UserTtsCharsUpdatedAtValue;
-
-      // Use a DB transaction to avoid partial increments across buckets and to avoid
-      // non-transactional "rollback" logic that can corrupt counts under concurrency.
-      // Note: We intentionally allow a request to push a bucket over its limit; we only
-      // block when the bucket was already exhausted before this request starts updating.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return await safeDb().transaction(async (tx: any) => {
+      return await this.runMutation(async (conn) => {
         // Ensure records exist for each bucket
         for (const bucket of buckets) {
-          await tx.insert(userTtsChars)
+          await conn.insert(userTtsChars)
             .values({
               userId: bucket.key,
               date: dateValue,
@@ -172,7 +177,7 @@ export class RateLimiter {
         // that start after the bucket is already exhausted, while still allowing a
         // request to push the count over the limit.
         for (const bucket of buckets) {
-          const updateResult = await tx.update(userTtsChars)
+          const updateResult = await conn.update(userTtsChars)
             .set({
               charCount: sql`${userTtsChars.charCount} + ${charCount}`,
               updatedAt,
@@ -191,7 +196,7 @@ export class RateLimiter {
         // Fetch current counts
         const bucketResults: Array<{ currentCount: number; limit: number }> = [];
         for (const bucket of buckets) {
-          const result = await tx.select({ currentCount: userTtsChars.charCount })
+          const result = await conn.select({ currentCount: userTtsChars.charCount })
             .from(userTtsChars)
             .where(and(eq(userTtsChars.userId, bucket.key), eq(userTtsChars.date, dateValue)));
 

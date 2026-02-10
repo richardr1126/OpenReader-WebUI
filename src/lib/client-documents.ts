@@ -1,8 +1,52 @@
-import type { BaseDocument } from '@/types/documents';
+import { sha256HexFromArrayBuffer } from '@/lib/sha256';
+import type { BaseDocument, DocumentType } from '@/types/documents';
+
+export type UploadSource = {
+  id: string;
+  name: string;
+  type: DocumentType;
+  size: number;
+  lastModified: number;
+  contentType: string;
+  body: Blob | ArrayBuffer | Uint8Array;
+};
+
+type UploadOptions = {
+  signal?: AbortSignal;
+};
+
+function toUploadBody(body: UploadSource['body']): BodyInit {
+  if (body instanceof Blob) return body;
+  if (body instanceof ArrayBuffer) return body;
+  return body as unknown as BodyInit;
+}
+
+async function uploadDocumentSourceViaProxy(source: UploadSource, options?: UploadOptions): Promise<void> {
+  const res = await fetch(`/api/documents/blob/upload/fallback?id=${encodeURIComponent(source.id)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': source.contentType || 'application/octet-stream' },
+    body: toUploadBody(source.body),
+    signal: options?.signal,
+  });
+
+  if (!res.ok) {
+    const data = (await res.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(data?.error || `Proxy upload failed (status ${res.status})`);
+  }
+}
+
+function documentTypeForName(name: string): DocumentType {
+  const lower = name.toLowerCase();
+  if (lower.endsWith('.pdf')) return 'pdf';
+  if (lower.endsWith('.epub')) return 'epub';
+  if (lower.endsWith('.docx')) return 'docx';
+  return 'html';
+}
 
 export function mimeTypeForDoc(doc: Pick<BaseDocument, 'type' | 'name'>): string {
   if (doc.type === 'pdf') return 'application/pdf';
   if (doc.type === 'epub') return 'application/epub+zip';
+  if (doc.type === 'docx') return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
   const lower = doc.name.toLowerCase();
   if (lower.endsWith('.md') || lower.endsWith('.markdown') || lower.endsWith('.mdown') || lower.endsWith('.mkd')) {
@@ -13,7 +57,6 @@ export function mimeTypeForDoc(doc: Pick<BaseDocument, 'type' | 'name'>): string
 
 export async function listDocuments(options?: { ids?: string[]; signal?: AbortSignal }): Promise<BaseDocument[]> {
   const params = new URLSearchParams();
-  params.set('list', 'true');
   if (options?.ids?.length) {
     params.set('ids', options.ids.join(','));
   }
@@ -33,25 +76,112 @@ export async function getDocumentMetadata(id: string, options?: { signal?: Abort
   return docs[0] ?? null;
 }
 
-export async function uploadDocuments(files: File[], options?: { signal?: AbortSignal }): Promise<BaseDocument[]> {
-  const form = new FormData();
-  for (const file of files) {
-    form.append('files', file);
-  }
+export async function uploadDocumentSources(sources: UploadSource[], options?: UploadOptions): Promise<BaseDocument[]> {
+  if (sources.length === 0) return [];
 
-  const res = await fetch('/api/documents/upload', {
+  const presignRes = await fetch('/api/documents/blob/upload/presign', {
     method: 'POST',
-    body: form,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      uploads: sources.map((source) => ({
+        id: source.id,
+        contentType: source.contentType,
+        size: source.size,
+      })),
+    }),
     signal: options?.signal,
   });
 
-  if (!res.ok) {
-    const data = (await res.json().catch(() => null)) as { error?: string } | null;
-    throw new Error(data?.error || 'Failed to upload documents');
+  if (!presignRes.ok) {
+    const data = (await presignRes.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(data?.error || 'Failed to prepare uploads');
   }
 
-  const data = (await res.json()) as { stored: BaseDocument[] };
+  const presigned = (await presignRes.json()) as {
+    uploads?: Array<{ id: string; url: string; headers?: Record<string, string> }>;
+  };
+  const byId = new Map((presigned.uploads || []).map((upload) => [upload.id, upload]));
+
+  for (const source of sources) {
+    const upload = byId.get(source.id);
+    if (!upload?.url) {
+      throw new Error(`Missing presigned upload for document ${source.id}`);
+    }
+
+    let putError: unknown = null;
+    try {
+      const putRes = await fetch(upload.url, {
+        method: 'PUT',
+        headers: new Headers(upload.headers || {}),
+        body: toUploadBody(source.body),
+        signal: options?.signal,
+      });
+
+      // 412 means the content-hash object already exists (idempotent upload).
+      if (putRes.ok || putRes.status === 412) {
+        continue;
+      }
+      putError = new Error(`Direct upload failed with status ${putRes.status}`);
+    } catch (error) {
+      if (options?.signal?.aborted) throw error;
+      putError = error;
+    }
+
+    try {
+      await uploadDocumentSourceViaProxy(source, options);
+    } catch (proxyError) {
+      const directMessage = putError instanceof Error ? putError.message : 'unknown direct upload error';
+      const proxyMessage = proxyError instanceof Error ? proxyError.message : 'unknown proxy upload error';
+      throw new Error(`Failed to upload document ${source.name}: ${directMessage}; fallback failed: ${proxyMessage}`);
+    }
+  }
+
+  const registerRes = await fetch('/api/documents', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      documents: sources.map((source) => ({
+        id: source.id,
+        name: source.name,
+        type: source.type,
+        size: source.size,
+        lastModified: source.lastModified,
+      })),
+    }),
+    signal: options?.signal,
+  });
+
+  if (!registerRes.ok) {
+    const data = (await registerRes.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(data?.error || 'Failed to register uploaded documents');
+  }
+
+  const data = (await registerRes.json()) as { stored: BaseDocument[] };
   return data.stored || [];
+}
+
+export async function uploadDocuments(files: File[], options?: UploadOptions): Promise<BaseDocument[]> {
+  if (files.length === 0) return [];
+
+  const sources: UploadSource[] = [];
+  for (const file of files) {
+    const bytes = await file.arrayBuffer();
+    const id = await sha256HexFromArrayBuffer(bytes);
+    const type = documentTypeForName(file.name);
+    const name = file.name || `${id}.${type}`;
+    const contentType = file.type || mimeTypeForDoc({ name, type });
+    sources.push({
+      id,
+      name,
+      type,
+      size: file.size,
+      lastModified: Number.isFinite(file.lastModified) ? file.lastModified : Date.now(),
+      contentType,
+      body: file,
+    });
+  }
+
+  return uploadDocumentSources(sources, options);
 }
 
 export async function deleteDocuments(options?: { ids?: string[]; scope?: 'user' | 'unclaimed'; signal?: AbortSignal }): Promise<void> {
@@ -72,7 +202,7 @@ export async function deleteDocuments(options?: { ids?: string[]; scope?: 'user'
 }
 
 export async function downloadDocumentContent(id: string, options?: { signal?: AbortSignal }): Promise<ArrayBuffer> {
-  const res = await fetch(`/api/documents/content?id=${encodeURIComponent(id)}`, { signal: options?.signal });
+  const res = await fetch(`/api/documents/blob?id=${encodeURIComponent(id)}`, { signal: options?.signal });
   if (!res.ok) {
     const contentType = res.headers.get('content-type') || '';
     if (contentType.includes('application/json')) {
@@ -95,7 +225,7 @@ export async function getDocumentContentSnippet(
   if (typeof options?.maxChars === 'number') params.set('maxChars', String(options.maxChars));
   if (typeof options?.maxBytes === 'number') params.set('maxBytes', String(options.maxBytes));
 
-  const res = await fetch(`/api/documents/content?${params.toString()}`, { signal: options?.signal });
+  const res = await fetch(`/api/documents/blob?${params.toString()}`, { signal: options?.signal });
   if (!res.ok) {
     const data = (await res.json().catch(() => null)) as { error?: string } | null;
     throw new Error(data?.error || `Failed to load content snippet (status ${res.status})`);

@@ -11,6 +11,7 @@ export const AUDIOBOOKS_V1_DIR = path.join(DOCSTORE_DIR, 'audiobooks_v1');
 export const AUDIOBOOKS_USERS_DIR = path.join(DOCSTORE_DIR, 'audiobooks_users_v1');
 
 export const UNCLAIMED_USER_ID = 'unclaimed';
+const SAFE_NAMESPACE_REGEX = /^[a-zA-Z0-9._-]{1,128}$/;
 
 /**
  * Get the audiobook directory for a specific user when auth is enabled.
@@ -34,15 +35,29 @@ export function getUnclaimedAudiobookDir(): string {
 }
 
 /**
- * Get the full path to a specific audiobook directory.
- * - When auth is disabled: docstore/audiobooks_v1/{bookId}-audiobook
- * - When auth is enabled: docstore/audiobooks_users_v1/{userId}/{bookId}-audiobook
+ * Resolve the base audiobooks directory for request context, including optional test namespace.
+ * - When auth is disabled or userId is absent: docstore/audiobooks_v1[/<namespace>]
+ * - When auth is enabled: docstore/audiobooks_users_v1/{userId}[/<namespace>]
  */
-export function getAudiobookPath(bookId: string, userId: string | null, authEnabled: boolean): string {
-  if (!authEnabled || !userId) {
-    return path.join(AUDIOBOOKS_V1_DIR, `${bookId}-audiobook`);
-  }
-  return path.join(getUserAudiobookDir(userId), `${bookId}-audiobook`);
+export function getAudiobooksRootDir({
+  userId,
+  authEnabled,
+  namespace,
+}: {
+  userId: string | null;
+  authEnabled: boolean;
+  namespace: string | null;
+}): string {
+  const baseDir = !authEnabled || !userId ? AUDIOBOOKS_V1_DIR : getUserAudiobookDir(userId);
+  if (!namespace) return baseDir;
+
+  const safe = namespace.trim();
+  if (!safe || safe === '.' || safe === '..' || safe.includes('..')) return baseDir;
+  if (!SAFE_NAMESPACE_REGEX.test(safe)) return baseDir;
+
+  const resolved = path.resolve(baseDir, safe);
+  if (!resolved.startsWith(path.resolve(baseDir) + path.sep)) return baseDir;
+  return resolved;
 }
 
 /**
@@ -209,15 +224,6 @@ export function getMigratedDocumentFileName(id: string, name: string): string {
   }
   return targetFileName;
 }
-
-export type FSDocument = {
-  id: string;
-  name: string;
-  type: string;
-  size: number;
-  lastModified: number;
-  filePath: string;
-};
 
 export async function ensureDocumentsV1Ready(): Promise<boolean> {
   await mkdir(DOCSTORE_DIR, { recursive: true });
