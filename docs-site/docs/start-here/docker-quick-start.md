@@ -2,6 +2,9 @@
 title: Docker Quick Start
 ---
 
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
 ## Prerequisites
 
 - A recent Docker version installed
@@ -13,7 +16,10 @@ If you have suitable hardware, you can run Kokoro locally with Docker. See [Koko
 
 ## 1. Start the Docker container
 
-Minimal setup (auth disabled, embedded storage ephemeral, no library import):
+<Tabs groupId="docker-start-mode">
+  <TabItem value="minimal" label="Minimal" default>
+
+Auth disabled, embedded storage ephemeral, no library import:
 
 ```bash
 docker run --name openreader-webui \
@@ -23,7 +29,10 @@ docker run --name openreader-webui \
   ghcr.io/richardr1126/openreader-webui:latest
 ```
 
-Fully featured setup (persistent storage, embedded SeaweedFS `weed mini`, optional auth):
+  </TabItem>
+  <TabItem value="full" label="Full Setup">
+
+Persistent storage, embedded SeaweedFS `weed mini`, optional auth, optional library mount:
 
 ```bash
 docker run --name openreader-webui \
@@ -39,21 +48,38 @@ docker run --name openreader-webui \
   ghcr.io/richardr1126/openreader-webui:latest
 ```
 
-You can remove `/app/docstore/library` if you do not need server library import.
-You can remove either `BASE_URL` or `AUTH_SECRET` to keep auth disabled.
+  </TabItem>
+</Tabs>
 
-Quick notes:
+:::tip
+Remove `/app/docstore/library` if you do not need server library import.
+:::
 
-- `API_BASE` should point to your TTS server base URL.
-- Expose `8333` for direct browser access to embedded SeaweedFS presigned URLs.
-- If `8333` is not exposed, uploads still work through `/api/documents/blob/upload/fallback`.
-- To enable auth, set both `BASE_URL` and `AUTH_SECRET`.
-- DB migrations run automatically during container startup via the shared entrypoint.
+:::tip
+Remove either `BASE_URL` or `AUTH_SECRET` to keep auth disabled.
+:::
 
-For all environment variables, see [Environment Variables](../reference/environment-variables).
-For app/auth behavior, see [Auth](../configure/configuration).
-For database startup and migration behavior, see [Database and Migrations](../configure/database-and-migrations).
-For blob behavior and mounts, see [Object / Blob Storage](../configure/storage-and-blob-behavior).
+:::tip TTS API Base
+Set `API_BASE` to your reachable TTS server base URL.
+:::
+
+:::warning Port `8333` Exposure
+Expose `8333` for direct browser presigned upload/download with embedded SeaweedFS.
+
+If `8333` is not reachable from the browser, direct presigned access is unavailable. Uploads can still fall back to `/api/documents/blob/upload/fallback`, and document reads/downloads continue through `/api/documents/blob`.
+:::
+
+:::info Auth and Migrations
+- Auth is enabled only when both `BASE_URL` and `AUTH_SECRET` are set.
+- DB/storage migrations run automatically at container startup via the shared entrypoint.
+:::
+
+:::info Related Docs
+- [Environment Variables](../reference/environment-variables)
+- [Auth](../configure/auth)
+- [Database and Migrations](../configure/database-and-migrations)
+- [Object / Blob Storage](../configure/object-blob-storage)
+:::
 
 ## 2. Configure settings in the app UI
 
@@ -69,5 +95,9 @@ docker rm openreader-webui || true && \
 docker image rm ghcr.io/richardr1126/openreader-webui:latest || true && \
 docker pull ghcr.io/richardr1126/openreader-webui:latest
 ```
+
+:::tip
+If you use a mounted volume for `/app/docstore`, your persisted data remains after image updates.
+:::
 
 Visit [http://localhost:3003](http://localhost:3003) after startup.

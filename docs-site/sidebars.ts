@@ -21,14 +21,11 @@ const sidebars: SidebarsConfig = {
       label: 'Configure',
       items: [
         'configure/tts-providers',
-        {
-          type: 'doc',
-          id: 'configure/configuration',
-          label: 'Auth (Reccomended)',
-        },
+        'configure/auth',
         'configure/tts-rate-limiting',
         'configure/database-and-migrations',
-        'configure/storage-and-blob-behavior',
+        'configure/object-blob-storage',
+        'configure/server-library-import',
       ],
     },
     {
@@ -45,7 +42,7 @@ const sidebars: SidebarsConfig = {
     {
       type: 'category',
       label: 'Project',
-      items: ['project/support', 'project/acknowledgements', 'project/license'],
+      items: ['project/support-and-contributing', 'project/acknowledgements', 'project/license'],
     },
   ],
 };

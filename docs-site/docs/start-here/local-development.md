@@ -2,6 +2,9 @@
 title: Local Development
 ---
 
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
 ## Prerequisites
 
 - Node.js (recommended with [nvm](https://github.com/nvm-sh/nvm))
@@ -14,9 +17,20 @@ npm install -g pnpm
 - A reachable TTS API server
 - [SeaweedFS](https://github.com/seaweedfs/seaweedfs) `weed` binary (required)
 
+<Tabs groupId="seaweedfs-install">
+  <TabItem value="macos" label="macOS" default>
+
 ```bash
 brew install seaweedfs
 ```
+
+  </TabItem>
+  <TabItem value="linux" label="Linux">
+
+Install the `weed` binary from the [SeaweedFS releases](https://github.com/seaweedfs/seaweedfs/releases) and ensure it is available on `PATH`.
+
+  </TabItem>
+</Tabs>
 
 Optional, depending on features:
 
@@ -39,7 +53,7 @@ cmake --build build -j --config Release
 echo WHISPER_CPP_BIN="$(pwd)/build/bin/whisper-cli"
 ```
 
-:::note
+:::tip
 Set `WHISPER_CPP_BIN` in your `.env` to enable word-by-word highlighting.
 :::
 
@@ -66,10 +80,8 @@ cp .env.example .env
 
 Then edit `.env`.
 
-Auth is enabled when both are set:
-
-- `BASE_URL` (for local dev, typically `http://localhost:3003`)
-- `AUTH_SECRET` (generate with `openssl rand -base64 32`)
+- No auth mode: leave `BASE_URL` or `AUTH_SECRET` unset.
+- Auth enabled mode: set both `BASE_URL` (typically `http://localhost:3003`) and `AUTH_SECRET` (generate with `openssl rand -base64 32`).
 
 Optional:
 
@@ -77,9 +89,12 @@ Optional:
 - Stable S3 credentials via `S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY`
 - External S3 storage by setting `USE_EMBEDDED_WEED_MINI=false` and related S3 vars
 
+:::info
 For all environment variables, see [Environment Variables](../reference/environment-variables).
-For app/auth behavior, see [Auth](../configure/configuration).
-For storage configuration, see [Object / Blob Storage](../configure/storage-and-blob-behavior).
+:::
+
+For app/auth behavior, see [Auth](../configure/auth).
+For storage configuration, see [Object / Blob Storage](../configure/object-blob-storage).
 For database mode and migrations, see [Database and Migrations](../configure/database-and-migrations).
 
 4. Run DB migrations.
@@ -91,21 +106,32 @@ For database mode and migrations, see [Database and Migrations](../configure/dat
 pnpm migrate
 ```
 
-:::note
+:::info
 If `POSTGRES_URL` is set, migrations target Postgres; otherwise local SQLite is used. To disable automatic startup migrations, set `RUN_DRIZZLE_MIGRATIONS=false` and/or `RUN_FS_MIGRATIONS=false`. You can run storage migration manually with `pnpm migrate-fs`.
 :::
 
 5. Start the app.
 
+<Tabs groupId="local-run-mode">
+  <TabItem value="dev" label="Dev" default>
+
 ```bash
 pnpm dev
 ```
 
-Or build + start production mode:
+  </TabItem>
+  <TabItem value="prod" label="Build + Start">
 
 ```bash
 pnpm build
 pnpm start
 ```
+
+  </TabItem>
+</Tabs>
+
+:::warning API Base Reachability
+`API_BASE` must be reachable from the Next.js server process, not just your browser.
+:::
 
 Visit [http://localhost:3003](http://localhost:3003).

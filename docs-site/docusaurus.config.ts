@@ -98,7 +98,7 @@ const config: Config = {
         {
           title: 'Community',
           items: [
-            { label: 'Support', to: '/project/support' },
+            { label: 'Support', to: '/project/support-and-contributing' },
             { label: 'GitHub Discussions', href: 'https://github.com/richardr1126/OpenReader-WebUI/discussions' },
             { label: 'Issues', href: 'https://github.com/richardr1126/OpenReader-WebUI/issues' },
           ],

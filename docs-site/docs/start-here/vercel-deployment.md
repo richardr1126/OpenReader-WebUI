@@ -2,17 +2,24 @@
 title: Vercel Deployment
 ---
 
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
 This guide covers deploying OpenReader WebUI to Vercel with external Postgres and S3-compatible object storage.
 
 ## What works on Vercel
 
 - Documents (PDF/EPUB/TXT/MD) work with `POSTGRES_URL` + external S3 storage.
 - Audiobook routes work on Node.js serverless functions using `ffmpeg-static`/`ffprobe-static`.
-- `docx` conversion requires `soffice` (LibreOffice), which is not available in a standard Vercel runtime.
 
-## 1. Required environment variables
+:::warning DOCX Conversion Limitation
+`docx` conversion requires `soffice` (LibreOffice), which is not available in a standard Vercel runtime.
+:::
 
-Set these in your Vercel project:
+## 1. Environment Variables
+
+<Tabs groupId="vercel-env-setup">
+  <TabItem value="required" label="Required" default>
 
 ```bash
 POSTGRES_URL=postgres://...
@@ -26,7 +33,8 @@ S3_FORCE_PATH_STYLE=true
 S3_PREFIX=openreader
 ```
 
-Optional but common:
+  </TabItem>
+  <TabItem value="common" label="Common Optional">
 
 ```bash
 BASE_URL=https://your-app.vercel.app
@@ -36,14 +44,25 @@ NEXT_PUBLIC_ENABLE_AUDIOBOOK_EXPORT=true
 NEXT_PUBLIC_ENABLE_WORD_HIGHLIGHT=true
 ```
 
+  </TabItem>
+</Tabs>
+
+:::tip
 For all variables and defaults, see [Environment Variables](../reference/environment-variables).
+:::
 
 ## 2. FFmpeg/ffprobe packaging in Vercel functions
 
 `ffmpeg-static` and `ffprobe-static` binaries must be included in function traces. This repo already does that in `next.config.ts` via `outputFileTracingIncludes` for:
 
-- `/api/audiobook(.*)`
+- `/api/audiobook`
+- `/api/audiobook/chapter`
+- `/api/audiobook/status`
 - `/api/whisper`
+
+:::info
+`serverExternalPackages` should include `ffmpeg-static` and `ffprobe-static` so package paths resolve at runtime instead of being bundled into route output.
+:::
 
 If you change route paths or split handlers, update `outputFileTracingIncludes` accordingly.
 
@@ -66,7 +85,7 @@ Adjust memory per route if your files are larger or your plan differs.
 ## 4. Runtime expectations and caveats
 
 - Audiobook APIs require S3 configuration; otherwise they return `503`.
-- `better-sqlite3` remains in `serverExternalPackages` for mixed/self-host setups, but production Vercel should use `POSTGRES_URL`.
+- For production Vercel deploys, use `POSTGRES_URL` instead of SQLite.
 - Filesystem-to-object-store migrations run via server scripts/entrypoint (`scripts/migrate-fs-v2.mjs`), not API routes.
 - Vercel deployments do not run `scripts/openreader-entrypoint.mjs`, so run `pnpm migrate-fs` in a controlled environment when migrating legacy filesystem data.
 

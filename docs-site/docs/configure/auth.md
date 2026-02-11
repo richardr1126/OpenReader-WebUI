@@ -15,5 +15,5 @@ This page covers application-level configuration for provider access and authent
 - For the complete variable reference: [Environment Variables](../reference/environment-variables)
 - For TTS character limits and quota behavior: [TTS Rate Limiting](./tts-rate-limiting)
 - For provider-specific guidance: [TTS Providers](./tts-providers)
-- For storage/S3/SeaweedFS behavior: [Object / Blob Storage](./storage-and-blob-behavior)
+- For storage/S3/SeaweedFS behavior: [Object / Blob Storage](./object-blob-storage)
 - For database mode and migration commands: [Database and Migrations](./database-and-migrations)
