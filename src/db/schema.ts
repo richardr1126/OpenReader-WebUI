@@ -12,3 +12,5 @@ export const session = usePostgres ? postgresSchema.session : sqliteSchema.sessi
 export const account = usePostgres ? postgresSchema.account : sqliteSchema.account;
 export const verification = usePostgres ? postgresSchema.verification : sqliteSchema.verification;
 export const userTtsChars = usePostgres ? postgresSchema.userTtsChars : sqliteSchema.userTtsChars;
+export const userPreferences = usePostgres ? postgresSchema.userPreferences : sqliteSchema.userPreferences;
+export const userDocumentProgress = usePostgres ? postgresSchema.userDocumentProgress : sqliteSchema.userDocumentProgress;

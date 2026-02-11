@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, R
 import type { BaseDocument, DocumentType } from '@/types/documents';
 import { listDocuments, uploadDocuments, deleteDocuments } from '@/lib/client-documents';
 import { putCachedEpub, putCachedHtml, putCachedPdf, evictCachedEpub, evictCachedHtml, evictCachedPdf } from '@/lib/document-cache';
+import { useAuthSession } from '@/hooks/useAuthSession';
 
 interface DocumentContextType {
   // PDF Documents
@@ -36,6 +37,8 @@ const DocumentContext = createContext<DocumentContextType | undefined>(undefined
 export function DocumentProvider({ children }: { children: ReactNode }) {
   const [docs, setDocs] = useState<BaseDocument[] | null>(null);
   const isLoading = docs === null;
+  const { data: sessionData, isPending: isSessionPending } = useAuthSession();
+  const sessionKey = sessionData?.user?.id ?? 'no-session';
 
   const refreshDocuments = useCallback(async () => {
     const serverDocs = await listDocuments();
@@ -44,11 +47,12 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    if (isSessionPending) return;
     refreshDocuments().catch((err) => {
       console.error('Failed to load documents from server:', err);
       setDocs([]);
     });
-  }, [refreshDocuments]);
+  }, [refreshDocuments, sessionKey, isSessionPending]);
 
   useEffect(() => {
     const handler = () => {

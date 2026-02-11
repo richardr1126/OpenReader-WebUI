@@ -17,9 +17,11 @@ import type { SpineItem } from 'epubjs/types/section';
 import type { Book, Rendition } from 'epubjs';
 
 import { setLastDocumentLocation } from '@/lib/dexie';
+import { scheduleDocumentProgressSync } from '@/lib/client-user-state';
 import { getDocumentMetadata } from '@/lib/client-documents';
 import { ensureCachedDocument } from '@/lib/document-cache';
 import { useTTS } from '@/contexts/TTSContext';
+import { useAuthConfig } from '@/contexts/AuthRateLimitContext';
 import { createRangeCfi } from '@/lib/epub';
 import { useParams } from 'next/navigation';
 import { useConfig } from './ConfigContext';
@@ -171,6 +173,7 @@ const collectContinuationFromRange = (range: Range | null | undefined, limit = E
  */
 export function EPUBProvider({ children }: { children: ReactNode }) {
   const { setText: setTTSText, currDocPage, currDocPages, setCurrDocPages, stop, skipToLocation, setIsEPUB } = useTTS();
+  const { authEnabled } = useAuthConfig();
   const { id } = useParams();
   // Configuration context to get TTS settings
   const {
@@ -694,6 +697,13 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
     if (id && locationRef.current !== 1) {
       console.log('Saving location:', location);
       setLastDocumentLocation(id as string, location.toString());
+      if (authEnabled) {
+        scheduleDocumentProgressSync({
+          documentId: id as string,
+          readerType: 'epub',
+          location: location.toString(),
+        });
+      }
     }
 
     skipToLocation(location);
@@ -703,7 +713,7 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
       extractPageText(bookRef.current, renditionRef.current, shouldPauseRef.current);
       shouldPauseRef.current = true;
     }
-  }, [id, skipToLocation, extractPageText, setIsEPUB]);
+  }, [id, skipToLocation, extractPageText, setIsEPUB, authEnabled]);
 
   const clearWordHighlights = useCallback(() => {
     if (!renditionRef.current) return;

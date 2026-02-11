@@ -1,4 +1,4 @@
-import { pgTable, text, integer, real, boolean, timestamp, date, bigint, primaryKey, index } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, real, boolean, timestamp, date, bigint, primaryKey, index, jsonb } from 'drizzle-orm/pg-core';
 
 export const documents = pgTable('documents', {
   id: text('id').notNull(),
@@ -95,4 +95,26 @@ export const userTtsChars = pgTable("user_tts_chars", {
 }, (table) => ({
   pk: primaryKey({ columns: [table.userId, table.date] }),
   dateIdx: index('idx_user_tts_chars_date').on(table.date),
+}));
+
+export const userPreferences = pgTable('user_preferences', {
+  userId: text('user_id').primaryKey(),
+  dataJson: jsonb('data_json').notNull().default({}),
+  clientUpdatedAtMs: bigint('client_updated_at_ms', { mode: 'number' }).notNull().default(0),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+export const userDocumentProgress = pgTable('user_document_progress', {
+  userId: text('user_id').notNull(),
+  documentId: text('document_id').notNull(),
+  readerType: text('reader_type').notNull(), // pdf, epub, html
+  location: text('location').notNull(),
+  progress: real('progress'),
+  clientUpdatedAtMs: bigint('client_updated_at_ms', { mode: 'number' }).notNull().default(0),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.userId, table.documentId] }),
+  userUpdatedIdx: index('idx_user_document_progress_user_id_updated_at').on(table.userId, table.updatedAt),
 }));

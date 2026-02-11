@@ -1,9 +1,13 @@
 'use client';
 
-import { createContext, useContext, useEffect, useMemo, useRef, useState, ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, ReactNode } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, initDB, migrateLegacyDexieDocumentIdsToSha, updateAppConfig } from '@/lib/dexie';
 import { APP_CONFIG_DEFAULTS, type ViewType, type SavedVoices, type AppConfigValues, type AppConfigRow } from '@/types/config';
+import { scheduleUserPreferencesSync, getUserPreferences, putUserPreferences } from '@/lib/client-user-state';
+import { SYNCED_PREFERENCE_KEYS, type SyncedPreferenceKey, type SyncedPreferencesPatch } from '@/types/user-state';
+import { useAuthSession } from '@/hooks/useAuthSession';
+import { useAuthConfig } from '@/contexts/AuthRateLimitContext';
 import toast from 'react-hot-toast';
 export type { ViewType } from '@/types/config';
 
@@ -50,9 +54,50 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [isDBReady, setIsDBReady] = useState(false);
   const didRunStartupMigrations = useRef(false);
+  const didAttemptInitialPreferenceSeedForSession = useRef<string | null>(null);
+  const syncedPreferenceKeys = useMemo(() => new Set<string>(SYNCED_PREFERENCE_KEYS), []);
+  const { authEnabled } = useAuthConfig();
+  const { data: sessionData, isPending: isSessionPending } = useAuthSession();
+  const sessionKey = sessionData?.user?.id ?? 'no-session';
 
   // Helper function to generate provider-model key
   const getVoiceKey = (provider: string, model: string) => `${provider}:${model}`;
+
+  const queueSyncedPreferencePatch = useCallback((patch: Partial<AppConfigValues>) => {
+    if (!authEnabled) return;
+
+    const syncedPatch: SyncedPreferencesPatch = {};
+    for (const key of SYNCED_PREFERENCE_KEYS) {
+      if (!(key in patch)) continue;
+      const value = patch[key];
+      if (value === undefined) continue;
+      (syncedPatch as Record<SyncedPreferenceKey, unknown>)[key] = value;
+    }
+    if (Object.keys(syncedPatch).length === 0) return;
+    scheduleUserPreferencesSync(syncedPatch);
+  }, [authEnabled]);
+
+  const buildSyncedPreferencePatch = useCallback((
+    source: Partial<AppConfigValues>,
+    options?: { nonDefaultOnly?: boolean },
+  ): SyncedPreferencesPatch => {
+    const out: SyncedPreferencesPatch = {};
+    for (const key of SYNCED_PREFERENCE_KEYS) {
+      if (!(key in source)) continue;
+      const value = source[key];
+      if (value === undefined) continue;
+      if (options?.nonDefaultOnly) {
+        const defaultValue = APP_CONFIG_DEFAULTS[key];
+        const same =
+          typeof value === 'object'
+            ? JSON.stringify(value) === JSON.stringify(defaultValue)
+            : value === defaultValue;
+        if (same) continue;
+      }
+      (out as Record<SyncedPreferenceKey, unknown>)[key] = value;
+    }
+    return out;
+  }, []);
 
   useEffect(() => {
     const handler = (event: Event) => {
@@ -107,6 +152,38 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     void run();
   }, [isDBReady]);
 
+  const refreshSyncedPreferencesFromServer = useCallback(async () => {
+    if (!isDBReady || !authEnabled) return;
+    try {
+      const remote = await getUserPreferences();
+      if (!remote?.hasStoredPreferences) return;
+      if (!remote.preferences || Object.keys(remote.preferences).length === 0) return;
+      await updateAppConfig(remote.preferences as Partial<AppConfigRow>);
+    } catch (error) {
+      console.warn('Failed to load synced preferences:', error);
+    }
+  }, [isDBReady, authEnabled]);
+
+  useEffect(() => {
+    if (!isDBReady || !authEnabled || isSessionPending) return;
+    refreshSyncedPreferencesFromServer().catch((error) => {
+      console.warn('Synced preferences refresh failed:', error);
+    });
+  }, [isDBReady, authEnabled, isSessionPending, sessionKey, refreshSyncedPreferencesFromServer]);
+
+  useEffect(() => {
+    if (!isDBReady || !authEnabled) return;
+    const onFocus = () => {
+      refreshSyncedPreferencesFromServer().catch((error) => {
+        console.warn('Focus synced preferences refresh failed:', error);
+      });
+    };
+    window.addEventListener('focus', onFocus);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [isDBReady, authEnabled, refreshSyncedPreferencesFromServer]);
+
   const appConfig = useLiveQuery(
     async () => {
       if (!isDBReady) return null;
@@ -123,6 +200,32 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     void id;
     return { ...APP_CONFIG_DEFAULTS, ...rest };
   }, [appConfig]);
+
+  useEffect(() => {
+    if (!isDBReady || !authEnabled || !appConfig || isSessionPending) return;
+    if (didAttemptInitialPreferenceSeedForSession.current === sessionKey) return;
+    didAttemptInitialPreferenceSeedForSession.current = sessionKey;
+
+    const run = async () => {
+      try {
+        const remote = await getUserPreferences();
+        if (remote?.hasStoredPreferences) return;
+
+        // Seed only user-customized (non-default) values. This prevents fresh/default
+        // profiles from overwriting existing server values during first-run races.
+        const patch = buildSyncedPreferencePatch(appConfig, { nonDefaultOnly: true });
+        if (Object.keys(patch).length === 0) return;
+
+        await putUserPreferences(patch, { clientUpdatedAtMs: Date.now() });
+      } catch (error) {
+        console.warn('Failed to seed initial synced preferences from local Dexie:', error);
+      }
+    };
+
+    run().catch((error) => {
+      console.warn('Initial synced preferences seed failed:', error);
+    });
+  }, [isDBReady, authEnabled, appConfig, buildSyncedPreferencePatch, isSessionPending, sessionKey]);
 
   // Destructure for convenience and to match context shape
   const {
@@ -163,7 +266,11 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
       if (newConfig.baseUrl !== undefined) {
         updates.baseUrl = newConfig.baseUrl;
       }
+      if (newConfig.viewType !== undefined) {
+        updates.viewType = newConfig.viewType;
+      }
       await updateAppConfig(updates);
+      queueSyncedPreferencePatch(updates);
     } catch (error) {
       console.error('Error updating config:', error);
       throw error;
@@ -189,6 +296,10 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
           savedVoices: updatedSavedVoices,
           voice: value as string,
         });
+        queueSyncedPreferencePatch({
+          savedVoices: updatedSavedVoices,
+          voice: value as string,
+        });
       }
       // Special handling for provider/model changes - restore saved voice if available
       else if (key === 'ttsProvider' || key === 'ttsModel') {
@@ -200,10 +311,17 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
           [key]: value as AppConfigValues[keyof AppConfigValues],
           voice: restoredVoice,
         } as Partial<AppConfigRow>);
+        queueSyncedPreferencePatch({
+          [key]: value as AppConfigValues[keyof AppConfigValues],
+          voice: restoredVoice,
+        } as Partial<AppConfigValues>);
       }
       else if (key === 'savedVoices') {
         const newSavedVoices = value as SavedVoices;
         await updateAppConfig({
+          savedVoices: newSavedVoices,
+        });
+        queueSyncedPreferencePatch({
           savedVoices: newSavedVoices,
         });
       }
@@ -211,6 +329,11 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
         await updateAppConfig({
           [key]: value as AppConfigValues[keyof AppConfigValues],
         } as Partial<AppConfigRow>);
+        if (syncedPreferenceKeys.has(String(key))) {
+          queueSyncedPreferencePatch({
+            [key]: value,
+          } as Partial<AppConfigValues>);
+        }
       }
     } catch (error) {
       console.error(`Error updating config key ${String(key)}:`, error);

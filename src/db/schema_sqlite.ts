@@ -97,3 +97,25 @@ export const userTtsChars = sqliteTable("user_tts_chars", {
   pk: primaryKey({ columns: [table.userId, table.date] }),
   dateIdx: index('idx_user_tts_chars_date').on(table.date),
 }));
+
+export const userPreferences = sqliteTable('user_preferences', {
+  userId: text('user_id').primaryKey(),
+  dataJson: text('data_json').notNull().default('{}'),
+  clientUpdatedAtMs: integer('client_updated_at_ms').notNull().default(0),
+  createdAt: integer('created_at').default(sql`(cast(strftime('%s','now') as int) * 1000)`),
+  updatedAt: integer('updated_at').default(sql`(cast(strftime('%s','now') as int) * 1000)`),
+});
+
+export const userDocumentProgress = sqliteTable('user_document_progress', {
+  userId: text('user_id').notNull(),
+  documentId: text('document_id').notNull(),
+  readerType: text('reader_type').notNull(), // pdf, epub, html
+  location: text('location').notNull(),
+  progress: real('progress'),
+  clientUpdatedAtMs: integer('client_updated_at_ms').notNull().default(0),
+  createdAt: integer('created_at').default(sql`(cast(strftime('%s','now') as int) * 1000)`),
+  updatedAt: integer('updated_at').default(sql`(cast(strftime('%s','now') as int) * 1000)`),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.userId, table.documentId] }),
+  userUpdatedIdx: index('idx_user_document_progress_user_id_updated_at').on(table.userId, table.updatedAt),
+}));

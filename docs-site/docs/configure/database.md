@@ -13,6 +13,9 @@ This page covers database mode selection for OpenReader WebUI.
 
 - Document and audiobook metadata/state used by server routes.
 - Auth/session tables when auth is enabled.
+- TTS character usage counters (`user_tts_chars`) for daily rate limiting (when enabled).
+- User settings preferences (`user_preferences`) when auth is enabled.
+- User reading progress (`user_document_progress`) when auth is enabled.
 
 ## Related variables
 
@@ -24,3 +27,10 @@ For database variable behavior, see [Environment Variables](../reference/environ
 
 - [Migrations](./migrations)
 - [Object / Blob Storage](./object-blob-storage)
+- [Auth](./auth)
+
+## State sync summary
+
+- With auth enabled, settings and reading progress are stored in SQL and synced from the app.
+- With auth disabled, settings and reading progress remain local in the browser.
+- Sync is currently request-based (not realtime push invalidation).

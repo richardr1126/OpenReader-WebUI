@@ -1,6 +1,6 @@
 import { db } from '@/db';
-import { documents, audiobooks, audiobookChapters } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import { documents, audiobooks, audiobookChapters, userPreferences, userDocumentProgress } from '@/db/schema';
+import { eq, and, inArray } from 'drizzle-orm';
 import { UNCLAIMED_USER_ID } from './docstore';
 import {
   deleteAudiobookObject,
@@ -32,6 +32,25 @@ type AudiobookChapterRow = {
   duration: number | null;
   filePath: string;
   format: string;
+};
+
+type UserPreferenceRow = {
+  userId: string;
+  dataJson: unknown;
+  clientUpdatedAtMs: number;
+  createdAt: unknown;
+  updatedAt: unknown;
+};
+
+type UserDocumentProgressRow = {
+  userId: string;
+  documentId: string;
+  readerType: string;
+  location: string;
+  progress: number | null;
+  clientUpdatedAtMs: number;
+  createdAt: unknown;
+  updatedAt: unknown;
 };
 
 function contentTypeForAudiobookObject(fileName: string): string {
@@ -70,16 +89,22 @@ async function moveAudiobookBlobScope(
 }
 
 export async function claimAnonymousData(userId: string, unclaimedUserId: string = UNCLAIMED_USER_ID, namespace: string | null = null) {
-  if (!isAuthEnabled() || !userId) return { documents: 0, audiobooks: 0 };
+  if (!isAuthEnabled() || !userId) {
+    return { documents: 0, audiobooks: 0, preferences: 0, progress: 0 };
+  }
 
-  const [documentsClaimed, audiobooksClaimed] = await Promise.all([
+  const [documentsClaimed, audiobooksClaimed, preferencesClaimed, progressClaimed] = await Promise.all([
     transferUserDocuments(unclaimedUserId, userId),
     transferUserAudiobooks(unclaimedUserId, userId, namespace),
+    transferUserPreferences(unclaimedUserId, userId),
+    transferUserProgress(unclaimedUserId, userId),
   ]);
 
   return {
     documents: documentsClaimed,
     audiobooks: audiobooksClaimed,
+    preferences: preferencesClaimed,
+    progress: progressClaimed,
   };
 }
 
@@ -160,4 +185,93 @@ export async function transferUserAudiobooks(
   await db.delete(audiobooks).where(eq(audiobooks.userId, fromUserId));
 
   return books.length;
+}
+
+export async function transferUserPreferences(fromUserId: string, toUserId: string): Promise<number> {
+  if (!isAuthEnabled() || !fromUserId || !toUserId) return 0;
+  if (fromUserId === toUserId) return 0;
+
+  const fromRows = (await db
+    .select()
+    .from(userPreferences)
+    .where(eq(userPreferences.userId, fromUserId))) as UserPreferenceRow[];
+  const fromRow = fromRows[0];
+  if (!fromRow) return 0;
+
+  const toRows = (await db
+    .select()
+    .from(userPreferences)
+    .where(eq(userPreferences.userId, toUserId))) as UserPreferenceRow[];
+  const toRow = toRows[0];
+
+  if (!toRow || Number(fromRow.clientUpdatedAtMs ?? 0) > Number(toRow.clientUpdatedAtMs ?? 0)) {
+    await db
+      .insert(userPreferences)
+      .values({
+        ...fromRow,
+        userId: toUserId,
+      })
+      .onConflictDoUpdate({
+        target: [userPreferences.userId],
+        set: {
+          dataJson: fromRow.dataJson,
+          clientUpdatedAtMs: fromRow.clientUpdatedAtMs,
+          updatedAt: fromRow.updatedAt,
+        },
+      });
+  }
+
+  await db.delete(userPreferences).where(eq(userPreferences.userId, fromUserId));
+  return 1;
+}
+
+export async function transferUserProgress(fromUserId: string, toUserId: string): Promise<number> {
+  if (!isAuthEnabled() || !fromUserId || !toUserId) return 0;
+  if (fromUserId === toUserId) return 0;
+
+  const fromRows = (await db
+    .select()
+    .from(userDocumentProgress)
+    .where(eq(userDocumentProgress.userId, fromUserId))) as UserDocumentProgressRow[];
+  if (fromRows.length === 0) return 0;
+
+  const documentIds = fromRows.map((row) => row.documentId);
+  const toRows = (await db
+    .select()
+    .from(userDocumentProgress)
+    .where(and(
+      eq(userDocumentProgress.userId, toUserId),
+      inArray(userDocumentProgress.documentId, documentIds),
+    ))) as UserDocumentProgressRow[];
+  const toByDocId = new Map<string, UserDocumentProgressRow>();
+  for (const row of toRows) {
+    toByDocId.set(row.documentId, row);
+  }
+
+  for (const row of fromRows) {
+    const existing = toByDocId.get(row.documentId);
+    const fromUpdated = Number(row.clientUpdatedAtMs ?? 0);
+    const toUpdated = Number(existing?.clientUpdatedAtMs ?? 0);
+    if (existing && fromUpdated <= toUpdated) continue;
+
+    await db
+      .insert(userDocumentProgress)
+      .values({
+        ...row,
+        userId: toUserId,
+      })
+      .onConflictDoUpdate({
+        target: [userDocumentProgress.userId, userDocumentProgress.documentId],
+        set: {
+          readerType: row.readerType,
+          location: row.location,
+          progress: row.progress,
+          clientUpdatedAtMs: row.clientUpdatedAtMs,
+          updatedAt: row.updatedAt,
+        },
+      });
+  }
+
+  await db.delete(userDocumentProgress).where(eq(userDocumentProgress.userId, fromUserId));
+  return fromRows.length;
 }

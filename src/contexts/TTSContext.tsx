@@ -27,7 +27,7 @@ import {
 } from 'react';
 import { Howl } from 'howler';
 import toast from 'react-hot-toast';
-import { useParams } from 'next/navigation';
+import { useParams, usePathname } from 'next/navigation';
 
 import { useConfig } from '@/contexts/ConfigContext';
 import { useAudioCache } from '@/hooks/audio/useAudioCache';
@@ -35,6 +35,7 @@ import { useVoiceManagement } from '@/hooks/audio/useVoiceManagement';
 import { useMediaSession } from '@/hooks/audio/useMediaSession';
 import { useAudioContext } from '@/hooks/audio/useAudioContext';
 import { getLastDocumentLocation, setLastDocumentLocation } from '@/lib/dexie';
+import { getDocumentProgress, scheduleDocumentProgressSync } from '@/lib/client-user-state';
 import { useBackgroundState } from '@/hooks/audio/useBackgroundState';
 import { withRetry, generateTTS, alignAudio } from '@/lib/client';
 import { preprocessSentenceForAudio, splitTextToTtsBlocks, splitTextToTtsBlocksEPUB } from '@/lib/nlp';
@@ -53,6 +54,7 @@ import type {
   TTSRequestHeaders,
   TTSRetryOptions,
 } from '@/types/client';
+import type { ReaderType } from '@/types/user-state';
 
 // Media globals
 declare global {
@@ -304,7 +306,14 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
   const audioContext = useAudioContext();
   const audioCache = useAudioCache(25);
   const { availableVoices, fetchVoices } = useVoiceManagement(openApiKey, openApiBaseUrl, configTTSProvider, configTTSModel);
-  const { onTTSStart, onTTSComplete, refresh: refreshRateLimit, triggerRateLimit, isAtLimit } = useAuthRateLimit();
+  const {
+    authEnabled,
+    onTTSStart,
+    onTTSComplete,
+    refresh: refreshRateLimit,
+    triggerRateLimit,
+    isAtLimit,
+  } = useAuthRateLimit();
 
   // Add ref for location change handler
   const locationChangeHandlerRef = useRef<((location: TTSLocation) => void) | null>(null);
@@ -332,6 +341,13 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
 
   // Get document ID from URL params
   const { id } = useParams();
+  const pathname = usePathname();
+
+  const currentReaderType: ReaderType = useMemo(() => {
+    if (pathname.startsWith('/epub/')) return 'epub';
+    if (pathname.startsWith('/html/')) return 'html';
+    return 'pdf';
+  }, [pathname]);
 
   /**
    * State Management
@@ -1716,38 +1732,75 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     skipBackward,
   });
 
-  // Load last location on mount for both EPUB and PDF
+  // Load last location on mount for both EPUB and PDF.
+  // Prefer server-backed progress when available, then fall back to local Dexie.
   useEffect(() => {
-    if (id) {
-      getLastDocumentLocation(id as string).then(lastLocation => {
-        if (lastLocation) {
-          console.log('Setting last location:', lastLocation);
+    if (!id) return;
 
-          if (isEPUB && locationChangeHandlerRef.current) {
-            // For EPUB documents, use the location change handler
-            locationChangeHandlerRef.current(lastLocation);
-          } else if (!isEPUB) {
-            // For PDF documents, parse the location as "page:sentence"
-            try {
-              const [pageStr, sentenceIndexStr] = lastLocation.split(':');
-              const page = parseInt(pageStr, 10);
-              const sentenceIndex = parseInt(sentenceIndexStr, 10);
+    let cancelled = false;
+    const docId = id as string;
 
-              if (!isNaN(page) && !isNaN(sentenceIndex)) {
-                console.log(`Restoring PDF position: page ${page}, sentence ${sentenceIndex}`);
-                // Skip to the page first, then the sentence index will be restored when setText is called
-                setCurrDocPage(page);
-                // Store the sentence index to be used when text is loaded
-                setPendingRestoreIndex(sentenceIndex);
-              }
-            } catch (error) {
-              console.warn('Error parsing PDF location:', error);
-            }
+    const applyLocation = (lastLocation: string) => {
+      console.log('Setting last location:', lastLocation);
+
+      if (isEPUB && locationChangeHandlerRef.current) {
+        // For EPUB documents, use the location change handler
+        locationChangeHandlerRef.current(lastLocation);
+        return;
+      }
+
+      if (!isEPUB) {
+        // For PDF documents, parse the location as "page:sentence"
+        try {
+          const [pageStr, sentenceIndexStr] = lastLocation.split(':');
+          const page = parseInt(pageStr, 10);
+          const sentenceIndex = parseInt(sentenceIndexStr, 10);
+
+          if (!isNaN(page) && !isNaN(sentenceIndex)) {
+            console.log(`Restoring PDF position: page ${page}, sentence ${sentenceIndex}`);
+            // Skip to the page first, then the sentence index will be restored when setText is called
+            setCurrDocPage(page);
+            // Store the sentence index to be used when text is loaded
+            setPendingRestoreIndex(sentenceIndex);
           }
+        } catch (error) {
+          console.warn('Error parsing PDF location:', error);
         }
-      });
-    }
-  }, [id, isEPUB]);
+      }
+    };
+
+    const load = async () => {
+      if (authEnabled) {
+        try {
+          const remote = await getDocumentProgress(docId);
+          if (!cancelled && remote?.location) {
+            await setLastDocumentLocation(docId, remote.location).catch((error) => {
+              console.warn('Error caching remote location locally:', error);
+            });
+            applyLocation(remote.location);
+            return;
+          }
+        } catch (error) {
+          console.warn('Error loading remote progress:', error);
+        }
+      }
+
+      try {
+        const local = await getLastDocumentLocation(docId);
+        if (!cancelled && local) {
+          applyLocation(local);
+        }
+      } catch (error) {
+        console.warn('Error loading local last location:', error);
+      }
+    };
+
+    load();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [id, isEPUB, currentReaderType, authEnabled]);
 
   // Save current position periodically for PDFs
   useEffect(() => {
@@ -1758,11 +1811,18 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
         setLastDocumentLocation(id as string, location).catch(error => {
           console.warn('Error saving PDF location:', error);
         });
+        if (authEnabled) {
+          scheduleDocumentProgressSync({
+            documentId: id as string,
+            readerType: currentReaderType,
+            location,
+          });
+        }
       }, 1000); // Debounce saves by 1 second
 
       return () => clearTimeout(timeoutId);
     }
-  }, [id, isEPUB, currDocPageNumber, currentIndex, sentences.length]);
+  }, [id, isEPUB, currDocPageNumber, currentIndex, sentences.length, currentReaderType, authEnabled]);
 
   /**
    * Renders the TTS context provider with its children

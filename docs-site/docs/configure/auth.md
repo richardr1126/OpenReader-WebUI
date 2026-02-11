@@ -18,3 +18,20 @@ This page covers application-level configuration for provider access and authent
 - For storage/S3/SeaweedFS behavior: [Object / Blob Storage](./object-blob-storage)
 - For database mode: [Database](./database)
 - For migration behavior and commands: [Migrations](./migrations)
+
+## Sync notes
+
+### Auth enabled
+
+- Settings and reading progress are saved to the server.
+- Updates are not instant push-based sync; they use normal client polling/refresh behavior.
+- If two devices change the same item around the same time, the newest update wins.
+
+### Auth disabled
+
+- Settings and reading progress stay local in the browser (Dexie/IndexedDB).
+- This avoids no-auth cross-browser conflicts, but there is no cross-device sync.
+
+## Claim modal note
+
+- You may still see old anonymous settings/progress available to claim from older deployments.

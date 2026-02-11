@@ -28,6 +28,7 @@ title: Stack
 ## Next.js server
 
 - APIs: Route Handlers for sync, blob/content access, migrations, audiobook export, TTS/Whisper proxying
+- State sync: request-based today (not realtime push updates)
 - Authentication: [Better Auth](https://www.better-auth.com/) server handlers/adapters
 - Metadata DB: [Drizzle ORM](https://orm.drizzle.team/) with SQLite (`better-sqlite3`) by default and optional Postgres (`pg`)
 - Blob storage: embedded [SeaweedFS](https://github.com/seaweedfs/seaweedfs) (`weed mini`) by default, or external S3-compatible storage via AWS SDK v3

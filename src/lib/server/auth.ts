@@ -7,7 +7,12 @@ import type { NextRequest } from 'next/server';
 import { db } from "@/db";
 import { rateLimiter } from "@/lib/server/rate-limiter";
 import { isAuthEnabled } from "@/lib/server/auth-config";
-import { transferUserAudiobooks, transferUserDocuments } from "@/lib/server/claim-data";
+import {
+  transferUserAudiobooks,
+  transferUserDocuments,
+  transferUserPreferences,
+  transferUserProgress,
+} from "@/lib/server/claim-data";
 
 import * as schema from "@/db/schema"; // Import the dynamic schema
 
@@ -133,6 +138,28 @@ const createAuth = () => betterAuth({
             }
           } catch (error) {
             console.error("Error transferring documents during account linking:", error);
+            // Don't throw here to prevent blocking the account linking process
+          }
+
+          // Transfer preferences from anonymous user to new authenticated user
+          try {
+            const transferred = await transferUserPreferences(anonymousUser.user.id, newUser.user.id);
+            if (transferred > 0) {
+              console.log(`Successfully transferred preferences from anonymous user ${anonymousUser.user.id} to user ${newUser.user.id}`);
+            }
+          } catch (error) {
+            console.error("Error transferring preferences during account linking:", error);
+            // Don't throw here to prevent blocking the account linking process
+          }
+
+          // Transfer reading progress from anonymous user to new authenticated user
+          try {
+            const transferred = await transferUserProgress(anonymousUser.user.id, newUser.user.id);
+            if (transferred > 0) {
+              console.log(`Successfully transferred ${transferred} progress row(s) from anonymous user ${anonymousUser.user.id} to user ${newUser.user.id}`);
+            }
+          } catch (error) {
+            console.error("Error transferring reading progress during account linking:", error);
             // Don't throw here to prevent blocking the account linking process
           }
         } catch (error) {

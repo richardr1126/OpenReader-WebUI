@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { claimAnonymousData } from '@/lib/server/claim-data';
 import { auth } from '@/lib/server/auth';
 import { db } from '@/db';
-import { audiobooks, documents } from '@/db/schema';
+import { audiobooks, documents, userDocumentProgress, userPreferences } from '@/db/schema';
 import { count, eq, ne } from 'drizzle-orm';
 import { getOpenReaderTestNamespace, getUnclaimedUserIdForNamespace } from '@/lib/server/test-namespace';
 
@@ -22,7 +22,9 @@ async function checkClaimMigrationReadiness(): Promise<NextResponse | null> {
   return null;
 }
 
-async function getClaimableCounts(unclaimedUserId: string): Promise<{ documents: number; audiobooks: number }> {
+async function getClaimableCounts(
+  unclaimedUserId: string,
+): Promise<{ documents: number; audiobooks: number; preferences: number; progress: number }> {
   const [docCount] = await db
     .select({ count: count() })
     .from(documents)
@@ -31,10 +33,20 @@ async function getClaimableCounts(unclaimedUserId: string): Promise<{ documents:
     .select({ count: count() })
     .from(audiobooks)
     .where(eq(audiobooks.userId, unclaimedUserId));
+  const [preferencesCount] = await db
+    .select({ count: count() })
+    .from(userPreferences)
+    .where(eq(userPreferences.userId, unclaimedUserId));
+  const [progressCount] = await db
+    .select({ count: count() })
+    .from(userDocumentProgress)
+    .where(eq(userDocumentProgress.userId, unclaimedUserId));
 
   return {
     documents: Number(docCount?.count ?? 0),
     audiobooks: Number(bookCount?.count ?? 0),
+    preferences: Number(preferencesCount?.count ?? 0),
+    progress: Number(progressCount?.count ?? 0),
   };
 }
 
