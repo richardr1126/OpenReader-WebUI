@@ -34,20 +34,5 @@ export function useBackgroundState({ activeHowl, isPlaying, keepPlayingInBackgro
     };
   }, [isPlaying, activeHowl, keepPlayingInBackground]);
 
-  useEffect(() => {
-    if (!document.hidden || !activeHowl || !isPlaying) return;
-
-    if (keepPlayingInBackground) {
-      if (!activeHowl.playing()) {
-        activeHowl.play();
-      }
-      return;
-    }
-
-    if (activeHowl.playing()) {
-      activeHowl.pause();
-    }
-  }, [activeHowl, isPlaying, keepPlayingInBackground]);
-
   return isBackgrounded;
 }
