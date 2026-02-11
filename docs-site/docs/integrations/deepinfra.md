@@ -16,4 +16,4 @@ Use Deepinfra as a hosted OpenAI-compatible TTS provider.
 
 - `Deepinfra` is a built-in provider in the dropdown, so `API_BASE` is usually not required.
 - Deepinfra supports multiple TTS models, including Kokoro-family options.
-- For variable details, see [Environment Variables](../guides/environment-variables).
+- For variable details, see [Environment Variables](../reference/environment-variables).

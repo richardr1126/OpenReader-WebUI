@@ -12,7 +12,7 @@ interface DocumentHeaderMenuProps {
   onZoomDecrease: () => void;
   onOpenSettings: () => void;
   onOpenAudiobook?: () => void;
-  isDev?: boolean;
+  showAudiobookExport?: boolean;
   minZoom?: number;
   maxZoom?: number;
 }
@@ -23,7 +23,7 @@ export function DocumentHeaderMenu({
   onZoomDecrease,
   onOpenSettings,
   onOpenAudiobook,
-  isDev,
+  showAudiobookExport,
   minZoom = 0,
   maxZoom = 100
 }: DocumentHeaderMenuProps) {
@@ -38,7 +38,7 @@ export function DocumentHeaderMenu({
         min={minZoom}
         max={maxZoom}
       />
-      {isDev && onOpenAudiobook && (
+      {showAudiobookExport && onOpenAudiobook && (
         <button
           onClick={onOpenAudiobook}
           className="inline-flex items-center py-1 px-2 rounded-md border border-offbase bg-base text-foreground text-xs hover:bg-offbase transition-all duration-200 ease-in-out hover:scale-[1.09] hover:text-accent"
@@ -102,7 +102,7 @@ export function DocumentHeaderMenu({
 
             {/* Actions Section */}
             <div className="p-1">
-              {isDev && onOpenAudiobook && (
+              {showAudiobookExport && onOpenAudiobook && (
                 <MenuItem>
                   {({ active }) => (
                     <button

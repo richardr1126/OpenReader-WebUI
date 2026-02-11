@@ -50,10 +50,10 @@ Quick notes:
 - To enable auth, set both `BASE_URL` and `AUTH_SECRET`.
 - DB migrations run automatically during container startup via the shared entrypoint.
 
-For all environment variables, see [Environment Variables](../guides/environment-variables).
-For app/auth behavior, see [Auth](../guides/configuration).
-For database startup and migration behavior, see [SQL Database](../operations/database-and-migrations).
-For blob behavior and mounts, see [Object / Blob Storage](../guides/storage-and-blob-behavior).
+For all environment variables, see [Environment Variables](../reference/environment-variables).
+For app/auth behavior, see [Auth](../configure/configuration).
+For database startup and migration behavior, see [Database and Migrations](../configure/database-and-migrations).
+For blob behavior and mounts, see [Object / Blob Storage](../configure/storage-and-blob-behavior).
 
 ## 2. Configure settings in the app UI
 

@@ -5,6 +5,7 @@ import type * as Preset from '@docusaurus/preset-classic';
 const config: Config = {
   title: 'OpenReader WebUI Docs',
   tagline: 'Docs for OpenReader',
+  favicon: 'favicon.ico',
 
   future: {
     v4: true,
@@ -97,7 +98,7 @@ const config: Config = {
         {
           title: 'Community',
           items: [
-            { label: 'Support', to: '/community/support' },
+            { label: 'Support', to: '/project/support' },
             { label: 'GitHub Discussions', href: 'https://github.com/richardr1126/OpenReader-WebUI/discussions' },
             { label: 'Issues', href: 'https://github.com/richardr1126/OpenReader-WebUI/issues' },
           ],

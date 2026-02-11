@@ -1,6 +1,7 @@
 import { spawn } from 'child_process';
 import path from 'path';
 import { readdir } from 'fs/promises';
+import { getFFprobePath } from '@/lib/server/ffmpeg-bin';
 
 export type StoredChapter = {
   index: number;
@@ -78,7 +79,7 @@ type ProbeResult = {
 
 export async function ffprobeAudio(filePath: string, signal?: AbortSignal): Promise<ProbeResult> {
   return new Promise<ProbeResult>((resolve, reject) => {
-    const ffprobe = spawn('ffprobe', [
+    const ffprobe = spawn(getFFprobePath(), [
       '-v',
       'quiet',
       '-print_format',

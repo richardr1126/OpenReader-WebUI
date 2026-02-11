@@ -19,7 +19,7 @@ import { resolveDocumentId } from '@/lib/dexie';
 import { RateLimitBanner } from '@/components/auth/RateLimitBanner';
 import { useAuthRateLimit } from '@/contexts/AuthRateLimitContext';
 
-const isDev = process.env.NEXT_PUBLIC_NODE_ENV !== 'production' || process.env.NODE_ENV == null;
+const canExportAudiobook = process.env.NEXT_PUBLIC_ENABLE_AUDIOBOOK_EXPORT !== 'false';
 
 // Dynamic import for client-side rendering only
 const PDFViewer = dynamic(
@@ -154,7 +154,7 @@ export default function PDFViewerPage() {
               onZoomDecrease={handleZoomOut}
               onOpenSettings={() => setIsSettingsOpen(true)}
               onOpenAudiobook={() => setIsAudiobookModalOpen(true)}
-              isDev={isDev}
+              showAudiobookExport={canExportAudiobook}
               minZoom={50}
               maxZoom={300}
             />
@@ -171,7 +171,7 @@ export default function PDFViewerPage() {
           <PDFViewer zoomLevel={zoomLevel} />
         )}
       </div>
-      {isDev && (
+      {canExportAudiobook && (
         <AudiobookExportModal
           isOpen={isAudiobookModalOpen}
           setIsOpen={setIsAudiobookModalOpen}

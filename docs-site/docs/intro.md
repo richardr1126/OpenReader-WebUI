@@ -27,13 +27,13 @@ It supports multiple TTS providers including OpenAI, DeepInfra, and custom OpenA
 
 ## Start Here
 
-- [Docker Quick Start](./getting-started/docker-quick-start)
-- [Local Development](./getting-started/local-development)
-- [Environment Variables](./guides/environment-variables)
-- [Auth](./guides/configuration)
-- [SQL Database](./operations/database-and-migrations)
-- [Object / Blob Storage](./guides/storage-and-blob-behavior)
-- [TTS Providers](./guides/tts-providers)
+- [Docker Quick Start](./start-here/docker-quick-start)
+- [Local Development](./start-here/local-development)
+- [Environment Variables](./reference/environment-variables)
+- [Auth](./configure/configuration)
+- [Database and Migrations](./configure/database-and-migrations)
+- [Object / Blob Storage](./configure/storage-and-blob-behavior)
+- [TTS Providers](./configure/tts-providers)
 
 ## Source Repository
 

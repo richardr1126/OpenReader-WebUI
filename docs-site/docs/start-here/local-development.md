@@ -20,12 +20,6 @@ brew install seaweedfs
 
 Optional, depending on features:
 
-- [FFmpeg](https://ffmpeg.org) (required for `m4b` audiobook generation)
-
-```bash
-brew install ffmpeg
-```
-
 - [libreoffice](https://www.libreoffice.org) (required for DOCX conversion)
 
 ```bash
@@ -83,10 +77,10 @@ Optional:
 - Stable S3 credentials via `S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY`
 - External S3 storage by setting `USE_EMBEDDED_WEED_MINI=false` and related S3 vars
 
-For all environment variables, see [Environment Variables](../guides/environment-variables).
-For app/auth behavior, see [Auth](../guides/configuration).
-For storage configuration, see [Object / Blob Storage](../guides/storage-and-blob-behavior).
-For database mode and migrations, see [SQL Database](../operations/database-and-migrations).
+For all environment variables, see [Environment Variables](../reference/environment-variables).
+For app/auth behavior, see [Auth](../configure/configuration).
+For storage configuration, see [Object / Blob Storage](../configure/storage-and-blob-behavior).
+For database mode and migrations, see [Database and Migrations](../configure/database-and-migrations).
 
 4. Run DB migrations.
 
@@ -98,7 +92,7 @@ pnpm migrate
 ```
 
 :::note
-If `POSTGRES_URL` is set, migrations target Postgres; otherwise local SQLite is used. To disable automatic startup migrations, set `RUN_DB_MIGRATIONS=false`.
+If `POSTGRES_URL` is set, migrations target Postgres; otherwise local SQLite is used. To disable automatic startup migrations, set `RUN_DRIZZLE_MIGRATIONS=false` and/or `RUN_FS_MIGRATIONS=false`. You can run storage migration manually with `pnpm migrate-fs`.
 :::
 
 5. Start the app.

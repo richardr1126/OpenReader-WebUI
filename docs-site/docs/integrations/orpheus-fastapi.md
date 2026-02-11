@@ -20,4 +20,4 @@ Use Orpheus-FastAPI as an OpenAI-compatible TTS backend for OpenReader.
 
 - `API_BASE` is needed here because Orpheus is configured through the custom provider path.
 - OpenReader expects OpenAI-compatible audio endpoints.
-- For variable details, see [Environment Variables](../guides/environment-variables).
+- For variable details, see [Environment Variables](../reference/environment-variables).

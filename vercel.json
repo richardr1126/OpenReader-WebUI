@@ -1,0 +1,11 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "app/api/audiobook/route.ts": {
+      "memory": 3009
+    },
+    "app/api/whisper/route.ts": {
+      "memory": 3009
+    }
+  }
+}

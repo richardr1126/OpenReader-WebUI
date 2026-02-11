@@ -9,7 +9,7 @@ This page documents storage backends, blob upload routing, and Docker mount beha
 - Default: embedded SQLite metadata + embedded SeaweedFS (`weed mini`) blobs
 - External option: Postgres + external S3-compatible object storage
 
-Storage variables are documented in [Environment Variables](./environment-variables) under the storage sections.
+Storage variables are documented in [Environment Variables](../reference/environment-variables) under the storage sections.
 
 ## Ports
 
@@ -26,7 +26,7 @@ Storage variables are documented in [Environment Variables](./environment-variab
 
 | Mount | Type | Recommended | Purpose | Example |
 | --- | --- | --- | --- | --- |
-| `/app/docstore` | Docker named volume | Yes (for persistence) | Persists SeaweedFS blob data, SQLite metadata DB, audiobook artifacts, migration/runtime files | `-v openreader_docstore:/app/docstore` |
+| `/app/docstore` | Docker named volume | Yes (for persistence) | Persists SeaweedFS blob data, SQLite metadata DB, migrations, and local runtime temp state | `-v openreader_docstore:/app/docstore` |
 | `/app/docstore/library` | Bind mount | Optional + `:ro` | Read-only source for server library import (files are copied/imported into client storage) | `-v /path/to/your/library:/app/docstore/library:ro` |
 
 To import from mounted library: **Settings -> Documents -> Server Library Import**.
@@ -42,3 +42,8 @@ If `8333` is not published externally:
 - Document uploads still work through upload fallback proxy
 - Reads/snippets continue through app API routes
 - Direct presigned browser upload/download to embedded endpoint is unavailable
+
+## Audiobook storage note
+
+- In current versions, audiobook assets live in object storage (`audiobooks_v1` keyspace), not as durable files under `/app/docstore`.
+- Local filesystem usage for audiobook routes is temporary processing only.

@@ -42,7 +42,7 @@ If your provider exposes this interface, it can be used as an OpenAI-compatible 
 3. Set `API_KEY` if required by your provider.
 4. Choose model and voice.
 
-For environment variables, see [Environment Variables](./environment-variables).
+For environment variables, see [Environment Variables](../reference/environment-variables).
 For TTS quota behavior, see [TTS Rate Limiting](./tts-rate-limiting).
 For auth behavior, see [Auth](./configuration).
 For provider-specific integration guides, see [Kokoro-FastAPI](../integrations/kokoro-fastapi), [Orpheus-FastAPI](../integrations/orpheus-fastapi), [Deepinfra](../integrations/deepinfra), [OpenAI](../integrations/openai), and [Custom OpenAI](../integrations/custom-openai).

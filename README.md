@@ -29,9 +29,10 @@ OpenReader WebUI is an open source, self-host-friendly text-to-speech document r
 | Goal | Link |
 | --- | --- |
 | Run with Docker | [Docker Quick Start](https://docs.openreader.richardr.dev/getting-started/docker-quick-start) |
+| Deploy on Vercel | [Vercel Deployment](https://docs.openreader.richardr.dev/getting-started/vercel-deployment) |
 | Develop locally | [Local Development](https://docs.openreader.richardr.dev/getting-started/local-development) |
 | Configure auth | [Auth](https://docs.openreader.richardr.dev/guides/configuration) |
-| Configure SQL database | [SQL Database](https://docs.openreader.richardr.dev/operations/database-and-migrations) |
+| Configure SQL database | [Database and Migrations](https://docs.openreader.richardr.dev/operations/database-and-migrations) |
 | Configure object storage | [Object / Blob Storage](https://docs.openreader.richardr.dev/guides/storage-and-blob-behavior) |
 | Configure TTS providers | [TTS Providers](https://docs.openreader.richardr.dev/guides/tts-providers) |
 | Run Kokoro locally | [Kokoro-FastAPI](https://docs.openreader.richardr.dev/integrations/kokoro-fastapi) |

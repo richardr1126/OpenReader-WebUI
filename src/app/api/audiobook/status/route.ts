@@ -1,18 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { existsSync } from 'fs';
-import { join } from 'path';
-import { getAudiobooksRootDir, ensureAudiobooksV1Ready, isAudiobooksV1Ready } from '@/lib/server/docstore';
-import { listStoredChapters } from '@/lib/server/audiobook';
-import type { AudiobookGenerationSettings } from '@/types/client';
-import type { TTSAudiobookFormat, TTSAudiobookChapter } from '@/types/tts';
-import { readFile } from 'fs/promises';
-import { requireAuthContext } from '@/lib/server/auth';
+import { and, eq, inArray } from 'drizzle-orm';
 import { db } from '@/db';
-import { audiobooks } from '@/db/schema';
-import { eq, and, inArray } from 'drizzle-orm';
-import { ensureDbIndexed } from '@/lib/server/db-indexing';
+import { audiobooks, audiobookChapters } from '@/db/schema';
+import { requireAuthContext } from '@/lib/server/auth';
+import { getAudiobookObjectBuffer, isMissingBlobError, listAudiobookObjects } from '@/lib/server/audiobooks-blobstore';
+import { decodeChapterFileName } from '@/lib/server/audiobook';
+import { pruneAudiobookChaptersNotOnDisk } from '@/lib/server/audiobook-prune';
+import { isS3Configured } from '@/lib/server/s3';
 import { getOpenReaderTestNamespace, getUnclaimedUserIdForNamespace } from '@/lib/server/test-namespace';
-import { pruneAudiobookChaptersNotOnDisk, pruneAudiobookIfMissingDir } from '@/lib/server/audiobook-prune';
+import type { AudiobookGenerationSettings } from '@/types/client';
+import type { TTSAudiobookChapter, TTSAudiobookFormat } from '@/types/tts';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,19 +19,53 @@ function isSafeId(value: string): boolean {
   return SAFE_ID_REGEX.test(value);
 }
 
+function s3NotConfiguredResponse(): NextResponse {
+  return NextResponse.json(
+    { error: 'Audiobooks storage is not configured. Set S3_* environment variables.' },
+    { status: 503 },
+  );
+}
+
+type ChapterObject = {
+  index: number;
+  title: string;
+  format: TTSAudiobookFormat;
+  fileName: string;
+};
+
+function listChapterObjects(fileNames: string[]): ChapterObject[] {
+  const chapters = fileNames
+    .map((fileName) => {
+      const decoded = decodeChapterFileName(fileName);
+      if (!decoded) return null;
+      return {
+        index: decoded.index,
+        title: decoded.title,
+        format: decoded.format,
+        fileName,
+      } satisfies ChapterObject;
+    })
+    .filter((value): value is ChapterObject => Boolean(value))
+    .sort((a, b) => a.index - b.index);
+
+  const deduped = new Map<number, ChapterObject>();
+  for (const chapter of chapters) {
+    const current = deduped.get(chapter.index);
+    if (!current || chapter.fileName > current.fileName) {
+      deduped.set(chapter.index, chapter);
+    }
+  }
+
+  return Array.from(deduped.values()).sort((a, b) => a.index - b.index);
+}
+
 export async function GET(request: NextRequest) {
   try {
+    if (!isS3Configured()) return s3NotConfiguredResponse();
+
     const bookId = request.nextUrl.searchParams.get('bookId');
     if (!bookId || !isSafeId(bookId)) {
       return NextResponse.json({ error: 'Missing bookId parameter' }, { status: 400 });
-    }
-
-    await ensureAudiobooksV1Ready();
-    if (!(await isAudiobooksV1Ready())) {
-      return NextResponse.json(
-        { error: 'Audiobooks storage is not migrated; run /api/migrations/v1 first.' },
-        { status: 409 },
-      );
     }
 
     const ctxOrRes = await requireAuthContext(request);
@@ -46,15 +77,12 @@ export async function GET(request: NextRequest) {
     const storageUserId = userId ?? unclaimedUserId;
     const allowedUserIds = authEnabled ? [storageUserId, unclaimedUserId] : [unclaimedUserId];
 
-    await ensureDbIndexed();
-
-    // Check if audiobook exists for user OR is unclaimed (similar to documents)
     const [existingBook] = await db
       .select({ userId: audiobooks.userId })
       .from(audiobooks)
       .where(and(eq(audiobooks.id, bookId), inArray(audiobooks.userId, allowedUserIds)));
+
     if (!existingBook) {
-      // Book doesn't exist for this user or unclaimed - return empty state
       return NextResponse.json({
         chapters: [],
         exists: false,
@@ -64,49 +92,56 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    const intermediateDir = join(
-      getAudiobooksRootDir({
-        userId: existingBook.userId,
-        authEnabled,
-        namespace: testNamespace,
-      }),
-      `${bookId}-audiobook`,
-    );
+    const objects = await listAudiobookObjects(bookId, existingBook.userId, testNamespace);
+    const objectNames = objects.map((object) => object.fileName);
+    const chapterObjects = listChapterObjects(objectNames);
 
-    if (!existsSync(intermediateDir)) {
-      await pruneAudiobookIfMissingDir(bookId, existingBook.userId, false);
-      return NextResponse.json({
-        chapters: [],
-        exists: false,
-        hasComplete: false,
-        bookId: null,
-        settings: null,
-      });
-    }
-
-    const stored = await listStoredChapters(intermediateDir, request.signal);
     await pruneAudiobookChaptersNotOnDisk(
       bookId,
       existingBook.userId,
-      stored.map((c) => c.index),
+      chapterObjects.map((chapter) => chapter.index),
     );
-    const chapters: TTSAudiobookChapter[] = stored.map((chapter) => ({
+
+    const chapterRows = await db
+      .select({ chapterIndex: audiobookChapters.chapterIndex, duration: audiobookChapters.duration })
+      .from(audiobookChapters)
+      .where(and(eq(audiobookChapters.bookId, bookId), eq(audiobookChapters.userId, existingBook.userId)));
+    const durationByIndex = new Map<number, number>();
+    for (const row of chapterRows) {
+      durationByIndex.set(row.chapterIndex, Number(row.duration ?? 0));
+    }
+
+    const chapters: TTSAudiobookChapter[] = chapterObjects.map((chapter) => ({
       index: chapter.index,
       title: chapter.title,
-      duration: chapter.durationSec,
+      duration: durationByIndex.get(chapter.index),
       status: 'completed',
       bookId,
-      format: chapter.format as TTSAudiobookFormat,
+      format: chapter.format,
     }));
 
     let settings: AudiobookGenerationSettings | null = null;
     try {
-      settings = JSON.parse(await readFile(join(intermediateDir, 'audiobook.meta.json'), 'utf8')) as AudiobookGenerationSettings;
-    } catch {
+      settings = JSON.parse((await getAudiobookObjectBuffer(bookId, existingBook.userId, 'audiobook.meta.json', testNamespace)).toString('utf8')) as AudiobookGenerationSettings;
+    } catch (error) {
+      if (!isMissingBlobError(error)) throw error;
       settings = null;
     }
 
-    const hasComplete = existsSync(join(intermediateDir, 'complete.mp3')) || existsSync(join(intermediateDir, 'complete.m4b'));
+    const hasComplete = objectNames.includes('complete.mp3') || objectNames.includes('complete.m4b');
+    const exists = chapters.length > 0 || hasComplete || settings !== null;
+
+    if (!exists) {
+      await db.delete(audiobookChapters).where(and(eq(audiobookChapters.bookId, bookId), eq(audiobookChapters.userId, existingBook.userId)));
+      await db.delete(audiobooks).where(and(eq(audiobooks.id, bookId), eq(audiobooks.userId, existingBook.userId)));
+      return NextResponse.json({
+        chapters: [],
+        exists: false,
+        hasComplete: false,
+        bookId: null,
+        settings: null,
+      });
+    }
 
     return NextResponse.json({
       chapters,
@@ -115,12 +150,8 @@ export async function GET(request: NextRequest) {
       bookId,
       settings,
     });
-
   } catch (error) {
     console.error('Error fetching chapters:', error);
-    return NextResponse.json(
-      { error: 'Failed to fetch chapters' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Failed to fetch chapters' }, { status: 500 });
   }
 }

@@ -28,6 +28,11 @@ function isTrue(value, defaultValue) {
   return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
 }
 
+function resolveBooleanEnv(env, key, defaultValue) {
+  const value = env[key];
+  return isTrue(value, defaultValue);
+}
+
 function withDefault(value, fallback) {
   return value && value.trim() ? value.trim() : fallback;
 }
@@ -193,6 +198,35 @@ function runDbMigrations(env) {
   }
 }
 
+function runStorageMigrations(env) {
+  const migrateScript = path.join(process.cwd(), 'scripts', 'migrate-fs-v2.mjs');
+  if (!fs.existsSync(migrateScript)) {
+    throw new Error(`Could not find storage migration script at ${migrateScript}`);
+  }
+
+  console.log('Running storage migrations (v2)...');
+  const migration = spawnSync(process.execPath, [migrateScript, '--dry-run', 'false', '--delete-local', 'false'], {
+    env,
+    stdio: 'inherit',
+  });
+
+  if (migration.error) {
+    throw migration.error;
+  }
+  if (typeof migration.status === 'number' && migration.status !== 0) {
+    throw new Error(`Storage migrations failed with exit code ${migration.status}.`);
+  }
+}
+
+function hasS3Config(env) {
+  return Boolean(
+    env.S3_BUCKET?.trim()
+    && env.S3_REGION?.trim()
+    && env.S3_ACCESS_KEY_ID?.trim()
+    && env.S3_SECRET_ACCESS_KEY?.trim()
+  );
+}
+
 function sendSignal(child, signal, useProcessGroup) {
   if (!child) return false;
   if (useProcessGroup && process.platform !== 'win32' && typeof child.pid === 'number' && child.pid > 0) {
@@ -291,7 +325,7 @@ async function main() {
   });
 
   try {
-    const shouldRunDbMigrations = isTrue(runtimeEnv.RUN_DB_MIGRATIONS, true);
+    const shouldRunDbMigrations = resolveBooleanEnv(runtimeEnv, 'RUN_DRIZZLE_MIGRATIONS', true);
     if (shouldRunDbMigrations) {
       runDbMigrations(runtimeEnv);
     }
@@ -349,6 +383,15 @@ async function main() {
       const waitSec = Number.parseInt(runtimeEnv.WEED_MINI_WAIT_SEC || '20', 10);
       await waitForEndpoint(endpoint, Number.isFinite(waitSec) ? waitSec : 20);
       console.log(`Embedded SeaweedFS is ready at ${endpoint}`);
+    }
+
+    const shouldRunStorageMigrations = resolveBooleanEnv(runtimeEnv, 'RUN_FS_MIGRATIONS', true);
+    if (shouldRunStorageMigrations) {
+      if (hasS3Config(runtimeEnv)) {
+        runStorageMigrations(runtimeEnv);
+      } else {
+        console.warn('Skipping storage migrations: S3 configuration is incomplete.');
+      }
     }
 
     const { child, exitPromise } = spawnMainCommand(command, runtimeEnv);

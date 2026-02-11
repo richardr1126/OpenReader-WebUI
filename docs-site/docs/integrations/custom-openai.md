@@ -25,4 +25,4 @@ Your provider should expose:
 
 - `API_BASE` is required for this provider path because OpenReader cannot infer your custom host.
 - If voices do not load, verify the `/v1/audio/voices` response format.
-- For variable details, see [Environment Variables](../guides/environment-variables).
+- For variable details, see [Environment Variables](../reference/environment-variables).

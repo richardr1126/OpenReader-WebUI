@@ -6,13 +6,13 @@ const sidebars: SidebarsConfig = {
     {
       type: 'category',
       label: 'Start Here',
-      items: ['getting-started/docker-quick-start', 'getting-started/local-development'],
+      items: ['start-here/docker-quick-start', 'start-here/vercel-deployment', 'start-here/local-development'],
     },
     {
       type: 'category',
       label: 'Reference',
       items: [
-        'guides/environment-variables',
+        'reference/environment-variables',
         'reference/stack',
       ],
     },
@@ -20,15 +20,15 @@ const sidebars: SidebarsConfig = {
       type: 'category',
       label: 'Configure',
       items: [
-        'guides/tts-providers',
+        'configure/tts-providers',
         {
           type: 'doc',
-          id: 'guides/configuration',
+          id: 'configure/configuration',
           label: 'Auth (Reccomended)',
         },
-        'guides/tts-rate-limiting',
-        'operations/database-and-migrations',
-        'guides/storage-and-blob-behavior',
+        'configure/tts-rate-limiting',
+        'configure/database-and-migrations',
+        'configure/storage-and-blob-behavior',
       ],
     },
     {
@@ -45,7 +45,7 @@ const sidebars: SidebarsConfig = {
     {
       type: 'category',
       label: 'Project',
-      items: ['community/support', 'community/acknowledgements', 'community/license'],
+      items: ['project/support', 'project/acknowledgements', 'project/license'],
     },
   ],
 };

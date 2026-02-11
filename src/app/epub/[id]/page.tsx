@@ -19,7 +19,7 @@ import { resolveDocumentId } from '@/lib/dexie';
 import { RateLimitBanner } from '@/components/auth/RateLimitBanner';
 import { useAuthRateLimit } from '@/contexts/AuthRateLimitContext';
 
-const isDev = process.env.NEXT_PUBLIC_NODE_ENV !== 'production' || process.env.NODE_ENV == null;
+const canExportAudiobook = process.env.NEXT_PUBLIC_ENABLE_AUDIOBOOK_EXPORT !== 'false';
 
 export default function EPUBPage() {
   const { id } = useParams();
@@ -158,7 +158,7 @@ export default function EPUBPage() {
               onZoomDecrease={() => setPadPct(p => Math.max(p - 10, 0))}
               onOpenSettings={() => setIsSettingsOpen(true)}
               onOpenAudiobook={() => setIsAudiobookModalOpen(true)}
-              isDev={isDev}
+              showAudiobookExport={canExportAudiobook}
               minZoom={0}
               maxZoom={100}
             />
@@ -177,7 +177,7 @@ export default function EPUBPage() {
           </div>
         )}
       </div>
-      {isDev && (
+      {canExportAudiobook && (
         <AudiobookExportModal
           isOpen={isAudiobookModalOpen}
           setIsOpen={setIsAudiobookModalOpen}

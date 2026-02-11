@@ -1,21 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { claimAnonymousData } from '@/lib/server/claim-data';
 import { auth } from '@/lib/server/auth';
-import { ensureDbIndexed, getUnclaimedCounts } from '@/lib/server/db-indexing';
-import { isDocumentsV1Ready } from '@/lib/server/docstore';
 import { db } from '@/db';
-import { documents } from '@/db/schema';
-import { count, ne } from 'drizzle-orm';
+import { audiobooks, documents } from '@/db/schema';
+import { count, eq, ne } from 'drizzle-orm';
+import { getOpenReaderTestNamespace, getUnclaimedUserIdForNamespace } from '@/lib/server/test-namespace';
 
 async function checkClaimMigrationReadiness(): Promise<NextResponse | null> {
-  const documentsV1Ready = await isDocumentsV1Ready();
-  if (!documentsV1Ready) {
-    return NextResponse.json(
-      { error: 'Document migration is not ready. Run startup migrations first.' },
-      { status: 409 },
-    );
-  }
-
   const [legacyRows] = await db
     .select({ count: count() })
     .from(documents)
@@ -31,6 +22,22 @@ async function checkClaimMigrationReadiness(): Promise<NextResponse | null> {
   return null;
 }
 
+async function getClaimableCounts(unclaimedUserId: string): Promise<{ documents: number; audiobooks: number }> {
+  const [docCount] = await db
+    .select({ count: count() })
+    .from(documents)
+    .where(eq(documents.userId, unclaimedUserId));
+  const [bookCount] = await db
+    .select({ count: count() })
+    .from(audiobooks)
+    .where(eq(audiobooks.userId, unclaimedUserId));
+
+  return {
+    documents: Number(docCount?.count ?? 0),
+    audiobooks: Number(bookCount?.count ?? 0),
+  };
+}
+
 export async function GET(req: NextRequest) {
   try {
     const session = await auth?.api.getSession({ headers: req.headers });
@@ -41,8 +48,9 @@ export async function GET(req: NextRequest) {
     const readiness = await checkClaimMigrationReadiness();
     if (readiness) return readiness;
 
-    await ensureDbIndexed();
-    const counts = await getUnclaimedCounts();
+    const testNamespace = getOpenReaderTestNamespace(req.headers);
+    const unclaimedUserId = getUnclaimedUserIdForNamespace(testNamespace);
+    const counts = await getClaimableCounts(unclaimedUserId);
     return NextResponse.json({ success: true, ...counts });
   } catch (error) {
     console.error('Error checking claimable data:', error);
@@ -60,10 +68,11 @@ export async function POST(req: NextRequest) {
     const readiness = await checkClaimMigrationReadiness();
     if (readiness) return readiness;
 
+    const testNamespace = getOpenReaderTestNamespace(req.headers);
+    const unclaimedUserId = getUnclaimedUserIdForNamespace(testNamespace);
     const userId = session.user.id;
 
-    await ensureDbIndexed();
-    const result = await claimAnonymousData(userId);
+    const result = await claimAnonymousData(userId, unclaimedUserId, testNamespace);
 
     return NextResponse.json({
       success: true,

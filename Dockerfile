@@ -44,9 +44,9 @@ RUN pnpm build
 FROM node:lts-alpine AS runner
 
 # Add runtime OS dependencies:
-# - ffmpeg: required for audiobook export and word-by-word alignment (/api/whisper)
 # - libreoffice-writer: required for DOCX → PDF conversion
-RUN apk add --no-cache ca-certificates ffmpeg libreoffice-writer
+# ffmpeg/ffprobe are provided by ffmpeg-static/ffprobe-static from node_modules.
+RUN apk add --no-cache ca-certificates libreoffice-writer
 
 # Install pnpm globally for running the app
 RUN npm install -g pnpm

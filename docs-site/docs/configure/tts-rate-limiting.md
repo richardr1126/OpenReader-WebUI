@@ -46,6 +46,6 @@ IP backstop daily limits:
 
 ## Related docs
 
-- Full variable list: [Environment Variables](./environment-variables)
+- Full variable list: [Environment Variables](../reference/environment-variables)
 - Auth configuration: [Auth](./configuration)
 - Provider setup: [TTS Providers](./tts-providers)

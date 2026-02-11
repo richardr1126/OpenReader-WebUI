@@ -15,4 +15,4 @@ Use OpenAI directly as an OpenAI-compatible TTS provider.
 
 - `OpenAI` is a built-in provider in the dropdown, so `API_BASE` is usually not required.
 - OpenReader routes TTS calls through its server API.
-- For variable details, see [Environment Variables](../guides/environment-variables).
+- For variable details, see [Environment Variables](../reference/environment-variables).
