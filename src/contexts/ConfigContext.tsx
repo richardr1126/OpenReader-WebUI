@@ -18,6 +18,7 @@ interface ConfigContextType {
   audioPlayerSpeed: number;
   voice: string;
   skipBlank: boolean;
+  keepPlayingInBackground: boolean;
   epubTheme: boolean;
   smartSentenceSplitting: boolean;
   headerMargin: number;
@@ -162,6 +163,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     audioPlayerSpeed,
     voice,
     skipBlank,
+    keepPlayingInBackground,
     epubTheme,
     headerMargin,
     footerMargin,
@@ -258,6 +260,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
       audioPlayerSpeed,
       voice,
       skipBlank,
+      keepPlayingInBackground,
       epubTheme,
       smartSentenceSplitting,
       headerMargin,

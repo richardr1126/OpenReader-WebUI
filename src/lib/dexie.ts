@@ -156,6 +156,8 @@ function buildAppConfigFromRaw(raw: RawConfigMap): AppConfigRow {
     audioPlayerSpeed: raw.audioPlayerSpeed ? parseFloat(raw.audioPlayerSpeed) : APP_CONFIG_DEFAULTS.audioPlayerSpeed,
     voice: '',
     skipBlank: raw.skipBlank === 'false' ? false : APP_CONFIG_DEFAULTS.skipBlank,
+    keepPlayingInBackground:
+      raw.keepPlayingInBackground === 'false' ? false : APP_CONFIG_DEFAULTS.keepPlayingInBackground,
     epubTheme: raw.epubTheme === 'true',
     smartSentenceSplitting:
       raw.smartSentenceSplitting === 'false' ? false : APP_CONFIG_DEFAULTS.smartSentenceSplitting,
@@ -1007,5 +1009,4 @@ export async function importDocumentsFromLibrary(
     onProgress(100, 'Library import complete!');
   }
 }
-
 
