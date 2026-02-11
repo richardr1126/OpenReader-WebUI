@@ -95,7 +95,8 @@ For all environment variables, see [Environment Variables](../reference/environm
 
 For app/auth behavior, see [Auth](../configure/auth).
 For storage configuration, see [Object / Blob Storage](../configure/object-blob-storage).
-For database mode and migrations, see [Database and Migrations](../configure/database-and-migrations).
+For database mode, see [Database](../configure/database).
+For migration behavior and commands, see [Migrations](../configure/migrations).
 
 4. Run DB migrations.
 

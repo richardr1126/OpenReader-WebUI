@@ -12,30 +12,21 @@ Server library import lets you browse files from one or more server directories 
 - Only selected files are imported
 - Imported files become normal OpenReader documents
 
-## Configure library roots
+## FS / Volume Mounts
 
-Library roots are resolved from environment variables:
+### App data mount
 
-- `IMPORT_LIBRARY_DIRS` (takes precedence): multiple roots separated by comma, colon, or semicolon
-- `IMPORT_LIBRARY_DIR`: single root
-- Fallback when neither is set: `docstore/library`
+- Target: `/app/docstore`
+- Recommended: yes, for persistence
+- Purpose: stores app runtime data, metadata DB, and embedded storage state
+- Mount string: `-v openreader_docstore:/app/docstore`
 
-See [Environment Variables](../reference/environment-variables#import_library_dir) for details.
+### Library source mount
 
-## Docker mount example
-
-Mount a host folder to the default library path:
-
-```bash
-docker run --name openreader-webui \
-  --restart unless-stopped \
-  -p 3003:3003 \
-  -v openreader_docstore:/app/docstore \
-  -v /path/to/your/library:/app/docstore/library:ro \
-  ghcr.io/richardr1126/openreader-webui:latest
-```
-
-Using `:ro` is recommended so the app treats the library as a read-only source.
+- Target: `/app/docstore/library`
+- Recommended: yes for this feature, use read-only (`:ro`)
+- Purpose: exposes host files as import candidates in Server Library Import
+- Mount string: `-v /path/to/your/library:/app/docstore/library:ro`
 
 ## Import flow
 
@@ -58,6 +49,17 @@ Imported documents are still saved to the importing user's document scope.
 - `.html`, `.htm`
 - `.txt`
 - `.md`, `.mdown`, `.markdown`
+
+## Optional: Configure Library Roots
+
+You only need this when the default mounted path is not what you want.
+
+By default, OpenReader uses `docstore/library` as the import root. You can override that with environment variables:
+
+- `IMPORT_LIBRARY_DIRS` (takes precedence): multiple roots separated by comma, colon, or semicolon
+- `IMPORT_LIBRARY_DIR`: single root
+
+See [Environment Variables](../reference/environment-variables#library-import) for variable details.
 
 ## Notes
 

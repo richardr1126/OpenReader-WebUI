@@ -99,6 +99,7 @@ interface SetTextOptions {
 
 const CONTINUATION_LOOKAHEAD = 600;
 const SENTENCE_ENDING = /[.?!…]["'”’)\]]*\s*$/;
+const wordHighlightFeatureEnabled = process.env.NEXT_PUBLIC_ENABLE_WORD_HIGHLIGHT === 'true';
 
 // Tiny silent WAV used to unlock HTML5 audio on iOS/Safari.
 const SILENT_WAV_DATA_URI =
@@ -857,8 +858,9 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
    */
   const getAudio = useCallback(async (sentence: string, preload = false): Promise<TTSAudioBuffer | undefined> => {
     const alignmentEnabledForCurrentDoc =
-      (!isEPUB && pdfHighlightEnabled && pdfWordHighlightEnabled) ||
-      (isEPUB && epubHighlightEnabled && epubWordHighlightEnabled);
+      wordHighlightFeatureEnabled &&
+      ((!isEPUB && pdfHighlightEnabled && pdfWordHighlightEnabled) ||
+        (isEPUB && epubHighlightEnabled && epubWordHighlightEnabled));
     // Helper to ensure we have an alignment for a given
     // sentence/audio pair, even when the audio itself is
     // served from the local cache.

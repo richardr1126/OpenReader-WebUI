@@ -31,15 +31,16 @@ It supports multiple TTS providers including OpenAI, DeepInfra, and custom OpenA
 - 🎨 **Customizable Experience**
   - Theme, TTS, and document handling controls
 
-## 🚀 Start Here
+## 🧭 Key Docs
 
-- [Docker Quick Start](./start-here/docker-quick-start)
-- [Vercel Deployment](./start-here/vercel-deployment)
-- [Local Development](./start-here/local-development)
+- [Docker Quick Start](./docker-quick-start)
+- [Local Development](./deploy/local-development)
+- [Vercel Deployment](./deploy/vercel-deployment)
 - [Environment Variables](./reference/environment-variables)
 - [Auth](./configure/auth)
-- [Database and Migrations](./configure/database-and-migrations)
+- [Database](./configure/database)
 - [Object / Blob Storage](./configure/object-blob-storage)
+- [Migrations](./configure/migrations)
 - [Server Library Import](./configure/server-library-import)
 - [TTS Providers](./configure/tts-providers)
 

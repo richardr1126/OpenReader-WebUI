@@ -11,7 +11,7 @@ import TabItem from '@theme/TabItem';
 - A TTS API server that OpenReader can reach (Kokoro-FastAPI, Orpheus-FastAPI, DeepInfra, OpenAI, or equivalent)
 
 :::note
-If you have suitable hardware, you can run Kokoro locally with Docker. See [Kokoro-FastAPI](../integrations/kokoro-fastapi).
+If you have suitable hardware, you can run Kokoro locally with Docker. See [Kokoro-FastAPI](./configure/tts-provider-guides/kokoro-fastapi).
 :::
 
 ## 1. Start the Docker container
@@ -75,10 +75,11 @@ If `8333` is not reachable from the browser, direct presigned access is unavaila
 :::
 
 :::info Related Docs
-- [Environment Variables](../reference/environment-variables)
-- [Auth](../configure/auth)
-- [Database and Migrations](../configure/database-and-migrations)
-- [Object / Blob Storage](../configure/object-blob-storage)
+- [Environment Variables](./reference/environment-variables)
+- [Auth](./configure/auth)
+- [Database](./configure/database)
+- [Object / Blob Storage](./configure/object-blob-storage)
+- [Migrations](./configure/migrations)
 :::
 
 ## 2. Configure settings in the app UI

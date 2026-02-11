@@ -1,6 +1,7 @@
 import type { DocumentListState } from '@/types/documents';
 
 const isDev = process.env.NEXT_PUBLIC_NODE_ENV !== 'production' || process.env.NODE_ENV == null;
+const wordHighlightEnabledByDefault = process.env.NEXT_PUBLIC_ENABLE_WORD_HIGHLIGHT === 'true';
 
 export type ViewType = 'single' | 'dual' | 'scroll';
 
@@ -53,9 +54,9 @@ export const APP_CONFIG_DEFAULTS: AppConfigValues = {
   savedVoices: {},
   smartSentenceSplitting: true,
   pdfHighlightEnabled: true,
-  pdfWordHighlightEnabled: isDev,
+  pdfWordHighlightEnabled: wordHighlightEnabledByDefault,
   epubHighlightEnabled: true,
-  epubWordHighlightEnabled: isDev,
+  epubWordHighlightEnabled: wordHighlightEnabledByDefault,
   firstVisit: false,
   documentListState: {
     sortBy: 'name',

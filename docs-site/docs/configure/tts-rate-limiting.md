@@ -46,6 +46,6 @@ IP backstop daily limits:
 
 ## Related docs
 
-- Full variable list: [Environment Variables](../reference/environment-variables)
+- TTS/rate-limit environment variables: [Environment Variables](../reference/environment-variables#tts-provider-and-request-behavior)
 - Auth configuration: [Auth](./auth)
 - Provider setup: [TTS Providers](./tts-providers)

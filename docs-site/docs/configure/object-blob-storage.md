@@ -2,6 +2,9 @@
 title: Object / Blob Storage
 ---
 
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
 This page documents storage backends, blob upload routing, and core Docker mount behavior.
 
 ## Storage backends
@@ -9,7 +12,7 @@ This page documents storage backends, blob upload routing, and core Docker mount
 - Embedded (default): SQLite metadata + embedded SeaweedFS (`weed mini`) blobs.
 - External: Postgres + external S3-compatible object storage.
 
-Storage variables are documented in [Environment Variables](../reference/environment-variables) under the storage sections.
+Storage variables are documented in [Environment Variables](../reference/environment-variables#database-and-object-blob-storage).
 
 ## Ports
 
@@ -26,13 +29,22 @@ Storage variables are documented in [Environment Variables](../reference/environ
 - Fallback path: `/api/documents/blob/upload/fallback` when direct upload fails/unreachable.
 - Read/download path: blob/content serving route `/api/documents/blob` (not the upload fallback route).
 
-## Recommended Docker mounts
+## FS / Volume Mounts
 
-| Mount | Type | Recommended | Purpose | Example |
-| --- | --- | --- | --- | --- |
-| `/app/docstore` | Docker named volume | Yes (for persistence) | Persists SeaweedFS blob data, SQLite metadata DB, migrations, and local runtime temp state | `-v openreader_docstore:/app/docstore` |
+### App data mount
 
-For server library mounts/import behavior, see [Server Library Import](./server-library-import).
+- Target: `/app/docstore`
+- Recommended: yes, for persistence
+- Purpose: persists SeaweedFS blob data, SQLite metadata DB, migrations, and local runtime temp state
+- Mount string: `-v openreader_docstore:/app/docstore`
+
+### Library source mount (optional)
+
+- Target: `/app/docstore/library`
+- Recommended: optional, use read-only (`:ro`)
+- Purpose: exposes host files as a source for server library import
+- Mount string: `-v /path/to/your/library:/app/docstore/library:ro`
+- Details: [Server Library Import](./server-library-import)
 
 ## Private blob endpoint mode
 
@@ -46,7 +58,39 @@ If `8333` is not published externally:
 Without `8333`, expect higher app-server traffic because uploads/downloads go through API routes instead of direct object endpoint access.
 :::
 
-## Audiobook storage note
+## Audiobook Storage Debug Commands
 
-- In current versions, audiobook assets live in object storage (`audiobooks_v1` keyspace), not as durable files under `/app/docstore`.
-- Local filesystem usage for audiobook routes is temporary processing only.
+Audiobook assets are stored in object storage under the `audiobooks_v1` keyspace. Use these commands to inspect and download objects for debugging.
+
+<Tabs groupId="audiobook-storage-access-cli">
+  <TabItem value="aws-s3" label="AWS S3" default>
+
+```bash
+# List all audiobook objects
+aws s3 ls "s3://$S3_BUCKET/$S3_PREFIX/audiobooks_v1/" --recursive
+
+# Filter to one book id (replace <book-id>)
+aws s3 ls "s3://$S3_BUCKET/$S3_PREFIX/audiobooks_v1/" --recursive | grep "<book-id>-audiobook/"
+
+# Download one object by full key
+aws s3 cp "s3://$S3_BUCKET/$S3_PREFIX/audiobooks_v1/<path>/<file>.m4b" "./audiobook.m4b"
+```
+
+  </TabItem>
+  <TabItem value="s3-compatible" label="Embedded / MinIO / R2 / etc">
+
+```bash
+# List all audiobook objects
+aws s3 ls "s3://$S3_BUCKET/$S3_PREFIX/audiobooks_v1/" --recursive --endpoint-url "$S3_ENDPOINT"
+
+# Filter to one book id (replace <book-id>)
+aws s3 ls "s3://$S3_BUCKET/$S3_PREFIX/audiobooks_v1/" --recursive --endpoint-url "$S3_ENDPOINT" | grep "<book-id>-audiobook/"
+
+# Download one object by full key
+aws s3 cp "s3://$S3_BUCKET/$S3_PREFIX/audiobooks_v1/<path>/<file>.m4b" "./audiobook.m4b" --endpoint-url "$S3_ENDPOINT"
+```
+
+Embedded default example: `S3_ENDPOINT=http://127.0.0.1:8333` (or your mapped host/port).
+
+  </TabItem>
+</Tabs>

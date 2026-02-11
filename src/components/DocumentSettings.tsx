@@ -11,9 +11,8 @@ import { useParams } from 'next/navigation';
 import type { TTSAudiobookChapter } from '@/types/tts';
 import type { AudiobookGenerationSettings } from '@/types/client';
 
-const isDev = process.env.NEXT_PUBLIC_NODE_ENV !== 'production' || process.env.NODE_ENV == null;
 const canExportAudiobook = process.env.NEXT_PUBLIC_ENABLE_AUDIOBOOK_EXPORT !== 'false';
-const canWordHighlight = isDev || process.env.NEXT_PUBLIC_ENABLE_WORD_HIGHLIGHT === 'true';
+const canWordHighlight = process.env.NEXT_PUBLIC_ENABLE_WORD_HIGHLIGHT === 'true';
 
 const viewTypeTextMapping = [
   { id: 'single', name: 'Single Page' },

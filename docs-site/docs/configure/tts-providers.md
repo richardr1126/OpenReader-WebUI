@@ -64,13 +64,16 @@ Custom providers should expose:
 TTS requests are sent from the Next.js server, not directly from the browser. `API_BASE` must be reachable from the server runtime.
 :::
 
-## Related Guides
+## Provider Guides
 
-- [Environment Variables](../reference/environment-variables)
+- [Kokoro-FastAPI](./tts-provider-guides/kokoro-fastapi)
+- [Orpheus-FastAPI](./tts-provider-guides/orpheus-fastapi)
+- [DeepInfra](./tts-provider-guides/deepinfra)
+- [OpenAI](./tts-provider-guides/openai)
+- [Custom OpenAI-Like](./tts-provider-guides/custom-openai)
+
+## Related Configuration
+
+- [TTS Environment Variables](../reference/environment-variables#tts-provider-and-request-behavior)
 - [TTS Rate Limiting](./tts-rate-limiting)
 - [Auth](./auth)
-- [Kokoro-FastAPI](../integrations/kokoro-fastapi)
-- [Orpheus-FastAPI](../integrations/orpheus-fastapi)
-- [Deepinfra](../integrations/deepinfra)
-- [OpenAI](../integrations/openai)
-- [Custom OpenAI](../integrations/custom-openai)

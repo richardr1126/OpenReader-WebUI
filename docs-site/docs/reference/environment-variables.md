@@ -9,9 +9,9 @@ This is the single reference page for OpenReader WebUI environment variables.
 
 | Variable | Area | Default | When to set |
 | --- | --- | --- | --- |
-| `NEXT_PUBLIC_NODE_ENV` | Runtime mode | `development` | Set `production` for production builds |
-| `NEXT_PUBLIC_ENABLE_AUDIOBOOK_EXPORT` | Client feature flags | `true` unless set to `false` | Disable audiobook export UI in any environment |
-| `NEXT_PUBLIC_ENABLE_WORD_HIGHLIGHT` | Client feature flags | `true` in dev, `false` in production | Force-enable word highlight UI in production |
+| `NEXT_PUBLIC_NODE_ENV` | Runtime mode | treated as `development` unless `production` | Set `production` for production client behavior |
+| `NEXT_PUBLIC_ENABLE_AUDIOBOOK_EXPORT` | Client feature flags | `true` unless set to `false` | Set `false` to hide audiobook export UI |
+| `NEXT_PUBLIC_ENABLE_WORD_HIGHLIGHT` | Client feature flags | `false` unless set to `true` | Set `true` to enable word highlight + alignment |
 | `API_BASE` | TTS provider | none | Point to your OpenAI-compatible TTS base URL |
 | `API_KEY` | TTS provider | `none` fallback in TTS route | Set when provider requires auth |
 | `TTS_CACHE_MAX_SIZE_BYTES` | TTS caching | `268435456` (256 MB) | Tune in-memory TTS cache size |
@@ -52,12 +52,23 @@ This is the single reference page for OpenReader WebUI environment variables.
 
 ## Detailed Reference
 
+## Client Runtime and Feature Flags
+
 ### NEXT_PUBLIC_NODE_ENV
 
 Controls development vs production behavior in client/server code paths.
 
 - Typical values: `development`, `production`
-- In production builds, set `production`
+- OpenReader `isDev` checks rely on this variable directly
+- If this is not `production`, OpenReader treats the client as development mode
+- In deployed environments, set `NEXT_PUBLIC_NODE_ENV=production` explicitly for predictable production behavior
+- Affects:
+  - Footer visibility in the app shell
+  - DOCX upload/conversion availability in upload UI
+  - Default provider/model behavior for first-run TTS config
+  - DeepInfra model picker restrictions when no API key is set
+  - Privacy modal wording (hosted-service vs local/dev wording)
+  - Dev-only destructive document actions in settings
 
 ### NEXT_PUBLIC_ENABLE_AUDIOBOOK_EXPORT
 
@@ -65,14 +76,20 @@ Controls whether audiobook export UI/actions are shown in the client.
 
 - Default behavior: enabled unless explicitly set to `false`
 - Applies in both development and production
+- Affects export entry points in PDF/EPUB pages and document settings UI
 
 ### NEXT_PUBLIC_ENABLE_WORD_HIGHLIGHT
 
-Controls word-by-word highlighting UI in production builds.
+Controls word-by-word highlighting UI and timestamp-alignment behavior.
 
-- Development default: enabled
-- Production default: disabled unless set to `true`
+- Default behavior: disabled unless set to `true`
+- Applies in both development and production
 - Requires working timestamp generation (for example `WHISPER_CPP_BIN`)
+- Affects:
+  - Word-highlight toggles in document settings
+  - Alignment requests during TTS playback
+
+## TTS Provider and Request Behavior
 
 ### API_BASE
 
@@ -80,6 +97,7 @@ Base URL for OpenAI-compatible TTS API requests.
 
 - Example: `http://host.docker.internal:8880/v1`
 - Can be overridden per request from UI settings
+- Related docs: [TTS Providers](../configure/tts-providers)
 
 ### API_KEY
 
@@ -87,6 +105,7 @@ Default API key for TTS provider requests.
 
 - Example: `none` or your provider token
 - Can be overridden by request headers from app settings
+- Related docs: [TTS Providers](../configure/tts-providers)
 
 ### TTS_CACHE_MAX_SIZE_BYTES
 
@@ -156,12 +175,15 @@ Authenticated IP backstop daily character limit.
 
 - Default: `1000000`
 
+## Auth and Identity
+
 ### BASE_URL
 
 External base URL for this OpenReader instance.
 
 - Required with `AUTH_SECRET` to enable auth
 - Example: `http://localhost:3003` or `https://reader.example.com`
+- Related docs: [Auth](../configure/auth)
 
 ### AUTH_SECRET
 
@@ -169,6 +191,7 @@ Secret key used by auth/session handling.
 
 - Required with `BASE_URL` to enable auth
 - Generate with `openssl rand -base64 32`
+- Related docs: [Auth](../configure/auth)
 
 ### AUTH_TRUSTED_ORIGINS
 
@@ -176,6 +199,7 @@ Additional allowed origins for auth requests.
 
 - Comma-separated list
 - `BASE_URL` origin is always trusted automatically
+- Related docs: [Auth](../configure/auth)
 
 ### GITHUB_CLIENT_ID
 
@@ -196,6 +220,9 @@ Controls Better Auth rate limiting.
 - Default behavior: auth-layer rate limiting enabled
 - Set to `true` to disable auth-layer rate limiting
 - This does not affect TTS character rate limiting
+- Related docs: [Auth](../configure/auth)
+
+## Database and Object Blob Storage
 
 ### POSTGRES_URL
 
@@ -203,6 +230,7 @@ Switches metadata/auth storage from SQLite to Postgres.
 
 - Unset: SQLite at `docstore/sqlite3.db`
 - Set: Postgres mode
+- Related docs: [Database](../configure/database)
 
 ### USE_EMBEDDED_WEED_MINI
 
@@ -210,18 +238,21 @@ Controls embedded SeaweedFS startup.
 
 - Default behavior: treated as enabled when unset
 - Set `false` to rely on external S3-compatible storage
+- Related docs: [Object / Blob Storage](../configure/object-blob-storage)
 
 ### WEED_MINI_DIR
 
 Data directory for embedded SeaweedFS (`weed mini`).
 
 - Default: `docstore/seaweedfs`
+- Related docs: [Object / Blob Storage](../configure/object-blob-storage)
 
 ### WEED_MINI_WAIT_SEC
 
 Maximum seconds to wait for embedded SeaweedFS startup.
 
 - Default: `20`
+- Related docs: [Object / Blob Storage](../configure/object-blob-storage)
 
 ### S3_ACCESS_KEY_ID
 
@@ -229,6 +260,7 @@ Access key for S3-compatible storage.
 
 - Auto-generated in embedded mode if unset
 - Set explicitly for stable credentials or external providers
+- Related docs: [Object / Blob Storage](../configure/object-blob-storage)
 
 ### S3_SECRET_ACCESS_KEY
 
@@ -236,6 +268,7 @@ Secret key for S3-compatible storage.
 
 - Auto-generated in embedded mode if unset
 - Set explicitly for stable credentials or external providers
+- Related docs: [Object / Blob Storage](../configure/object-blob-storage)
 
 ### S3_BUCKET
 
@@ -243,12 +276,14 @@ Bucket name used for document blobs.
 
 - Default in embedded mode: `openreader-documents`
 - Required for external S3-compatible storage
+- Related docs: [Object / Blob Storage](../configure/object-blob-storage)
 
 ### S3_REGION
 
 Region used by the S3 client.
 
 - Default in embedded mode: `us-east-1`
+- Related docs: [Object / Blob Storage](../configure/object-blob-storage)
 
 ### S3_ENDPOINT
 
@@ -257,6 +292,7 @@ Endpoint URL for S3-compatible storage.
 - In embedded mode, defaults to `http://<BASE_URL host>:8333` (or detected host)
 - For AWS S3, usually leave unset
 - For MinIO/SeaweedFS/R2/B2-style APIs, typically set explicitly
+- Related docs: [Object / Blob Storage](../configure/object-blob-storage)
 
 ### S3_FORCE_PATH_STYLE
 
@@ -264,12 +300,16 @@ Path-style S3 addressing toggle.
 
 - Default in embedded mode: `true`
 - Set according to provider requirements
+- Related docs: [Object / Blob Storage](../configure/object-blob-storage)
 
 ### S3_PREFIX
 
 Prefix prepended to stored object keys.
 
 - Default: `openreader`
+- Related docs: [Object / Blob Storage](../configure/object-blob-storage)
+
+## Migration Controls
 
 ### RUN_DRIZZLE_MIGRATIONS
 
@@ -277,6 +317,7 @@ Controls startup migration execution in shared entrypoint.
 
 - Default: `true`
 - Set `false` to skip automatic startup Drizzle schema migrations
+- Related docs: [Migrations](../configure/migrations), [Database](../configure/database)
 
 ### RUN_FS_MIGRATIONS
 
@@ -285,6 +326,9 @@ Controls startup filesystem-to-object-store migration execution in shared entryp
 - Default: `true`
 - Runs `scripts/migrate-fs-v2.mjs` at startup after DB migrations
 - Set `false` to skip automatic storage migration pass
+- Related docs: [Migrations](../configure/migrations), [Database](../configure/database), [Object / Blob Storage](../configure/object-blob-storage)
+
+## Library Import
 
 ### IMPORT_LIBRARY_DIR
 
@@ -292,6 +336,7 @@ Single directory root for server library import.
 
 - Used when `IMPORT_LIBRARY_DIRS` is unset
 - Default fallback root: `docstore/library`
+- Related docs: [Server Library Import](../configure/server-library-import)
 
 ### IMPORT_LIBRARY_DIRS
 
@@ -299,6 +344,9 @@ Multiple library roots for server library import.
 
 - Separator: comma, colon, or semicolon
 - Takes precedence over `IMPORT_LIBRARY_DIR`
+- Related docs: [Server Library Import](../configure/server-library-import)
+
+## Audio Tooling and Alignment
 
 ### WHISPER_CPP_BIN
 
