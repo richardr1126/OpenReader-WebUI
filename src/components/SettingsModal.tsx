@@ -43,7 +43,16 @@ export function SettingsModal() {
   const [isOpen, setIsOpen] = useState(false);
 
   const { theme, setTheme } = useTheme();
-  const { apiKey, baseUrl, ttsProvider, ttsModel, ttsInstructions, updateConfig, updateConfigKey } = useConfig();
+  const {
+    apiKey,
+    baseUrl,
+    ttsProvider,
+    ttsModel,
+    ttsInstructions,
+    keepPlayingInBackground,
+    updateConfig,
+    updateConfigKey
+  } = useConfig();
   const { clearPDFs, clearEPUBs, clearHTML } = useDocuments();
   const [localApiKey, setLocalApiKey] = useState(apiKey);
   const [localBaseUrl, setLocalBaseUrl] = useState(baseUrl);
@@ -674,6 +683,21 @@ export function SettingsModal() {
                       </TabPanel>
 
                       <TabPanel className="space-y-4">
+                        <div className="space-y-1">
+                          <label className="flex items-center space-x-2">
+                            <input
+                              type="checkbox"
+                              checked={keepPlayingInBackground}
+                              onChange={(e) => updateConfigKey('keepPlayingInBackground', e.target.checked)}
+                              className="form-checkbox h-4 w-4 text-accent rounded border-muted"
+                            />
+                            <span className="text-sm font-medium text-foreground">Keep playing in background</span>
+                          </label>
+                          <p className="text-sm text-muted pl-6">
+                            Continue TTS playback when this tab is not active
+                          </p>
+                        </div>
+
                         <div className="space-y-1">
                           <label className="block text-sm font-medium text-foreground">Server Library Import</label>
                           <div className="flex gap-2">

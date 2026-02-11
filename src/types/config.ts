@@ -14,6 +14,7 @@ export interface AppConfigValues {
   audioPlayerSpeed: number;
   voice: string;
   skipBlank: boolean;
+  keepPlayingInBackground: boolean;
   epubTheme: boolean;
   headerMargin: number;
   footerMargin: number;
@@ -40,6 +41,7 @@ export const APP_CONFIG_DEFAULTS: AppConfigValues = {
   audioPlayerSpeed: 1,
   voice: '',
   skipBlank: true,
+  keepPlayingInBackground: true,
   epubTheme: false,
   headerMargin: 0,
   footerMargin: 0,

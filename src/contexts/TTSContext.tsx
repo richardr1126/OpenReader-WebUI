@@ -285,6 +285,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     ttsProvider: configTTSProvider,
     ttsModel: configTTSModel,
     ttsInstructions: configTTSInstructions,
+    keepPlayingInBackground,
     updateConfigKey,
     skipBlank,
     smartSentenceSplitting,
@@ -1141,7 +1142,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
   const isBackgrounded = useBackgroundState({
     activeHowl,
     isPlaying,
-    playAudio,
+    keepPlayingInBackground,
   });
 
   // Track the current word index during playback using Howler's seek position
@@ -1221,7 +1222,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     if (isProcessing) return; // Don't proceed if processing audio
     if (!sentences[currentIndex]) return; // Don't proceed if no sentence to play
     if (activeHowl) return; // Don't proceed if audio is already playing
-    if (isBackgrounded) return; // Don't proceed if backgrounded
+    if (isBackgrounded && !keepPlayingInBackground) return; // Don't proceed if background playback is disabled
 
     // Start playing current sentence
     playAudio();
@@ -1242,6 +1243,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     sentences,
     activeHowl,
     isBackgrounded,
+    keepPlayingInBackground,
     playAudio,
     preloadNextAudio,
     abortAudio
