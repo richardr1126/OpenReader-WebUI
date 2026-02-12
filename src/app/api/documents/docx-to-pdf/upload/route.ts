@@ -9,6 +9,7 @@ import { requireAuthContext } from '@/lib/server/auth';
 import { db } from '@/db';
 import { documents } from '@/db/schema';
 import { safeDocumentName } from '@/lib/server/documents-utils';
+import { enqueueDocumentPreview } from '@/lib/server/document-previews';
 import { getOpenReaderTestNamespace, getUnclaimedUserIdForNamespace } from '@/lib/server/test-namespace';
 import { isS3Configured } from '@/lib/server/s3';
 import { putDocumentBlob } from '@/lib/server/documents-blobstore';
@@ -146,6 +147,17 @@ export async function POST(req: NextRequest) {
             filePath: id,
           },
         });
+
+      await enqueueDocumentPreview(
+        {
+          id,
+          type: 'pdf',
+          lastModified,
+        },
+        testNamespace,
+      ).catch((error) => {
+        console.error(`Failed to enqueue preview for converted DOCX ${id}:`, error);
+      });
 
       return NextResponse.json({
         stored: {

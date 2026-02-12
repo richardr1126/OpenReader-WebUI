@@ -28,6 +28,13 @@ Storage variables are documented in [Environment Variables](../reference/environ
 - Primary path: browser uploads to presigned URL from `/api/documents/blob/upload/presign`.
 - Fallback path: `/api/documents/blob/upload/fallback` when direct upload fails/unreachable.
 - Read/download path: blob/content serving route `/api/documents/blob` (not the upload fallback route).
+- Preview path: `/api/documents/blob/preview` (returns `202` while a preview is generating; serves/redirects when ready).
+
+## Document previews
+
+- PDF/EPUB previews are generated server-side and stored in object storage under `document_previews_v1`.
+- Preview generation is triggered on upload registration and also backfills on first preview request for older docs.
+- Preview artifacts are temporary-cache friendly and can be regenerated from the source document blob.
 
 ## FS / Volume Mounts
 

@@ -38,6 +38,27 @@ CREATE TABLE "audiobooks" (
 	CONSTRAINT "audiobooks_id_user_id_pk" PRIMARY KEY("id","user_id")
 );
 --> statement-breakpoint
+CREATE TABLE "document_previews" (
+	"document_id" text NOT NULL,
+	"namespace" text DEFAULT '' NOT NULL,
+	"variant" text DEFAULT 'card-240-jpeg' NOT NULL,
+	"status" text DEFAULT 'queued' NOT NULL,
+	"source_last_modified_ms" bigint NOT NULL,
+	"object_key" text NOT NULL,
+	"content_type" text DEFAULT 'image/jpeg' NOT NULL,
+	"width" integer DEFAULT 240 NOT NULL,
+	"height" integer,
+	"byte_size" bigint,
+	"etag" text,
+	"lease_owner" text,
+	"lease_until_ms" bigint DEFAULT 0 NOT NULL,
+	"attempt_count" integer DEFAULT 0 NOT NULL,
+	"last_error" text,
+	"created_at_ms" bigint DEFAULT 0 NOT NULL,
+	"updated_at_ms" bigint DEFAULT 0 NOT NULL,
+	CONSTRAINT "document_previews_document_id_namespace_variant_pk" PRIMARY KEY("document_id","namespace","variant")
+);
+--> statement-breakpoint
 CREATE TABLE "documents" (
 	"id" text NOT NULL,
 	"user_id" text NOT NULL,
@@ -74,6 +95,26 @@ CREATE TABLE "user" (
 	CONSTRAINT "user_email_unique" UNIQUE("email")
 );
 --> statement-breakpoint
+CREATE TABLE "user_document_progress" (
+	"user_id" text NOT NULL,
+	"document_id" text NOT NULL,
+	"reader_type" text NOT NULL,
+	"location" text NOT NULL,
+	"progress" real,
+	"client_updated_at_ms" bigint DEFAULT 0 NOT NULL,
+	"created_at" timestamp DEFAULT now(),
+	"updated_at" timestamp DEFAULT now(),
+	CONSTRAINT "user_document_progress_user_id_document_id_pk" PRIMARY KEY("user_id","document_id")
+);
+--> statement-breakpoint
+CREATE TABLE "user_preferences" (
+	"user_id" text PRIMARY KEY NOT NULL,
+	"data_json" jsonb DEFAULT '{}'::jsonb NOT NULL,
+	"client_updated_at_ms" bigint DEFAULT 0 NOT NULL,
+	"created_at" timestamp DEFAULT now(),
+	"updated_at" timestamp DEFAULT now()
+);
+--> statement-breakpoint
 CREATE TABLE "user_tts_chars" (
 	"user_id" text NOT NULL,
 	"date" date NOT NULL,
@@ -92,6 +133,8 @@ CREATE TABLE "verification" (
 --> statement-breakpoint
 ALTER TABLE "account" ADD CONSTRAINT "account_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "session" ADD CONSTRAINT "session_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "idx_document_previews_status_lease" ON "document_previews" USING btree ("status","lease_until_ms");--> statement-breakpoint
 CREATE INDEX "idx_documents_user_id" ON "documents" USING btree ("user_id");--> statement-breakpoint
 CREATE INDEX "idx_documents_user_id_last_modified" ON "documents" USING btree ("user_id","last_modified");--> statement-breakpoint
+CREATE INDEX "idx_user_document_progress_user_id_updated_at" ON "user_document_progress" USING btree ("user_id","updated_at");--> statement-breakpoint
 CREATE INDEX "idx_user_tts_chars_date" ON "user_tts_chars" USING btree ("date");

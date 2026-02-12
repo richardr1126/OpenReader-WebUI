@@ -2,7 +2,7 @@
 
 import { useParams, useRouter } from "next/navigation";
 import Link from 'next/link';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useHTML } from '@/contexts/HTMLContext';
 import { DocumentSkeleton } from '@/components/DocumentSkeleton';
 import { HTMLViewer } from '@/components/views/HTMLViewer';
@@ -28,12 +28,21 @@ export default function HTMLPage() {
   const [containerHeight, setContainerHeight] = useState<string>('auto');
   const [padPct, setPadPct] = useState<number>(100); // 0..100 (100 = full width)
   const [maxPadPx, setMaxPadPx] = useState<number>(0);
+  const inFlightDocIdRef = useRef<string | null>(null);
+  const loadedDocIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    setIsLoading(true);
+    setError(null);
+    inFlightDocIdRef.current = null;
+    loadedDocIdRef.current = null;
+  }, [id]);
 
   const loadDocument = useCallback(async () => {
     if (!isLoading) return;
     console.log('Loading new HTML document (from page.tsx)');
-    stop();
     let didRedirect = false;
+    let startedLoad = false;
     try {
       if (!id) {
         setError('Document not found');
@@ -45,12 +54,27 @@ export default function HTMLPage() {
         router.replace(`/html/${resolved}`);
         return;
       }
+
+      if (loadedDocIdRef.current === resolved) {
+        return;
+      }
+      if (inFlightDocIdRef.current === resolved) {
+        return;
+      }
+
+      startedLoad = true;
+      inFlightDocIdRef.current = resolved;
+      stop();
       await setCurrentDocument(resolved);
+      loadedDocIdRef.current = resolved;
     } catch (err) {
       console.error('Error loading document:', err);
       setError('Failed to load document');
     } finally {
-      if (!didRedirect) {
+      if (startedLoad) {
+        inFlightDocIdRef.current = null;
+      }
+      if (!didRedirect && startedLoad) {
         setIsLoading(false);
       }
     }

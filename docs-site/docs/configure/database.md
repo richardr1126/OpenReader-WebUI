@@ -16,6 +16,7 @@ This page covers database mode selection for OpenReader WebUI.
 - TTS character usage counters (`user_tts_chars`) for daily rate limiting (when enabled).
 - User settings preferences (`user_preferences`) when auth is enabled.
 - User reading progress (`user_document_progress`) when auth is enabled.
+- Document preview job/asset metadata (`document_previews`) for server-side PDF/EPUB thumbnails.
 
 ## Related variables
 

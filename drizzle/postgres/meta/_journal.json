@@ -5,15 +5,8 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1770191341206,
-      "tag": "0000_perfect_risque",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1770843600000,
-      "tag": "0001_user_state_minimal",
+      "when": 1770846273728,
+      "tag": "0000_solid_colossus",
       "breakpoints": true
     }
   ]

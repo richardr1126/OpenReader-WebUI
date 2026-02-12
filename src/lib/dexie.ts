@@ -14,7 +14,7 @@ import { cacheStoredDocumentFromBytes } from '@/lib/document-cache';
 
 const DB_NAME = 'openreader-db';
 // Managed via Dexie (version bumped from the original manual IndexedDB)
-const DB_VERSION = 6;
+const DB_VERSION = 8;
 
 const PDF_TABLE = 'pdf-documents' as const;
 const EPUB_TABLE = 'epub-documents' as const;
@@ -23,6 +23,20 @@ const CONFIG_TABLE = 'config' as const;
 const APP_CONFIG_TABLE = 'app-config' as const;
 const LAST_LOCATION_TABLE = 'last-locations' as const;
 const DOCUMENT_ID_MAP_TABLE = 'document-id-map' as const;
+const PREVIEW_CACHE_TABLE = 'document-preview-cache' as const;
+const MIB = 1024 * 1024;
+const DOCUMENT_CACHE_MAX_BYTES = 1024 * MIB; // 1 GiB
+const PREVIEW_CACHE_MAX_BYTES = 128 * MIB; // 128 MiB
+
+interface DocumentCacheMeta {
+  cacheCreatedAt?: number;
+  cacheAccessedAt?: number;
+  cacheByteSize?: number;
+}
+
+type PDFCacheRow = PDFDocument & DocumentCacheMeta;
+type EPUBCacheRow = EPUBDocument & DocumentCacheMeta;
+type HTMLCacheRow = HTMLDocument & DocumentCacheMeta;
 
 export interface LastLocationRow {
   docId: string;
@@ -35,19 +49,29 @@ export interface DocumentIdMapRow {
   createdAt: number;
 }
 
+export interface DocumentPreviewCacheRow {
+  docId: string;
+  lastModified: number;
+  contentType: string;
+  data: ArrayBuffer;
+  cachedAt: number;
+  byteSize?: number;
+}
+
 export interface ConfigRow {
   key: string;
   value: string;
 }
 
 type OpenReaderDB = Dexie & {
-  [PDF_TABLE]: EntityTable<PDFDocument, 'id'>;
-  [EPUB_TABLE]: EntityTable<EPUBDocument, 'id'>;
-  [HTML_TABLE]: EntityTable<HTMLDocument, 'id'>;
+  [PDF_TABLE]: EntityTable<PDFCacheRow, 'id'>;
+  [EPUB_TABLE]: EntityTable<EPUBCacheRow, 'id'>;
+  [HTML_TABLE]: EntityTable<HTMLCacheRow, 'id'>;
   [CONFIG_TABLE]: EntityTable<ConfigRow, 'key'>;
   [APP_CONFIG_TABLE]: EntityTable<AppConfigRow, 'id'>;
   [LAST_LOCATION_TABLE]: EntityTable<LastLocationRow, 'docId'>;
   [DOCUMENT_ID_MAP_TABLE]: EntityTable<DocumentIdMapRow, 'oldId'>;
+  [PREVIEW_CACHE_TABLE]: EntityTable<DocumentPreviewCacheRow, 'docId'>;
 };
 
 export const db = new Dexie(DB_NAME) as OpenReaderDB;
@@ -192,15 +216,15 @@ function buildAppConfigFromRaw(raw: RawConfigMap): AppConfigRow {
   return config;
 }
 
-// Version 6: add document-id-map table; keep v5 upgrade to migrate scattered config keys
-// and drop the legacy config table in a single upgrade step.
+// Version 8: add local cache metadata/indexes so document + preview caches can be bounded via LRU pruning.
 db.version(DB_VERSION).stores({
-  [PDF_TABLE]: 'id, type, name, lastModified, size, folderId',
-  [EPUB_TABLE]: 'id, type, name, lastModified, size, folderId',
-  [HTML_TABLE]: 'id, type, name, lastModified, size, folderId',
+  [PDF_TABLE]: 'id, type, name, lastModified, size, folderId, cacheAccessedAt',
+  [EPUB_TABLE]: 'id, type, name, lastModified, size, folderId, cacheAccessedAt',
+  [HTML_TABLE]: 'id, type, name, lastModified, size, folderId, cacheAccessedAt',
   [APP_CONFIG_TABLE]: 'id',
   [LAST_LOCATION_TABLE]: 'docId',
   [DOCUMENT_ID_MAP_TABLE]: 'oldId, id, createdAt',
+  [PREVIEW_CACHE_TABLE]: 'docId, lastModified, cachedAt, byteSize',
   // `null` here means: drop the old 'config' table after upgrade runs,
   // but Dexie still lets us read it inside the upgrade transaction.
   [CONFIG_TABLE]: null,
@@ -231,6 +255,7 @@ db.version(DB_VERSION).stores({
 });
 
 let dbOpenPromise: Promise<void> | null = null;
+const cacheTextEncoder = new TextEncoder();
 
 export async function initDB(): Promise<void> {
   if (dbOpenPromise) {
@@ -246,6 +271,9 @@ export async function initDB(): Promise<void> {
         emitDexieStatus('stalled', { ms: Date.now() - startedAt });
       }, 4000);
       await db.open();
+      await Promise.all([pruneDocumentCacheIfNeededInternal(), prunePreviewCacheIfNeededInternal()]).catch((error) => {
+        console.warn('Dexie cache prune on open failed:', error);
+      });
       clearTimeout(stallTimer);
       console.log('Dexie database opened successfully');
       emitDexieStatus('opened');
@@ -263,6 +291,139 @@ export async function initDB(): Promise<void> {
 async function withDB<T>(operation: () => Promise<T>): Promise<T> {
   await initDB();
   return operation();
+}
+
+type DocumentCacheTableName = typeof PDF_TABLE | typeof EPUB_TABLE | typeof HTML_TABLE;
+
+type DocumentCacheEntryRef = {
+  table: DocumentCacheTableName;
+  id: string;
+  byteSize: number;
+  accessedAt: number;
+};
+
+function toPositiveInt(value: unknown, fallback: number = 0): number {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return fallback;
+  return Math.max(0, Math.floor(n));
+}
+
+function byteSizeForPdfRow(row: PDFCacheRow): number {
+  const cached = toPositiveInt(row.cacheByteSize, 0);
+  if (cached > 0) return cached;
+  return row.data instanceof ArrayBuffer ? row.data.byteLength : toPositiveInt(row.size, 0);
+}
+
+function byteSizeForEpubRow(row: EPUBCacheRow): number {
+  const cached = toPositiveInt(row.cacheByteSize, 0);
+  if (cached > 0) return cached;
+  return row.data instanceof ArrayBuffer ? row.data.byteLength : toPositiveInt(row.size, 0);
+}
+
+function byteSizeForHtmlRow(row: HTMLCacheRow): number {
+  const cached = toPositiveInt(row.cacheByteSize, 0);
+  if (cached > 0) return cached;
+  if (typeof row.data === 'string') return cacheTextEncoder.encode(row.data).byteLength;
+  return toPositiveInt(row.size, 0);
+}
+
+function accessedAtForRow(row: DocumentCacheMeta & { lastModified?: number }): number {
+  return toPositiveInt(row.cacheAccessedAt, toPositiveInt(row.lastModified, Date.now()));
+}
+
+async function deleteDocumentCacheEntryInternal(table: DocumentCacheTableName, id: string): Promise<void> {
+  if (table === PDF_TABLE) {
+    await db[PDF_TABLE].delete(id);
+    return;
+  }
+  if (table === EPUB_TABLE) {
+    await db[EPUB_TABLE].delete(id);
+    return;
+  }
+  await db[HTML_TABLE].delete(id);
+}
+
+async function pruneDocumentCacheIfNeededInternal(): Promise<void> {
+  const budget = DOCUMENT_CACHE_MAX_BYTES;
+  if (!Number.isFinite(budget) || budget <= 0) return;
+
+  const [pdfRows, epubRows, htmlRows] = await Promise.all([
+    db[PDF_TABLE].toArray(),
+    db[EPUB_TABLE].toArray(),
+    db[HTML_TABLE].toArray(),
+  ]);
+
+  const entries: DocumentCacheEntryRef[] = [];
+  let totalBytes = 0;
+
+  for (const row of pdfRows) {
+    const byteSize = byteSizeForPdfRow(row);
+    totalBytes += byteSize;
+    entries.push({
+      table: PDF_TABLE,
+      id: row.id,
+      byteSize,
+      accessedAt: accessedAtForRow(row),
+    });
+  }
+  for (const row of epubRows) {
+    const byteSize = byteSizeForEpubRow(row);
+    totalBytes += byteSize;
+    entries.push({
+      table: EPUB_TABLE,
+      id: row.id,
+      byteSize,
+      accessedAt: accessedAtForRow(row),
+    });
+  }
+  for (const row of htmlRows) {
+    const byteSize = byteSizeForHtmlRow(row);
+    totalBytes += byteSize;
+    entries.push({
+      table: HTML_TABLE,
+      id: row.id,
+      byteSize,
+      accessedAt: accessedAtForRow(row),
+    });
+  }
+
+  if (totalBytes <= budget) return;
+
+  entries.sort((a, b) => a.accessedAt - b.accessedAt);
+  for (const entry of entries) {
+    if (totalBytes <= budget) break;
+    await deleteDocumentCacheEntryInternal(entry.table, entry.id);
+    totalBytes -= entry.byteSize;
+  }
+}
+
+async function prunePreviewCacheIfNeededInternal(): Promise<void> {
+  const budget = PREVIEW_CACHE_MAX_BYTES;
+  if (!Number.isFinite(budget) || budget <= 0) return;
+
+  const rows = await db[PREVIEW_CACHE_TABLE].toArray();
+  let totalBytes = 0;
+  const entries = rows.map((row) => {
+    const byteSize = toPositiveInt(
+      row.byteSize,
+      row.data instanceof ArrayBuffer ? row.data.byteLength : 0,
+    );
+    totalBytes += byteSize;
+    return {
+      docId: row.docId,
+      byteSize,
+      accessedAt: toPositiveInt(row.cachedAt, 0),
+    };
+  });
+
+  if (totalBytes <= budget) return;
+
+  entries.sort((a, b) => a.accessedAt - b.accessedAt);
+  for (const entry of entries) {
+    if (totalBytes <= budget) break;
+    await db[PREVIEW_CACHE_TABLE].delete(entry.docId);
+    totalBytes -= entry.byteSize;
+  }
 }
 
 function isSha256HexId(value: string): boolean {
@@ -325,6 +486,7 @@ async function applyDocumentIdMapping(oldId: string, newId: string): Promise<voi
         db[LAST_LOCATION_TABLE],
         db[APP_CONFIG_TABLE],
         db[DOCUMENT_ID_MAP_TABLE],
+        db[PREVIEW_CACHE_TABLE],
       ],
       async () => {
         await recordDocumentIdMapping(oldId, nextId);
@@ -395,6 +557,15 @@ async function applyDocumentIdMapping(oldId: string, newId: string): Promise<voi
           await db[LAST_LOCATION_TABLE].delete(oldId);
         }
 
+        const preview = await db[PREVIEW_CACHE_TABLE].get(oldId);
+        if (preview) {
+          const existing = await db[PREVIEW_CACHE_TABLE].get(nextId);
+          if (!existing || Number(existing.cachedAt ?? 0) < Number(preview.cachedAt ?? 0)) {
+            await db[PREVIEW_CACHE_TABLE].put({ ...preview, docId: nextId });
+          }
+          await db[PREVIEW_CACHE_TABLE].delete(oldId);
+        }
+
         const appConfig = await db[APP_CONFIG_TABLE].get('singleton');
         if (appConfig?.documentListState) {
           const mapped = rewriteDocumentListStateDocIds(appConfig.documentListState, new Map([[oldId, nextId]]));
@@ -457,7 +628,14 @@ export async function getDocumentIdMappings(): Promise<Array<{ oldId: string; id
 export async function addPdfDocument(document: PDFDocument): Promise<void> {
   await withDB(async () => {
     console.log('Adding PDF document via Dexie:', document.name);
-    await db[PDF_TABLE].put(document);
+    const now = Date.now();
+    await db[PDF_TABLE].put({
+      ...document,
+      cacheCreatedAt: now,
+      cacheAccessedAt: now,
+      cacheByteSize: document.data.byteLength,
+    });
+    await pruneDocumentCacheIfNeededInternal();
   });
 }
 
@@ -465,7 +643,11 @@ export async function getPdfDocument(id: string): Promise<PDFDocument | undefine
   return withDB(async () => {
     console.log('Fetching PDF document via Dexie:', id);
     const resolved = await getMappedDocumentId(id);
-    return db[PDF_TABLE].get(resolved);
+    const row = await db[PDF_TABLE].get(resolved);
+    if (row) {
+      await db[PDF_TABLE].update(resolved, { cacheAccessedAt: Date.now() });
+    }
+    return row;
   });
 }
 
@@ -480,9 +662,10 @@ export async function removePdfDocument(id: string): Promise<void> {
   await withDB(async () => {
     console.log('Removing PDF document via Dexie:', id);
     const resolved = await getMappedDocumentId(id);
-    await db.transaction('readwrite', db[PDF_TABLE], db[LAST_LOCATION_TABLE], async () => {
+    await db.transaction('readwrite', db[PDF_TABLE], db[LAST_LOCATION_TABLE], db[PREVIEW_CACHE_TABLE], async () => {
       await db[PDF_TABLE].delete(resolved);
       await db[LAST_LOCATION_TABLE].delete(resolved);
+      await db[PREVIEW_CACHE_TABLE].delete(resolved);
     });
   });
 }
@@ -508,7 +691,14 @@ export async function addEpubDocument(document: EPUBDocument): Promise<void> {
       actualSize: document.data.byteLength,
     });
 
-    await db[EPUB_TABLE].put(document);
+    const now = Date.now();
+    await db[EPUB_TABLE].put({
+      ...document,
+      cacheCreatedAt: now,
+      cacheAccessedAt: now,
+      cacheByteSize: document.data.byteLength,
+    });
+    await pruneDocumentCacheIfNeededInternal();
   });
 }
 
@@ -516,7 +706,11 @@ export async function getEpubDocument(id: string): Promise<EPUBDocument | undefi
   return withDB(async () => {
     console.log('Fetching EPUB document via Dexie:', id);
     const resolved = await getMappedDocumentId(id);
-    return db[EPUB_TABLE].get(resolved);
+    const row = await db[EPUB_TABLE].get(resolved);
+    if (row) {
+      await db[EPUB_TABLE].update(resolved, { cacheAccessedAt: Date.now() });
+    }
+    return row;
   });
 }
 
@@ -531,9 +725,10 @@ export async function removeEpubDocument(id: string): Promise<void> {
   await withDB(async () => {
     console.log('Removing EPUB document via Dexie:', id);
     const resolved = await getMappedDocumentId(id);
-    await db.transaction('readwrite', db[EPUB_TABLE], db[LAST_LOCATION_TABLE], async () => {
+    await db.transaction('readwrite', db[EPUB_TABLE], db[LAST_LOCATION_TABLE], db[PREVIEW_CACHE_TABLE], async () => {
       await db[EPUB_TABLE].delete(resolved);
       await db[LAST_LOCATION_TABLE].delete(resolved);
+      await db[PREVIEW_CACHE_TABLE].delete(resolved);
     });
   });
 }
@@ -550,7 +745,14 @@ export async function clearEpubDocuments(): Promise<void> {
 export async function addHtmlDocument(document: HTMLDocument): Promise<void> {
   await withDB(async () => {
     console.log('Adding HTML document via Dexie:', document.name);
-    await db[HTML_TABLE].put(document);
+    const now = Date.now();
+    await db[HTML_TABLE].put({
+      ...document,
+      cacheCreatedAt: now,
+      cacheAccessedAt: now,
+      cacheByteSize: cacheTextEncoder.encode(document.data).byteLength,
+    });
+    await pruneDocumentCacheIfNeededInternal();
   });
 }
 
@@ -558,7 +760,11 @@ export async function getHtmlDocument(id: string): Promise<HTMLDocument | undefi
   return withDB(async () => {
     console.log('Fetching HTML document via Dexie:', id);
     const resolved = await getMappedDocumentId(id);
-    return db[HTML_TABLE].get(resolved);
+    const row = await db[HTML_TABLE].get(resolved);
+    if (row) {
+      await db[HTML_TABLE].update(resolved, { cacheAccessedAt: Date.now() });
+    }
+    return row;
   });
 }
 
@@ -573,7 +779,10 @@ export async function removeHtmlDocument(id: string): Promise<void> {
   await withDB(async () => {
     console.log('Removing HTML document via Dexie:', id);
     const resolved = await getMappedDocumentId(id);
-    await db[HTML_TABLE].delete(resolved);
+    await db.transaction('readwrite', db[HTML_TABLE], db[PREVIEW_CACHE_TABLE], async () => {
+      await db[HTML_TABLE].delete(resolved);
+      await db[PREVIEW_CACHE_TABLE].delete(resolved);
+    });
   });
 }
 
@@ -646,6 +855,45 @@ export async function getFirstVisit(): Promise<boolean> {
 
 export async function setFirstVisit(value: boolean): Promise<void> {
   await updateAppConfig({ firstVisit: value });
+}
+
+// Document preview cache helpers
+
+export async function getDocumentPreviewCache(docId: string): Promise<DocumentPreviewCacheRow | undefined> {
+  return withDB(async () => {
+    const resolved = await getMappedDocumentId(docId);
+    const row = await db[PREVIEW_CACHE_TABLE].get(resolved);
+    if (row) {
+      await db[PREVIEW_CACHE_TABLE].update(resolved, { cachedAt: Date.now() });
+    }
+    return row;
+  });
+}
+
+export async function putDocumentPreviewCache(row: DocumentPreviewCacheRow): Promise<void> {
+  await withDB(async () => {
+    const resolved = await getMappedDocumentId(row.docId);
+    await db[PREVIEW_CACHE_TABLE].put({
+      ...row,
+      docId: resolved,
+      cachedAt: Date.now(),
+      byteSize: toPositiveInt(row.byteSize, row.data.byteLength),
+    });
+    await prunePreviewCacheIfNeededInternal();
+  });
+}
+
+export async function removeDocumentPreviewCache(docId: string): Promise<void> {
+  await withDB(async () => {
+    const resolved = await getMappedDocumentId(docId);
+    await db[PREVIEW_CACHE_TABLE].delete(resolved);
+  });
+}
+
+export async function clearDocumentPreviewCache(): Promise<void> {
+  await withDB(async () => {
+    await db[PREVIEW_CACHE_TABLE].clear();
+  });
 }
 
 // Sync helpers (server round-trip)

@@ -202,17 +202,39 @@ export async function deleteDocuments(options?: { ids?: string[]; scope?: 'user'
 }
 
 export async function downloadDocumentContent(id: string, options?: { signal?: AbortSignal }): Promise<ArrayBuffer> {
-  const res = await fetch(`/api/documents/blob?id=${encodeURIComponent(id)}`, { signal: options?.signal });
-  if (!res.ok) {
-    const contentType = res.headers.get('content-type') || '';
-    if (contentType.includes('application/json')) {
-      const data = (await res.json().catch(() => null)) as { error?: string } | null;
-      throw new Error(data?.error || `Failed to download document (status ${res.status})`);
-    }
-    throw new Error(`Failed to download document (status ${res.status})`);
-  }
+  const fallbackUrl = `/api/documents/blob/get/fallback?id=${encodeURIComponent(id)}`;
 
-  return res.arrayBuffer();
+  const fetchFallback = async (): Promise<ArrayBuffer> => {
+    const res = await fetch(fallbackUrl, { signal: options?.signal });
+    if (!res.ok) {
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        const data = (await res.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(data?.error || `Failed to download document (status ${res.status})`);
+      }
+      throw new Error(`Failed to download document (status ${res.status})`);
+    }
+    return res.arrayBuffer();
+  };
+
+  try {
+    const directRes = await fetch(`/api/documents/blob/get/presign?id=${encodeURIComponent(id)}`, {
+      signal: options?.signal,
+      cache: 'no-store',
+    });
+    if (!directRes.ok) {
+      const contentType = directRes.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        const data = (await directRes.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(data?.error || `Failed to download document (status ${directRes.status})`);
+      }
+      throw new Error(`Failed to download document (status ${directRes.status})`);
+    }
+    return directRes.arrayBuffer();
+  } catch (error) {
+    if (options?.signal?.aborted) throw error;
+    return fetchFallback();
+  }
 }
 
 export async function getDocumentContentSnippet(
@@ -233,6 +255,86 @@ export async function getDocumentContentSnippet(
 
   const data = (await res.json()) as { snippet?: string };
   return data?.snippet || '';
+}
+
+export type DocumentPreviewPending = {
+  kind: 'pending';
+  status: 'queued' | 'processing' | 'failed';
+  retryAfterMs: number;
+  fallbackUrl: string;
+  presignUrl: string;
+  directUrl?: string;
+};
+
+export type DocumentPreviewReady = {
+  kind: 'ready';
+  fallbackUrl: string;
+  presignUrl: string;
+  directUrl?: string;
+};
+
+export type DocumentPreviewStatus = DocumentPreviewPending | DocumentPreviewReady;
+
+function documentPreviewEnsureUrl(id: string): string {
+  return `/api/documents/blob/preview/ensure?id=${encodeURIComponent(id)}`;
+}
+
+export function documentPreviewPresignUrl(id: string): string {
+  return `/api/documents/blob/preview/presign?id=${encodeURIComponent(id)}`;
+}
+
+export function documentPreviewFallbackUrl(id: string): string {
+  return `/api/documents/blob/preview/fallback?id=${encodeURIComponent(id)}`;
+}
+
+export async function getDocumentPreviewStatus(
+  id: string,
+  options?: { signal?: AbortSignal },
+): Promise<DocumentPreviewStatus> {
+  const res = await fetch(documentPreviewEnsureUrl(id), {
+    signal: options?.signal,
+    cache: 'no-store',
+  });
+
+  if (res.status === 202) {
+    const data = (await res.json().catch(() => null)) as {
+      status?: 'queued' | 'processing' | 'failed';
+      retryAfterMs?: number;
+      fallbackUrl?: string;
+      presignUrl?: string;
+      directUrl?: string;
+    } | null;
+    return {
+      kind: 'pending',
+      status: data?.status ?? 'queued',
+      retryAfterMs: Number.isFinite(data?.retryAfterMs) ? Number(data?.retryAfterMs) : 1500,
+      fallbackUrl: data?.fallbackUrl || documentPreviewFallbackUrl(id),
+      presignUrl: data?.presignUrl || documentPreviewPresignUrl(id),
+      directUrl: data?.directUrl,
+    };
+  }
+
+  if (res.ok) {
+    const data = (await res.json().catch(() => null)) as {
+      fallbackUrl?: string;
+      presignUrl?: string;
+      directUrl?: string;
+    } | null;
+    return {
+      kind: 'ready',
+      fallbackUrl: data?.fallbackUrl || documentPreviewFallbackUrl(id),
+      presignUrl: data?.presignUrl || documentPreviewPresignUrl(id),
+      directUrl: data?.directUrl,
+    };
+  }
+
+  const contentType = res.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) {
+    const data = (await res.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(data?.error || `Failed to load preview status (status ${res.status})`);
+  }
+
+  throw new Error(`Failed to load preview status (status ${res.status})`);
 }
 
 export async function uploadDocxAsPdf(file: File, options?: { signal?: AbortSignal }): Promise<BaseDocument> {

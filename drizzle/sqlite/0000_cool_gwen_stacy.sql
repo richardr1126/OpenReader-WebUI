@@ -39,6 +39,28 @@ CREATE TABLE `audiobooks` (
 	PRIMARY KEY(`id`, `user_id`)
 );
 --> statement-breakpoint
+CREATE TABLE `document_previews` (
+	`document_id` text NOT NULL,
+	`namespace` text DEFAULT '' NOT NULL,
+	`variant` text DEFAULT 'card-240-jpeg' NOT NULL,
+	`status` text DEFAULT 'queued' NOT NULL,
+	`source_last_modified_ms` integer NOT NULL,
+	`object_key` text NOT NULL,
+	`content_type` text DEFAULT 'image/jpeg' NOT NULL,
+	`width` integer DEFAULT 240 NOT NULL,
+	`height` integer,
+	`byte_size` integer,
+	`etag` text,
+	`lease_owner` text,
+	`lease_until_ms` integer DEFAULT 0 NOT NULL,
+	`attempt_count` integer DEFAULT 0 NOT NULL,
+	`last_error` text,
+	`created_at_ms` integer DEFAULT 0 NOT NULL,
+	`updated_at_ms` integer DEFAULT 0 NOT NULL,
+	PRIMARY KEY(`document_id`, `namespace`, `variant`)
+);
+--> statement-breakpoint
+CREATE INDEX `idx_document_previews_status_lease` ON `document_previews` (`status`,`lease_until_ms`);--> statement-breakpoint
 CREATE TABLE `documents` (
 	`id` text NOT NULL,
 	`user_id` text NOT NULL,
@@ -78,6 +100,27 @@ CREATE TABLE `user` (
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `user_email_unique` ON `user` (`email`);--> statement-breakpoint
+CREATE TABLE `user_document_progress` (
+	`user_id` text NOT NULL,
+	`document_id` text NOT NULL,
+	`reader_type` text NOT NULL,
+	`location` text NOT NULL,
+	`progress` real,
+	`client_updated_at_ms` integer DEFAULT 0 NOT NULL,
+	`created_at` integer DEFAULT (cast(strftime('%s','now') as int) * 1000),
+	`updated_at` integer DEFAULT (cast(strftime('%s','now') as int) * 1000),
+	PRIMARY KEY(`user_id`, `document_id`)
+);
+--> statement-breakpoint
+CREATE INDEX `idx_user_document_progress_user_id_updated_at` ON `user_document_progress` (`user_id`,`updated_at`);--> statement-breakpoint
+CREATE TABLE `user_preferences` (
+	`user_id` text PRIMARY KEY NOT NULL,
+	`data_json` text DEFAULT '{}' NOT NULL,
+	`client_updated_at_ms` integer DEFAULT 0 NOT NULL,
+	`created_at` integer DEFAULT (cast(strftime('%s','now') as int) * 1000),
+	`updated_at` integer DEFAULT (cast(strftime('%s','now') as int) * 1000)
+);
+--> statement-breakpoint
 CREATE TABLE `user_tts_chars` (
 	`user_id` text NOT NULL,
 	`date` text NOT NULL,

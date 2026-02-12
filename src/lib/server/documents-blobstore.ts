@@ -146,6 +146,24 @@ export async function getDocumentBlob(id: string, namespace: string | null): Pro
   return bodyToBuffer(res.Body);
 }
 
+export async function presignGet(
+  id: string,
+  namespace: string | null,
+  options?: { expiresInSeconds?: number },
+): Promise<string> {
+  const cfg = getS3Config();
+  const client = getS3Client();
+  const key = documentKey(id, namespace);
+  return getSignedUrl(
+    client,
+    new GetObjectCommand({
+      Bucket: cfg.bucket,
+      Key: key,
+    }),
+    { expiresIn: Math.max(30, Math.min(options?.expiresInSeconds ?? 300, 3600)) },
+  );
+}
+
 export async function putDocumentBlob(
   id: string,
   body: Buffer,

@@ -2,7 +2,7 @@
 
 import { useParams, useRouter } from "next/navigation";
 import Link from 'next/link';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useEPUB } from '@/contexts/EPUBContext';
 import { DocumentSkeleton } from '@/components/DocumentSkeleton';
 import { EPUBViewer } from '@/components/views/EPUBViewer';
@@ -34,11 +34,20 @@ export default function EPUBPage() {
   const [containerHeight, setContainerHeight] = useState<string>('auto');
   const [padPct, setPadPct] = useState<number>(100); // 0..100 (100 = full width, 0 = max padding)
   const [maxPadPx, setMaxPadPx] = useState<number>(0);
+  const inFlightDocIdRef = useRef<string | null>(null);
+  const loadedDocIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    setIsLoading(true);
+    setError(null);
+    inFlightDocIdRef.current = null;
+    loadedDocIdRef.current = null;
+  }, [id]);
 
   const loadDocument = useCallback(async () => {
     console.log('Loading new epub (from page.tsx)');
-    stop(); // Reset TTS when loading new document
     let didRedirect = false;
+    let startedLoad = false;
     try {
       if (!id) {
         setError('Document not found');
@@ -50,12 +59,27 @@ export default function EPUBPage() {
         router.replace(`/epub/${resolved}`);
         return;
       }
+
+      if (loadedDocIdRef.current === resolved) {
+        return;
+      }
+      if (inFlightDocIdRef.current === resolved) {
+        return;
+      }
+
+      startedLoad = true;
+      inFlightDocIdRef.current = resolved;
+      stop(); // Reset TTS when loading new document
       await setCurrentDocument(resolved);
+      loadedDocIdRef.current = resolved;
     } catch (err) {
       console.error('Error loading document:', err);
       setError('Failed to load document');
     } finally {
-      if (!didRedirect) {
+      if (startedLoad) {
+        inFlightDocIdRef.current = null;
+      }
+      if (!didRedirect && startedLoad) {
         setIsLoading(false);
       }
     }

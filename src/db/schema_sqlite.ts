@@ -119,3 +119,26 @@ export const userDocumentProgress = sqliteTable('user_document_progress', {
   pk: primaryKey({ columns: [table.userId, table.documentId] }),
   userUpdatedIdx: index('idx_user_document_progress_user_id_updated_at').on(table.userId, table.updatedAt),
 }));
+
+export const documentPreviews = sqliteTable('document_previews', {
+  documentId: text('document_id').notNull(),
+  namespace: text('namespace').notNull().default(''),
+  variant: text('variant').notNull().default('card-240-jpeg'),
+  status: text('status').notNull().default('queued'),
+  sourceLastModifiedMs: integer('source_last_modified_ms').notNull(),
+  objectKey: text('object_key').notNull(),
+  contentType: text('content_type').notNull().default('image/jpeg'),
+  width: integer('width').notNull().default(240),
+  height: integer('height'),
+  byteSize: integer('byte_size'),
+  eTag: text('etag'),
+  leaseOwner: text('lease_owner'),
+  leaseUntilMs: integer('lease_until_ms').notNull().default(0),
+  attemptCount: integer('attempt_count').notNull().default(0),
+  lastError: text('last_error'),
+  createdAtMs: integer('created_at_ms').notNull().default(0),
+  updatedAtMs: integer('updated_at_ms').notNull().default(0),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.documentId, table.namespace, table.variant] }),
+  statusLeaseIdx: index('idx_document_previews_status_lease').on(table.status, table.leaseUntilMs),
+}));

@@ -4,7 +4,7 @@ import dynamic from 'next/dynamic';
 import { usePDF } from '@/contexts/PDFContext';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { DocumentSkeleton } from '@/components/DocumentSkeleton';
 import { useTTS } from '@/contexts/TTSContext';
 import { DocumentSettings } from '@/components/DocumentSettings';
@@ -42,12 +42,21 @@ export default function PDFViewerPage() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isAudiobookModalOpen, setIsAudiobookModalOpen] = useState(false);
   const [containerHeight, setContainerHeight] = useState<string>('auto');
+  const inFlightDocIdRef = useRef<string | null>(null);
+  const loadedDocIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    setIsLoading(true);
+    setError(null);
+    inFlightDocIdRef.current = null;
+    loadedDocIdRef.current = null;
+  }, [id]);
 
   const loadDocument = useCallback(async () => {
     if (!isLoading) return; // Prevent calls when not loading new doc
     console.log('Loading new document (from page.tsx)');
-    stop(); // Reset TTS when loading new document
     let didRedirect = false;
+    let startedLoad = false;
     try {
       if (!id) {
         setError('Document not found');
@@ -59,12 +68,27 @@ export default function PDFViewerPage() {
         router.replace(`/pdf/${resolved}`);
         return;
       }
+
+      if (loadedDocIdRef.current === resolved) {
+        return;
+      }
+      if (inFlightDocIdRef.current === resolved) {
+        return;
+      }
+
+      startedLoad = true;
+      inFlightDocIdRef.current = resolved;
+      stop(); // Reset TTS when loading new document
       await setCurrentDocument(resolved);
+      loadedDocIdRef.current = resolved;
     } catch (err) {
       console.error('Error loading document:', err);
       setError('Failed to load document');
     } finally {
-      if (!didRedirect) {
+      if (startedLoad) {
+        inFlightDocIdRef.current = null;
+      }
+      if (!didRedirect && startedLoad) {
         setIsLoading(false);
       }
     }

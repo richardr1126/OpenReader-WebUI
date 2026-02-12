@@ -38,6 +38,7 @@ import { useRouter } from 'next/navigation';
 import { showPrivacyModal } from '@/components/PrivacyModal';
 import { deleteDocuments, mimeTypeForDoc, uploadDocuments } from '@/lib/client-documents';
 import { cacheStoredDocumentFromBytes, clearDocumentCache } from '@/lib/document-cache';
+import { clearAllDocumentPreviewCaches, clearInMemoryDocumentPreviewCache } from '@/lib/document-preview-cache';
 
 const isDev = process.env.NEXT_PUBLIC_NODE_ENV !== 'production' || process.env.NODE_ENV == null;
 
@@ -188,6 +189,7 @@ export function SettingsModal({ className = '' }: { className?: string }) {
 
   const handleRefresh = async () => {
     try {
+      clearInMemoryDocumentPreviewCache();
       await refreshDocuments();
     } catch (error) {
       console.error('Failed to refresh documents:', error);
@@ -196,7 +198,10 @@ export function SettingsModal({ className = '' }: { className?: string }) {
 
   const handleClearCache = async () => {
     try {
-      await clearDocumentCache();
+      await Promise.all([
+        clearDocumentCache(),
+        clearAllDocumentPreviewCaches(),
+      ]);
     } catch (error) {
       console.error('Failed to clear cache:', error);
     }

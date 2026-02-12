@@ -2,11 +2,16 @@ import { DocumentListDocument } from '@/types/documents';
 import { PDFIcon, EPUBIcon, FileIcon } from '@/components/icons/Icons';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  extractEpubCoverToDataUrl,
-  renderPdfFirstPageToDataUrl,
-} from '@/lib/documentPreview';
-import { getDocumentContentSnippet } from '@/lib/client-documents';
-import { ensureCachedDocument } from '@/lib/document-cache';
+  documentPreviewFallbackUrl,
+  getDocumentContentSnippet,
+  getDocumentPreviewStatus,
+} from '@/lib/client-documents';
+import {
+  getInMemoryDocumentPreviewUrl,
+  getPersistedDocumentPreviewUrl,
+  primeDocumentPreviewCache,
+  setInMemoryDocumentPreviewUrl,
+} from '@/lib/document-preview-cache';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -14,7 +19,6 @@ interface DocumentPreviewProps {
   doc: DocumentListDocument;
 }
 
-const imagePreviewCache = new Map<string, string>();
 const textPreviewCache = new Map<string, string>();
 
 export function DocumentPreview({ doc }: DocumentPreviewProps) {
@@ -33,20 +37,11 @@ export function DocumentPreview({ doc }: DocumentPreviewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [isVisible, setIsVisible] = useState(false);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [isImageReady, setIsImageReady] = useState(false);
   const [textPreview, setTextPreview] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
 
   const previewKey = useMemo(() => `${doc.type}:${doc.id}`, [doc.id, doc.type]);
-  const cacheMeta = useMemo(
-    () => ({
-      id: doc.id,
-      name: doc.name,
-      type: doc.type,
-      size: doc.size,
-      lastModified: doc.lastModified,
-    }),
-    [doc.id, doc.lastModified, doc.name, doc.size, doc.type],
-  );
 
   useEffect(() => {
     const el = containerRef.current;
@@ -69,7 +64,7 @@ export function DocumentPreview({ doc }: DocumentPreviewProps) {
   useEffect(() => {
     if (!isVisible) return;
 
-    const cachedImage = imagePreviewCache.get(previewKey);
+    const cachedImage = getInMemoryDocumentPreviewUrl(previewKey);
     if (cachedImage) {
       setImagePreview(cachedImage);
       setTextPreview(null);
@@ -89,32 +84,65 @@ export function DocumentPreview({ doc }: DocumentPreviewProps) {
     const run = async () => {
       setIsGenerating(true);
       try {
-        const targetWidth = 240;
-
-        if (doc.type === 'pdf') {
-          const cached = await ensureCachedDocument(cacheMeta, { signal: controller.signal });
-          if (cached.type !== 'pdf') return;
-          const data = cached.data;
-          if (cancelled) return;
-          const dataUrl = await renderPdfFirstPageToDataUrl(data, targetWidth);
-          if (cancelled) return;
-          imagePreviewCache.set(previewKey, dataUrl);
-          setImagePreview(dataUrl);
-          setTextPreview(null);
-          return;
-        }
-
-        if (doc.type === 'epub') {
-          const cached = await ensureCachedDocument(cacheMeta, { signal: controller.signal });
-          if (cached.type !== 'epub') return;
-          const data = cached.data;
-          if (cancelled) return;
-          const cover = await extractEpubCoverToDataUrl(data, targetWidth);
-          if (cancelled) return;
-          if (cover) {
-            imagePreviewCache.set(previewKey, cover);
-            setImagePreview(cover);
+        if (doc.type === 'pdf' || doc.type === 'epub') {
+          const persistedUrl = await getPersistedDocumentPreviewUrl(
+            doc.id,
+            Number(doc.lastModified),
+            previewKey,
+          );
+          if (!cancelled && persistedUrl) {
+            setImagePreview(persistedUrl);
             setTextPreview(null);
+            return;
+          }
+
+          let attempt = 0;
+          while (!cancelled && attempt < 12) {
+            const status = await getDocumentPreviewStatus(doc.id, { signal: controller.signal });
+            if (cancelled) return;
+
+            if (status.kind === 'ready') {
+              const primedUrl = await primeDocumentPreviewCache(
+                doc.id,
+                Number(doc.lastModified),
+                previewKey,
+                { signal: controller.signal },
+              ).catch(() => null);
+              if (cancelled) return;
+
+              if (primedUrl) {
+                setImagePreview(primedUrl);
+                setTextPreview(null);
+                return;
+              }
+
+              const fallbackUrl = status.fallbackUrl || documentPreviewFallbackUrl(doc.id);
+              setInMemoryDocumentPreviewUrl(previewKey, fallbackUrl);
+              setImagePreview(fallbackUrl);
+              setTextPreview(null);
+              return;
+            }
+
+            if (status.status === 'failed') {
+              return;
+            }
+
+            const waitMs = Math.max(
+              400,
+              Math.min(6000, Number.isFinite(status.retryAfterMs) ? status.retryAfterMs : 1500),
+            );
+            await new Promise<void>((resolve) => {
+              const timer = setTimeout(resolve, waitMs);
+              controller.signal.addEventListener(
+                'abort',
+                () => {
+                  clearTimeout(timer);
+                  resolve();
+                },
+                { once: true },
+              );
+            });
+            attempt += 1;
           }
           return;
         }
@@ -145,7 +173,11 @@ export function DocumentPreview({ doc }: DocumentPreviewProps) {
       cancelled = true;
       controller.abort();
     };
-  }, [cacheMeta, doc.id, doc.type, isVisible, previewKey]);
+  }, [doc.id, doc.lastModified, doc.type, isVisible, previewKey]);
+
+  useEffect(() => {
+    setIsImageReady(false);
+  }, [imagePreview]);
 
   const gradientClass = isPDF
     ? 'from-red-500/80 via-red-400/60 to-red-600/80'
@@ -176,15 +208,40 @@ export function DocumentPreview({ doc }: DocumentPreviewProps) {
     >
       {imagePreview ? (
         <>
+          <div className={`absolute inset-0 bg-gradient-to-br ${gradientClass}`} />
+          {!isImageReady ? (
+            <div className="relative z-10 flex flex-col items-center justify-center h-full gap-2 px-2 text-white">
+              <Icon className="w-10 h-10 sm:w-12 sm:h-12 drop-shadow-md" />
+              <span className="text-[10px] sm:text-[11px] tracking-wide uppercase font-semibold opacity-90">
+                {typeLabel}
+              </span>
+            </div>
+          ) : null}
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={imagePreview}
             alt={`${doc.name} preview`}
-            className="absolute inset-0 h-full w-full object-cover"
+            className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-150 ${isImageReady ? 'opacity-100' : 'opacity-0'}`}
             draggable={false}
             loading="lazy"
+            onLoad={() => {
+              setIsImageReady(true);
+            }}
+            onError={() => {
+              if (!imagePreview) return;
+              setIsImageReady(false);
+              const fallback = documentPreviewFallbackUrl(doc.id);
+              if (imagePreview === fallback) return;
+              setInMemoryDocumentPreviewUrl(previewKey, fallback);
+              setImagePreview(fallback);
+              void primeDocumentPreviewCache(
+                doc.id,
+                Number(doc.lastModified),
+                previewKey,
+              ).catch(() => {});
+            }}
           />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/35 via-black/0 to-black/15" />
+          {isImageReady ? <div className="absolute inset-0 bg-gradient-to-t from-black/35 via-black/0 to-black/15" /> : null}
         </>
       ) : textPreview ? (
         <>

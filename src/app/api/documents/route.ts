@@ -4,6 +4,11 @@ import { db } from '@/db';
 import { documents } from '@/db/schema';
 import { requireAuthContext } from '@/lib/server/auth';
 import { safeDocumentName, toDocumentTypeFromName } from '@/lib/server/documents-utils';
+import {
+  cleanupDocumentPreviewArtifacts,
+  deleteDocumentPreviewRows,
+  enqueueDocumentPreview,
+} from '@/lib/server/document-previews';
 import { deleteDocumentBlob, headDocumentBlob, isMissingBlobError, isValidDocumentId } from '@/lib/server/documents-blobstore';
 import { getOpenReaderTestNamespace, getUnclaimedUserIdForNamespace } from '@/lib/server/test-namespace';
 import { isS3Configured } from '@/lib/server/s3';
@@ -123,6 +128,17 @@ export async function POST(req: NextRequest) {
         size: headSize,
         lastModified: doc.lastModified,
         scope: storageUserId === unclaimedUserId ? 'unclaimed' : 'user',
+      });
+
+      await enqueueDocumentPreview(
+        {
+          id: doc.id,
+          type: doc.type,
+          lastModified: doc.lastModified,
+        },
+        testNamespace,
+      ).catch((error) => {
+        console.error(`Failed to enqueue preview for document ${doc.id}:`, error);
       });
     }
 
@@ -269,6 +285,13 @@ export async function DELETE(req: NextRequest) {
           throw error;
         }
       }
+
+      await cleanupDocumentPreviewArtifacts(id, testNamespace).catch((error) => {
+        console.error(`Failed to cleanup preview artifacts for document ${id}:`, error);
+      });
+      await deleteDocumentPreviewRows(id, testNamespace).catch((error) => {
+        console.error(`Failed to cleanup preview rows for document ${id}:`, error);
+      });
     }
 
     return NextResponse.json({ success: true, deleted: deletedRows.length });

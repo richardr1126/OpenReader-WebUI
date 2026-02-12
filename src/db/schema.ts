@@ -14,3 +14,4 @@ export const verification = usePostgres ? postgresSchema.verification : sqliteSc
 export const userTtsChars = usePostgres ? postgresSchema.userTtsChars : sqliteSchema.userTtsChars;
 export const userPreferences = usePostgres ? postgresSchema.userPreferences : sqliteSchema.userPreferences;
 export const userDocumentProgress = usePostgres ? postgresSchema.userDocumentProgress : sqliteSchema.userDocumentProgress;
+export const documentPreviews = usePostgres ? postgresSchema.documentPreviews : sqliteSchema.documentPreviews;

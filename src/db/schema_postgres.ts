@@ -118,3 +118,26 @@ export const userDocumentProgress = pgTable('user_document_progress', {
   pk: primaryKey({ columns: [table.userId, table.documentId] }),
   userUpdatedIdx: index('idx_user_document_progress_user_id_updated_at').on(table.userId, table.updatedAt),
 }));
+
+export const documentPreviews = pgTable('document_previews', {
+  documentId: text('document_id').notNull(),
+  namespace: text('namespace').notNull().default(''),
+  variant: text('variant').notNull().default('card-240-jpeg'),
+  status: text('status').notNull().default('queued'),
+  sourceLastModifiedMs: bigint('source_last_modified_ms', { mode: 'number' }).notNull(),
+  objectKey: text('object_key').notNull(),
+  contentType: text('content_type').notNull().default('image/jpeg'),
+  width: integer('width').notNull().default(240),
+  height: integer('height'),
+  byteSize: bigint('byte_size', { mode: 'number' }),
+  eTag: text('etag'),
+  leaseOwner: text('lease_owner'),
+  leaseUntilMs: bigint('lease_until_ms', { mode: 'number' }).notNull().default(0),
+  attemptCount: integer('attempt_count').notNull().default(0),
+  lastError: text('last_error'),
+  createdAtMs: bigint('created_at_ms', { mode: 'number' }).notNull().default(0),
+  updatedAtMs: bigint('updated_at_ms', { mode: 'number' }).notNull().default(0),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.documentId, table.namespace, table.variant] }),
+  statusLeaseIdx: index('idx_document_previews_status_lease').on(table.status, table.leaseUntilMs),
+}));
