@@ -36,6 +36,7 @@ import { useMediaSession } from '@/hooks/audio/useMediaSession';
 import { useAudioContext } from '@/hooks/audio/useAudioContext';
 import { getLastDocumentLocation, setLastDocumentLocation } from '@/lib/dexie';
 import { useBackgroundState } from '@/hooks/audio/useBackgroundState';
+import { useWakeLock } from '@/hooks/audio/useWakeLock';
 import { withRetry, generateTTS, alignAudio } from '@/lib/client';
 import { preprocessSentenceForAudio, splitTextToTtsBlocks, splitTextToTtsBlocksEPUB } from '@/lib/nlp';
 import { isKokoroModel } from '@/utils/voice';
@@ -1143,6 +1144,9 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     isPlaying,
     playAudio,
   });
+
+  // Prevent screen from sleeping during audio playback (mobile Safari)
+  useWakeLock(isPlaying);
 
   // Track the current word index during playback using Howler's seek position
   useEffect(() => {
