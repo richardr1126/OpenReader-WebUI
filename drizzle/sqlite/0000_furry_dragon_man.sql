@@ -7,7 +7,8 @@ CREATE TABLE `audiobook_chapters` (
 	`duration` real DEFAULT 0,
 	`file_path` text NOT NULL,
 	`format` text NOT NULL,
-	PRIMARY KEY(`id`, `user_id`)
+	PRIMARY KEY(`id`, `user_id`),
+	FOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
 CREATE TABLE `audiobooks` (
@@ -19,7 +20,8 @@ CREATE TABLE `audiobooks` (
 	`cover_path` text,
 	`duration` real DEFAULT 0,
 	`created_at` integer DEFAULT (cast(strftime('%s','now') as int) * 1000),
-	PRIMARY KEY(`id`, `user_id`)
+	PRIMARY KEY(`id`, `user_id`),
+	FOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
 CREATE TABLE `document_previews` (
@@ -53,7 +55,8 @@ CREATE TABLE `documents` (
 	`last_modified` integer NOT NULL,
 	`file_path` text NOT NULL,
 	`created_at` integer DEFAULT (cast(strftime('%s','now') as int) * 1000),
-	PRIMARY KEY(`id`, `user_id`)
+	PRIMARY KEY(`id`, `user_id`),
+	FOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
 CREATE INDEX `idx_documents_user_id` ON `documents` (`user_id`);--> statement-breakpoint
@@ -67,7 +70,8 @@ CREATE TABLE `user_document_progress` (
 	`client_updated_at_ms` integer DEFAULT 0 NOT NULL,
 	`created_at` integer DEFAULT (cast(strftime('%s','now') as int) * 1000),
 	`updated_at` integer DEFAULT (cast(strftime('%s','now') as int) * 1000),
-	PRIMARY KEY(`user_id`, `document_id`)
+	PRIMARY KEY(`user_id`, `document_id`),
+	FOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
 CREATE INDEX `idx_user_document_progress_user_id_updated_at` ON `user_document_progress` (`user_id`,`updated_at`);--> statement-breakpoint
@@ -76,7 +80,8 @@ CREATE TABLE `user_preferences` (
 	`data_json` text DEFAULT '{}' NOT NULL,
 	`client_updated_at_ms` integer DEFAULT 0 NOT NULL,
 	`created_at` integer DEFAULT (cast(strftime('%s','now') as int) * 1000),
-	`updated_at` integer DEFAULT (cast(strftime('%s','now') as int) * 1000)
+	`updated_at` integer DEFAULT (cast(strftime('%s','now') as int) * 1000),
+	FOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
 CREATE TABLE `user_tts_chars` (
@@ -85,7 +90,8 @@ CREATE TABLE `user_tts_chars` (
 	`char_count` integer DEFAULT 0,
 	`created_at` integer DEFAULT (cast(strftime('%s','now') as int) * 1000),
 	`updated_at` integer DEFAULT (cast(strftime('%s','now') as int) * 1000),
-	PRIMARY KEY(`user_id`, `date`)
+	PRIMARY KEY(`user_id`, `date`),
+	FOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
 CREATE INDEX `idx_user_tts_chars_date` ON `user_tts_chars` (`date`);--> statement-breakpoint

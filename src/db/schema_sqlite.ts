@@ -1,9 +1,10 @@
 import { sqliteTable, text, integer, real, primaryKey, index } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
+import { user } from './schema_auth_sqlite';
 
 export const documents = sqliteTable('documents', {
   id: text('id').notNull(),
-  userId: text('user_id').notNull(),
+  userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
   name: text('name').notNull(),
   type: text('type').notNull(), // pdf, epub, docx, html
   size: integer('size').notNull(),
@@ -18,7 +19,7 @@ export const documents = sqliteTable('documents', {
 
 export const audiobooks = sqliteTable('audiobooks', {
   id: text('id').notNull(),
-  userId: text('user_id').notNull(),
+  userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
   title: text('title').notNull(),
   author: text('author'),
   description: text('description'),
@@ -32,7 +33,7 @@ export const audiobooks = sqliteTable('audiobooks', {
 export const audiobookChapters = sqliteTable('audiobook_chapters', {
   id: text('id').notNull(),
   bookId: text('book_id').notNull(),
-  userId: text('user_id').notNull(),
+  userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
   chapterIndex: integer('chapter_index').notNull(),
   title: text('title').notNull(),
   duration: real('duration').default(0),
@@ -47,7 +48,7 @@ export const audiobookChapters = sqliteTable('audiobook_chapters', {
 // defined here. Only application-specific tables belong in this file.
 
 export const userTtsChars = sqliteTable("user_tts_chars", {
-  userId: text('user_id').notNull(),
+  userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
   date: text('date').notNull(), // SQLite doesn't have native DATE type, text YYYY-MM-DD is standard
   charCount: integer('char_count').default(0),
   createdAt: integer('created_at').default(sql`(cast(strftime('%s','now') as int) * 1000)`),
@@ -58,7 +59,7 @@ export const userTtsChars = sqliteTable("user_tts_chars", {
 }));
 
 export const userPreferences = sqliteTable('user_preferences', {
-  userId: text('user_id').primaryKey(),
+  userId: text('user_id').primaryKey().references(() => user.id, { onDelete: 'cascade' }),
   dataJson: text('data_json').notNull().default('{}'),
   clientUpdatedAtMs: integer('client_updated_at_ms').notNull().default(0),
   createdAt: integer('created_at').default(sql`(cast(strftime('%s','now') as int) * 1000)`),
@@ -66,7 +67,7 @@ export const userPreferences = sqliteTable('user_preferences', {
 });
 
 export const userDocumentProgress = sqliteTable('user_document_progress', {
-  userId: text('user_id').notNull(),
+  userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
   documentId: text('document_id').notNull(),
   readerType: text('reader_type').notNull(), // pdf, epub, html
   location: text('location').notNull(),

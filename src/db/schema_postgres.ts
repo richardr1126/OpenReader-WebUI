@@ -1,8 +1,9 @@
 import { pgTable, text, integer, real, timestamp, date, bigint, primaryKey, index, jsonb } from 'drizzle-orm/pg-core';
+import { user } from './schema_auth_postgres';
 
 export const documents = pgTable('documents', {
   id: text('id').notNull(),
-  userId: text('user_id').notNull(),
+  userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
   name: text('name').notNull(),
   type: text('type').notNull(), // pdf, epub, docx, html
   size: bigint('size', { mode: 'number' }).notNull(),
@@ -17,7 +18,7 @@ export const documents = pgTable('documents', {
 
 export const audiobooks = pgTable('audiobooks', {
   id: text('id').notNull(),
-  userId: text('user_id').notNull(),
+  userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
   title: text('title').notNull(),
   author: text('author'),
   description: text('description'),
@@ -31,7 +32,7 @@ export const audiobooks = pgTable('audiobooks', {
 export const audiobookChapters = pgTable('audiobook_chapters', {
   id: text('id').notNull(),
   bookId: text('book_id').notNull(),
-  userId: text('user_id').notNull(),
+  userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
   chapterIndex: integer('chapter_index').notNull(),
   title: text('title').notNull(),
   duration: real('duration').default(0),
@@ -46,7 +47,7 @@ export const audiobookChapters = pgTable('audiobook_chapters', {
 // defined here. Only application-specific tables belong in this file.
 
 export const userTtsChars = pgTable("user_tts_chars", {
-  userId: text('user_id').notNull(),
+  userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
   date: date('date').notNull(),
   charCount: bigint('char_count', { mode: 'number' }).default(0),
   createdAt: timestamp('created_at').defaultNow(),
@@ -57,7 +58,7 @@ export const userTtsChars = pgTable("user_tts_chars", {
 }));
 
 export const userPreferences = pgTable('user_preferences', {
-  userId: text('user_id').primaryKey(),
+  userId: text('user_id').primaryKey().references(() => user.id, { onDelete: 'cascade' }),
   dataJson: jsonb('data_json').notNull().default({}),
   clientUpdatedAtMs: bigint('client_updated_at_ms', { mode: 'number' }).notNull().default(0),
   createdAt: timestamp('created_at').defaultNow(),
@@ -65,7 +66,7 @@ export const userPreferences = pgTable('user_preferences', {
 });
 
 export const userDocumentProgress = pgTable('user_document_progress', {
-  userId: text('user_id').notNull(),
+  userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
   documentId: text('document_id').notNull(),
   readerType: text('reader_type').notNull(), // pdf, epub, html
   location: text('location').notNull(),

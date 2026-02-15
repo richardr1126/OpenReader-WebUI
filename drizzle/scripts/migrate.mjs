@@ -26,6 +26,16 @@ const hasConfigArg = extraArgs.includes('--config');
 const configFile = process.env.POSTGRES_URL ? 'drizzle.config.pg.ts' : 'drizzle.config.sqlite.ts';
 const configArgs = hasConfigArg ? [] : ['--config', configFile];
 
+// Ensure the docstore directory exists for SQLite migrations.
+// drizzle-kit opens the database file directly and will fail if the parent
+// directory is missing (e.g. in a fresh CI checkout).
+if (!process.env.POSTGRES_URL) {
+  const dbDir = path.join(process.cwd(), 'docstore');
+  if (!fs.existsSync(dbDir)) {
+    fs.mkdirSync(dbDir, { recursive: true });
+  }
+}
+
 const result = spawnSync('drizzle-kit', ['migrate', ...configArgs, ...extraArgs], {
   stdio: 'inherit',
   env: process.env,

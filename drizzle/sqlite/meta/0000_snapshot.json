@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "b45e86c4-7d98-4cfb-9b38-5d1423b17b5e",
+  "id": "a55d11c6-847c-4e19-9a7c-fbc2401df061",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "audiobook_chapters": {
@@ -66,7 +66,21 @@
         }
       },
       "indexes": {},
-      "foreignKeys": {},
+      "foreignKeys": {
+        "audiobook_chapters_user_id_user_id_fk": {
+          "name": "audiobook_chapters_user_id_user_id_fk",
+          "tableFrom": "audiobook_chapters",
+          "tableTo": "user",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {
         "audiobook_chapters_id_user_id_pk": {
           "columns": [
@@ -142,7 +156,21 @@
         }
       },
       "indexes": {},
-      "foreignKeys": {},
+      "foreignKeys": {
+        "audiobooks_user_id_user_id_fk": {
+          "name": "audiobooks_user_id_user_id_fk",
+          "tableFrom": "audiobooks",
+          "tableTo": "user",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {
         "audiobooks_id_user_id_pk": {
           "columns": [
@@ -389,7 +417,21 @@
           "isUnique": false
         }
       },
-      "foreignKeys": {},
+      "foreignKeys": {
+        "documents_user_id_user_id_fk": {
+          "name": "documents_user_id_user_id_fk",
+          "tableFrom": "documents",
+          "tableTo": "user",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {
         "documents_id_user_id_pk": {
           "columns": [
@@ -475,7 +517,21 @@
           "isUnique": false
         }
       },
-      "foreignKeys": {},
+      "foreignKeys": {
+        "user_document_progress_user_id_user_id_fk": {
+          "name": "user_document_progress_user_id_user_id_fk",
+          "tableFrom": "user_document_progress",
+          "tableTo": "user",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {
         "user_document_progress_user_id_document_id_pk": {
           "columns": [
@@ -532,7 +588,21 @@
         }
       },
       "indexes": {},
-      "foreignKeys": {},
+      "foreignKeys": {
+        "user_preferences_user_id_user_id_fk": {
+          "name": "user_preferences_user_id_user_id_fk",
+          "tableFrom": "user_preferences",
+          "tableTo": "user",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
@@ -588,7 +658,21 @@
           "isUnique": false
         }
       },
-      "foreignKeys": {},
+      "foreignKeys": {
+        "user_tts_chars_user_id_user_id_fk": {
+          "name": "user_tts_chars_user_id_user_id_fk",
+          "tableFrom": "user_tts_chars",
+          "tableTo": "user",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {
         "user_tts_chars_user_id_date_pk": {
           "columns": [
