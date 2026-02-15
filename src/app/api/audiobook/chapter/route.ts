@@ -24,7 +24,7 @@ import {
 import { isS3Configured } from '@/lib/server/s3';
 import { getOpenReaderTestNamespace, getUnclaimedUserIdForNamespace } from '@/lib/server/test-namespace';
 import { buildAllowedAudiobookUserIds, pickAudiobookOwner } from '@/lib/server/audiobook-scope';
-import { getFFmpegPath, getFFprobePath } from '@/lib/server/ffmpeg-bin';
+import { getFFmpegPath } from '@/lib/server/ffmpeg-bin';
 import type { AudiobookGenerationSettings } from '@/types/client';
 import type { TTSAudioBytes, TTSAudiobookFormat } from '@/types/tts';
 
@@ -147,68 +147,6 @@ async function runFFmpeg(args: string[], signal?: AbortSignal): Promise<void> {
       if (finished) return;
       finished = true;
       signal?.removeEventListener('abort', onAbort);
-      reject(err);
-    });
-  });
-}
-
-async function getAudioDuration(filePath: string, signal?: AbortSignal): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const ffprobe = spawn(getFFprobePath(), [
-      '-i',
-      filePath,
-      '-show_entries',
-      'format=duration',
-      '-v',
-      'quiet',
-      '-of',
-      'csv=p=0',
-    ]);
-
-    let output = '';
-    let finished = false;
-
-    const onAbort = () => {
-      if (finished) return;
-      finished = true;
-      try {
-        ffprobe.kill('SIGKILL');
-      } catch {}
-      reject(new Error('ABORTED'));
-    };
-
-    const cleanup = () => {
-      if (finished) return;
-      finished = true;
-      signal?.removeEventListener('abort', onAbort);
-    };
-
-    if (signal) {
-      if (signal.aborted) {
-        onAbort();
-        return;
-      }
-      signal.addEventListener('abort', onAbort, { once: true });
-    }
-
-    ffprobe.stdout.on('data', (data) => {
-      output += data.toString();
-    });
-
-    ffprobe.on('close', (code) => {
-      if (finished) return;
-      cleanup();
-      if (code === 0) {
-        const duration = parseFloat(output.trim());
-        resolve(duration);
-      } else {
-        reject(new Error(`ffprobe process exited with code ${code}`));
-      }
-    });
-
-    ffprobe.on('error', (err) => {
-      if (finished) return;
-      cleanup();
       reject(err);
     });
   });
@@ -377,7 +315,7 @@ export async function POST(request: NextRequest) {
     }
 
     const probe = await ffprobeAudio(chapterOutputTempPath, request.signal);
-    const duration = probe.durationSec ?? (await getAudioDuration(chapterOutputTempPath, request.signal));
+    const duration = probe.durationSec ?? 0;
 
     const finalChapterName = encodeChapterFileName(chapterIndex, data.chapterTitle, format);
     const finalChapterBytes = await readFile(chapterOutputTempPath);

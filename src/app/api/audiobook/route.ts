@@ -22,7 +22,7 @@ import {
 } from '@/lib/server/audiobook';
 import { isS3Configured } from '@/lib/server/s3';
 import { getOpenReaderTestNamespace, getUnclaimedUserIdForNamespace } from '@/lib/server/test-namespace';
-import { getFFmpegPath, getFFprobePath } from '@/lib/server/ffmpeg-bin';
+import { getFFmpegPath } from '@/lib/server/ffmpeg-bin';
 import { buildAllowedAudiobookUserIds, pickAudiobookOwner } from '@/lib/server/audiobook-scope';
 import type { TTSAudiobookFormat } from '@/types/tts';
 
@@ -138,68 +138,6 @@ async function runFFmpeg(args: string[], signal?: AbortSignal): Promise<void> {
   });
 }
 
-async function getAudioDuration(filePath: string, signal?: AbortSignal): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const ffprobe = spawn(getFFprobePath(), [
-      '-i',
-      filePath,
-      '-show_entries',
-      'format=duration',
-      '-v',
-      'quiet',
-      '-of',
-      'csv=p=0',
-    ]);
-
-    let output = '';
-    let finished = false;
-
-    const onAbort = () => {
-      if (finished) return;
-      finished = true;
-      try {
-        ffprobe.kill('SIGKILL');
-      } catch {}
-      reject(new Error('ABORTED'));
-    };
-
-    const cleanup = () => {
-      if (finished) return;
-      finished = true;
-      signal?.removeEventListener('abort', onAbort);
-    };
-
-    if (signal) {
-      if (signal.aborted) {
-        onAbort();
-        return;
-      }
-      signal.addEventListener('abort', onAbort, { once: true });
-    }
-
-    ffprobe.stdout.on('data', (data) => {
-      output += data.toString();
-    });
-
-    ffprobe.on('close', (code) => {
-      if (finished) return;
-      cleanup();
-      if (code === 0) {
-        const duration = parseFloat(output.trim());
-        resolve(duration);
-      } else {
-        reject(new Error(`ffprobe process exited with code ${code}`));
-      }
-    });
-
-    ffprobe.on('error', (err) => {
-      if (finished) return;
-      cleanup();
-      reject(err);
-    });
-  });
-}
-
 export async function GET(request: NextRequest) {
   let workDir: string | null = null;
   try {
@@ -298,8 +236,6 @@ export async function GET(request: NextRequest) {
           const probe = await ffprobeAudio(localPath, request.signal);
           if (probe.durationSec && probe.durationSec > 0) {
             duration = probe.durationSec;
-          } else {
-            duration = await getAudioDuration(localPath, request.signal);
           }
         } catch {
           duration = 0;

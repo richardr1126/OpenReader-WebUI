@@ -148,11 +148,18 @@ export async function setupTest(page: Page, testInfo?: TestInfo) {
   if (!isAuthEnabledForTests()) {
     const headers = namespace ? { 'x-openreader-test-namespace': namespace } : undefined;
     let cleared = false;
+    let authProtected = false;
     let attempts = 0;
     while (!cleared && attempts < 3) {
       attempts += 1;
       try {
         const res = await page.request.delete('/api/documents', { ...(headers ? { headers } : {}) });
+        // If this endpoint requires auth, we're not in no-auth mode for this run.
+        // Skip cleanup rather than hard-failing setup.
+        if (res.status() === 401 || res.status() === 403) {
+          authProtected = true;
+          break;
+        }
         if (res.ok()) {
           cleared = true;
           break;
@@ -162,7 +169,7 @@ export async function setupTest(page: Page, testInfo?: TestInfo) {
       }
       await page.waitForTimeout(200);
     }
-    if (!cleared) {
+    if (!cleared && !authProtected) {
       throw new Error('Failed to clear server documents before test setup');
     }
   }

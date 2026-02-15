@@ -1,7 +1,6 @@
 import { spawn } from 'child_process';
 import path from 'path';
 import { readdir } from 'fs/promises';
-import { getFFprobePath } from '@/lib/server/ffmpeg-bin';
 
 export type StoredChapter = {
   index: number;
@@ -77,26 +76,52 @@ type ProbeResult = {
   titleTag?: string;
 };
 
+function parseDurationFromFFmpegStderr(stderr: string): number | undefined {
+  const match = stderr.match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/);
+  if (!match) return undefined;
+
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  const seconds = Number(match[3]);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes) || !Number.isFinite(seconds)) {
+    return undefined;
+  }
+
+  const total = hours * 3600 + minutes * 60 + seconds;
+  return Number.isFinite(total) ? total : undefined;
+}
+
+function parseTitleFromFFMetadata(stdout: string): string | undefined {
+  const line = stdout
+    .split(/\r?\n/)
+    .find((value) => value.startsWith('title='));
+  if (!line) return undefined;
+
+  const raw = line.slice('title='.length).trim();
+  return raw.length > 0 ? raw : undefined;
+}
+
 export async function ffprobeAudio(filePath: string, signal?: AbortSignal): Promise<ProbeResult> {
+  const { getFFmpegPath } = await import('@/lib/server/ffmpeg-bin');
+
   return new Promise<ProbeResult>((resolve, reject) => {
-    const ffprobe = spawn(getFFprobePath(), [
-      '-v',
-      'quiet',
-      '-print_format',
-      'json',
-      '-show_entries',
-      'format=duration:format_tags=title',
+    const ffmpeg = spawn(getFFmpegPath(), [
+      '-i',
       filePath,
+      '-f',
+      'ffmetadata',
+      '-',
     ]);
 
-    let output = '';
+    let stdout = '';
+    let stderr = '';
     let finished = false;
 
     const onAbort = () => {
       if (finished) return;
       finished = true;
       try {
-        ffprobe.kill('SIGKILL');
+        ffmpeg.kill('SIGKILL');
       } catch {}
       reject(new Error('ABORTED'));
     };
@@ -115,34 +140,29 @@ export async function ffprobeAudio(filePath: string, signal?: AbortSignal): Prom
       signal.addEventListener('abort', onAbort, { once: true });
     }
 
-    ffprobe.stdout.on('data', (data) => {
-      output += data.toString();
+    ffmpeg.stdout.on('data', (data) => {
+      stdout += data.toString();
     });
 
-    ffprobe.on('close', (code) => {
+    ffmpeg.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
+
+    ffmpeg.on('close', (code) => {
       if (finished) return;
       cleanup();
       if (code !== 0) {
-        reject(new Error(`ffprobe process exited with code ${code}`));
+        reject(new Error(`ffmpeg probe process exited with code ${code}`));
         return;
       }
 
-      try {
-        const parsed = JSON.parse(output) as {
-          format?: { duration?: string; tags?: { title?: string } };
-        };
-        const durationStr = parsed.format?.duration;
-        const durationSec = durationStr ? Number(durationStr) : undefined;
-        resolve({
-          durationSec: Number.isFinite(durationSec) ? durationSec : undefined,
-          titleTag: parsed.format?.tags?.title,
-        });
-      } catch (error) {
-        reject(error);
-      }
+      resolve({
+        durationSec: parseDurationFromFFmpegStderr(stderr),
+        titleTag: parseTitleFromFFMetadata(stdout),
+      });
     });
 
-    ffprobe.on('error', (err) => {
+    ffmpeg.on('error', (err) => {
       if (finished) return;
       cleanup();
       reject(err);

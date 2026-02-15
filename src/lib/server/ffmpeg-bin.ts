@@ -1,6 +1,5 @@
 import { existsSync } from 'fs';
 import ffmpegStatic from 'ffmpeg-static';
-import ffprobeStatic from 'ffprobe-static';
 
 function normalizePath(value: unknown): string | null {
   if (typeof value !== 'string') return null;
@@ -34,14 +33,5 @@ export function getFFmpegPath(): string {
     normalizePath(ffmpegStatic),
     'FFMPEG_BIN',
     'ffmpeg-static',
-  );
-}
-
-export function getFFprobePath(): string {
-  return resolveBinary(
-    normalizePath(process.env.FFPROBE_BIN),
-    normalizePath(ffprobeStatic?.path),
-    'FFPROBE_BIN',
-    'ffprobe-static',
   );
 }
