@@ -81,7 +81,7 @@ export function SettingsModal({ className = '' }: { className?: string }) {
   const [deleteDocsMode, setDeleteDocsMode] = useState<'user' | 'unclaimed'>('user');
   const [showDeleteAccountConfirm, setShowDeleteAccountConfirm] = useState(false);
   const { progress, setProgress, estimatedTimeRemaining } = useTimeEstimation();
-  const { authEnabled, baseUrl: authBaseUrl } = useAuthConfig();
+  const { authEnabled, baseUrl: authBaseUrl, allowAnonymousAuthSessions } = useAuthConfig();
   const { data: session } = useAuthSession();
   const router = useRouter();
   const isBusy = isImportingLibrary;
@@ -312,11 +312,8 @@ export function SettingsModal({ className = '' }: { className?: string }) {
 
   const handleSignOut = async () => {
     const client = getAuthClient(authBaseUrl);
-    // "Sign out" here means: disconnect the email/social account and return to a fresh
-    // anonymous session. The app should not be able to end up truly signed out.
     await client.signOut();
-    // AuthLoader will create the next anonymous session and refresh rate limit state.
-    router.refresh();
+    router.push('/signin');
   };
 
   const handleDeleteAccount = async () => {
@@ -327,9 +324,7 @@ export function SettingsModal({ className = '' }: { className?: string }) {
       // Sign out locally
       const client = getAuthClient(authBaseUrl);
       await client.signOut();
-      // After account deletion, we return to a fresh anonymous session.
-      // AuthLoader will create the session if one isn't present yet.
-      window.location.href = '/';
+      window.location.href = '/signup';
     } catch (error) {
       console.error('Failed to delete account:', error);
     }
@@ -872,14 +867,18 @@ export function SettingsModal({ className = '' }: { className?: string }) {
                                       Delete Account
                                     </Button>
                                     <p className="text-xs text-muted mt-2 text-center">
-                                      This will permanently delete your account and data. You will be returned to a fresh anonymous session.
+                                      This will permanently delete your account and data. You will be redirected to sign up.
                                     </p>
                                   </div>
                                 </>
                               ) : (
                                 <div className="pt-2 border-t border-offbase">
                                   <p className="text-sm text-muted mb-3">
-                                    You are using an anonymous session. Sign up to save your progress permanently.
+                                    {session?.user?.isAnonymous
+                                      ? (allowAnonymousAuthSessions
+                                          ? 'You are using an anonymous session. Sign up to save your progress permanently.'
+                                          : 'Anonymous sessions are disabled. Please sign in or create an account.')
+                                      : 'No active session. Please sign in or create an account.'}
                                   </p>
                                   <div className="grid grid-cols-2 gap-3">
                                     <Link href="/signin" className="w-full">
@@ -893,6 +892,11 @@ export function SettingsModal({ className = '' }: { className?: string }) {
                                       </Button>
                                     </Link>
                                   </div>
+                                  <Link href="/?redirect=false" className="block mt-3">
+                                    <Button className="w-full justify-center rounded-lg bg-background border border-offbase px-3 py-2 text-sm font-medium text-foreground hover:bg-offbase focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-base transform transition-transform duration-200 ease-in-out hover:scale-[1.02]">
+                                      Back to landing page
+                                    </Button>
+                                  </Link>
                                 </div>
                               )}
                             </div>

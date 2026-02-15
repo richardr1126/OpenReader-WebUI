@@ -113,7 +113,7 @@ export default function HTMLPage() {
       <div className="flex flex-col items-center justify-center min-h-screen">
         <p className="text-red-500 mb-4">{error}</p>
         <Link
-          href="/"
+          href="/app"
           onClick={() => { clearCurrDoc(); }}
           className="inline-flex items-center px-3 py-1 bg-base text-foreground rounded-lg hover:bg-offbase transition-all duration-200 ease-in-out hover:scale-[1.04] hover:text-accent"
         >
@@ -131,7 +131,7 @@ export default function HTMLPage() {
       <Header
         left={
           <Link
-            href="/"
+            href="/app"
             onClick={() => clearCurrDoc()}
             className="inline-flex items-center py-1 px-2 rounded-md border border-offbase bg-base text-foreground text-xs hover:bg-offbase transition-all duration-200 ease-in-out hover:scale-[1.04] hover:text-accent"
             aria-label="Back to documents"

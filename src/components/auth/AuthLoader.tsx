@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, ReactNode } from 'react';
 import type { BetterFetchError } from 'better-auth/react';
+import { usePathname, useRouter } from 'next/navigation';
 import { useAuthConfig, useAuthRateLimit } from '@/contexts/AuthRateLimitContext';
 import { useAuthSession } from '@/hooks/useAuthSession';
 import { getAuthClient } from '@/lib/auth-client';
@@ -89,30 +90,61 @@ function isRateLimited(info: ErrorInfo | null): boolean {
 }
 
 export function AuthLoader({ children }: { children: ReactNode }) {
-  const { authEnabled, baseUrl } = useAuthConfig();
+  const { authEnabled, baseUrl, allowAnonymousAuthSessions } = useAuthConfig();
   const { refresh: refreshRateLimit } = useAuthRateLimit();
   const { data: session, isPending, error: sessionError, refetch: refetchSession } = useAuthSession();
+  const router = useRouter();
+  const pathname = usePathname();
   const [isAutoLoggingIn, setIsAutoLoggingIn] = useState(false);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
+  const [isRedirecting, setIsRedirecting] = useState(false);
   const [retryNonce, setRetryNonce] = useState(0);
   const attemptedForNullSessionRef = useRef(false);
+  const clearingDisallowedAnonymousRef = useRef(false);
+  const isAuthPage = pathname === '/signin' || pathname === '/signup';
 
   // If the auth base URL changes, re-run the bootstrap logic.
   useEffect(() => {
     attemptedForNullSessionRef.current = false;
     setBootstrapError(null);
-  }, [authEnabled, baseUrl]);
+    setIsRedirecting(false);
+  }, [authEnabled, baseUrl, allowAnonymousAuthSessions, pathname]);
 
   useEffect(() => {
-    // This app does not have a real "signed out" state when auth is enabled.
-    // If we ever observe "no session", we immediately start an anonymous session.
     const checkStatus = async () => {
       if (!authEnabled) return;
       if (isPending) return;
 
       if (session) {
+        if (!allowAnonymousAuthSessions && session.user.isAnonymous) {
+          if (clearingDisallowedAnonymousRef.current) return;
+          clearingDisallowedAnonymousRef.current = true;
+          setIsRedirecting(true);
+          try {
+            const client = getAuthClient(baseUrl);
+            await client.signOut();
+          } catch (err) {
+            console.error('[AuthLoader] failed to clear disallowed anonymous session', err);
+          } finally {
+            clearingDisallowedAnonymousRef.current = false;
+            router.replace('/signin');
+            return;
+          }
+        }
+
+        clearingDisallowedAnonymousRef.current = false;
         attemptedForNullSessionRef.current = false;
         setBootstrapError(null);
+        return;
+      }
+
+      if (!allowAnonymousAuthSessions) {
+        setIsAutoLoggingIn(false);
+        setBootstrapError(null);
+        if (!isAuthPage) {
+          setIsRedirecting(true);
+          router.replace('/signin');
+        }
         return;
       }
 
@@ -189,7 +221,18 @@ export function AuthLoader({ children }: { children: ReactNode }) {
     };
 
     checkStatus();
-  }, [session, isPending, authEnabled, baseUrl, refreshRateLimit, refetchSession, retryNonce]);
+  }, [
+    session,
+    isPending,
+    authEnabled,
+    baseUrl,
+    allowAnonymousAuthSessions,
+    refreshRateLimit,
+    refetchSession,
+    retryNonce,
+    isAuthPage,
+    router,
+  ]);
 
   useEffect(() => {
     if (!authEnabled) return;
@@ -198,10 +241,16 @@ export function AuthLoader({ children }: { children: ReactNode }) {
     }
   }, [authEnabled, sessionError]);
 
-  // Show loader if:
-  // 1. Auth client is initializing (isPending) AND auth is enabled
-  // 2. We are actively creating an anonymous session
-  const isLoading = authEnabled && (isPending || isAutoLoggingIn || !session);
+  const shouldBlockForProtectedNoSession =
+    authEnabled && !allowAnonymousAuthSessions && !isAuthPage && !session;
+  const shouldBlockForDisallowedAnonymous =
+    authEnabled && !allowAnonymousAuthSessions && Boolean(session?.user?.isAnonymous);
+  const isLoading = authEnabled && (
+    (allowAnonymousAuthSessions && (isPending || isAutoLoggingIn || !session)) ||
+    (!allowAnonymousAuthSessions && !isAuthPage && (
+      isPending || isRedirecting || shouldBlockForProtectedNoSession || shouldBlockForDisallowedAnonymous
+    ))
+  );
 
   if (isLoading) {
     return (

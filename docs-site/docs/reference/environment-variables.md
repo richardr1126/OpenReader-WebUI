@@ -28,6 +28,7 @@ This is the single reference page for OpenReader WebUI environment variables.
 | `BASE_URL` | Auth | unset | Required (with `AUTH_SECRET`) to enable auth |
 | `AUTH_SECRET` | Auth | unset | Required (with `BASE_URL`) to enable auth |
 | `AUTH_TRUSTED_ORIGINS` | Auth | empty | Add extra allowed origins |
+| `USE_ANONYMOUS_AUTH_SESSIONS` | Auth | `false` | Set `true` to enable anonymous auth sessions |
 | `GITHUB_CLIENT_ID` | Auth/OAuth | unset | Set with `GITHUB_CLIENT_SECRET` to enable GitHub sign-in |
 | `GITHUB_CLIENT_SECRET` | Auth/OAuth | unset | Set with `GITHUB_CLIENT_ID` to enable GitHub sign-in |
 | `DISABLE_AUTH_RATE_LIMIT` | Rate limiting | `false` | Set `true` to disable auth-layer rate limiting |
@@ -199,6 +200,15 @@ Additional allowed origins for auth requests.
 
 - Comma-separated list
 - `BASE_URL` origin is always trusted automatically
+- Related docs: [Auth](../configure/auth)
+
+### USE_ANONYMOUS_AUTH_SESSIONS
+
+Controls whether auth-enabled deployments can create/use anonymous sessions.
+
+- Default: `false` (anonymous sessions disabled)
+- Set `true` to allow anonymous sessions and guest-style flows
+- When `false`, users must sign in or sign up with an account
 - Related docs: [Auth](../configure/auth)
 
 ### GITHUB_CLIENT_ID

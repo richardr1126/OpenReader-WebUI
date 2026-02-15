@@ -1,4 +1,7 @@
+'use client';
+
 import { ReactNode } from 'react';
+import { usePathname } from 'next/navigation';
 
 import { DocumentProvider } from '@/contexts/DocumentContext';
 import { PDFProvider } from '@/contexts/PDFContext';
@@ -16,11 +19,38 @@ interface ProvidersProps {
   children: ReactNode;
   authEnabled: boolean;
   authBaseUrl: string | null;
+  allowAnonymousAuthSessions: boolean;
 }
 
-export function Providers({ children, authEnabled, authBaseUrl }: ProvidersProps) {
+export function Providers({ children, authEnabled, authBaseUrl, allowAnonymousAuthSessions }: ProvidersProps) {
+  const pathname = usePathname();
+  const isAuthPage = pathname === '/signin' || pathname === '/signup';
+
+  if (isAuthPage) {
+    return (
+      <AuthRateLimitProvider
+        authEnabled={authEnabled}
+        authBaseUrl={authBaseUrl}
+        allowAnonymousAuthSessions={allowAnonymousAuthSessions}
+      >
+        <ThemeProvider>
+          <AuthLoader>
+            <>
+              {children}
+              <PrivacyModal authEnabled={authEnabled} />
+            </>
+          </AuthLoader>
+        </ThemeProvider>
+      </AuthRateLimitProvider>
+    );
+  }
+
   return (
-    <AuthRateLimitProvider authEnabled={authEnabled} authBaseUrl={authBaseUrl}>
+    <AuthRateLimitProvider
+      authEnabled={authEnabled}
+      authBaseUrl={authBaseUrl}
+      allowAnonymousAuthSessions={allowAnonymousAuthSessions}
+    >
       <ThemeProvider>
         <AuthLoader>
           <ConfigProvider>

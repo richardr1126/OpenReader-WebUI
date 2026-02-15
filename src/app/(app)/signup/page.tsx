@@ -24,7 +24,7 @@ export default function SignUpPage() {
   // Check if auth is enabled, redirect home if not
   useEffect(() => {
     if (!authEnabled) {
-      router.push('/');
+      router.push('/app');
     }
   }, [router, authEnabled]);
 
@@ -87,7 +87,7 @@ export default function SignUpPage() {
         } else {
           await refreshRateLimit();
           toast.success('Account created successfully!');
-          router.push('/');
+          router.push('/app');
         }
       }
     } catch (err) {

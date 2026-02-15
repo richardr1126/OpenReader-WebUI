@@ -97,7 +97,7 @@ export const createAudiobookChapter = async (
   payload: CreateChapterPayload,
   signal?: AbortSignal
 ): Promise<TTSAudiobookChapter> => {
-  const response = await fetch(`/api/audiobook`, {
+  const response = await fetch(`/api/audiobook/chapter`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

@@ -1,47 +1,39 @@
 'use client';
 
-import dynamic from 'next/dynamic';
-import { usePDF } from '@/contexts/PDFContext';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter } from "next/navigation";
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEPUB } from '@/contexts/EPUBContext';
 import { DocumentSkeleton } from '@/components/DocumentSkeleton';
-import { useTTS } from '@/contexts/TTSContext';
+import { EPUBViewer } from '@/components/views/EPUBViewer';
 import { DocumentSettings } from '@/components/DocumentSettings';
-import { DocumentHeaderMenu } from '@/components/DocumentHeaderMenu';
 import { Header } from '@/components/Header';
+import { useTTS } from "@/contexts/TTSContext";
+import TTSPlayer from '@/components/player/TTSPlayer';
+import { RateLimitPauseButton } from '@/components/player/RateLimitPauseButton';
+import { DocumentHeaderMenu } from '@/components/DocumentHeaderMenu';
 import { AudiobookExportModal } from '@/components/AudiobookExportModal';
 import type { TTSAudiobookChapter } from '@/types/tts';
 import type { AudiobookGenerationSettings } from '@/types/client';
-import TTSPlayer from '@/components/player/TTSPlayer';
-import { RateLimitPauseButton } from '@/components/player/RateLimitPauseButton';
 import { resolveDocumentId } from '@/lib/dexie';
 import { RateLimitBanner } from '@/components/auth/RateLimitBanner';
 import { useAuthRateLimit } from '@/contexts/AuthRateLimitContext';
 
 const canExportAudiobook = process.env.NEXT_PUBLIC_ENABLE_AUDIOBOOK_EXPORT !== 'false';
 
-// Dynamic import for client-side rendering only
-const PDFViewer = dynamic(
-  () => import('@/components/views/PDFViewer').then((module) => module.PDFViewer),
-  {
-    ssr: false,
-    loading: () => <DocumentSkeleton />
-  }
-);
-
-export default function PDFViewerPage() {
+export default function EPUBPage() {
   const { id } = useParams();
   const router = useRouter();
-  const { setCurrentDocument, currDocName, clearCurrDoc, currDocPage, currDocPages, createFullAudioBook: createPDFAudioBook, regenerateChapter: regeneratePDFChapter } = usePDF();
+  const { setCurrentDocument, currDocName, clearCurrDoc, createFullAudioBook: createEPUBAudioBook, regenerateChapter: regenerateEPUBChapter } = useEPUB();
   const { stop } = useTTS();
   const { isAtLimit } = useAuthRateLimit();
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [zoomLevel, setZoomLevel] = useState<number>(100);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isAudiobookModalOpen, setIsAudiobookModalOpen] = useState(false);
   const [containerHeight, setContainerHeight] = useState<string>('auto');
+  const [padPct, setPadPct] = useState<number>(100); // 0..100 (100 = full width, 0 = max padding)
+  const [maxPadPx, setMaxPadPx] = useState<number>(0);
   const inFlightDocIdRef = useRef<string | null>(null);
   const loadedDocIdRef = useRef<string | null>(null);
 
@@ -53,8 +45,7 @@ export default function PDFViewerPage() {
   }, [id]);
 
   const loadDocument = useCallback(async () => {
-    if (!isLoading) return; // Prevent calls when not loading new doc
-    console.log('Loading new document (from page.tsx)');
+    console.log('Loading new epub (from page.tsx)');
     let didRedirect = false;
     let startedLoad = false;
     try {
@@ -65,7 +56,7 @@ export default function PDFViewerPage() {
       const resolved = await resolveDocumentId(id as string);
       if (resolved !== (id as string)) {
         didRedirect = true;
-        router.replace(`/pdf/${resolved}`);
+        router.replace(`/epub/${resolved}`);
         return;
       }
 
@@ -92,11 +83,13 @@ export default function PDFViewerPage() {
         setIsLoading(false);
       }
     }
-  }, [isLoading, id, router, setCurrentDocument, stop]);
+  }, [id, router, setCurrentDocument, stop]);
 
   useEffect(() => {
+    if (!isLoading) return;
+
     loadDocument();
-  }, [loadDocument]);
+  }, [loadDocument, isLoading]);
 
   // Compute available height = viewport - (header height + tts bar height)
   useEffect(() => {
@@ -108,14 +101,25 @@ export default function PDFViewerPage() {
       const vh = window.innerHeight;
       const h = Math.max(0, vh - headerH - ttsH);
       setContainerHeight(`${h}px`);
+
+      // compute max horizontal padding while preserving a minimum readable width,
+      // but still allow some padding on small screens
+      const vw = window.innerWidth;
+      const desiredMin = 640; // target readable min width
+      const minContent = Math.min(desiredMin, Math.max(320, vw - 32));
+      const maxPad = Math.max(0, Math.floor((vw - minContent) / 2));
+      setMaxPadPx(maxPad);
     };
     compute();
     window.addEventListener('resize', compute);
     return () => window.removeEventListener('resize', compute);
   }, []);
 
-  const handleZoomIn = () => setZoomLevel(prev => Math.min(prev + 10, 300));
-  const handleZoomOut = () => setZoomLevel(prev => Math.max(prev - 10, 50));
+  // Nudge EPUB renderer to reflow on horizontal padding changes
+  useEffect(() => {
+    // Some EPUB renderers listen to window resize; emit a synthetic event
+    window.dispatchEvent(new Event('resize'));
+  }, [padPct]);
 
   const handleGenerateAudiobook = useCallback(async (
     onProgress: (progress: number) => void,
@@ -123,8 +127,8 @@ export default function PDFViewerPage() {
     onChapterComplete: (chapter: TTSAudiobookChapter) => void,
     settings: AudiobookGenerationSettings
   ) => {
-    return createPDFAudioBook(onProgress, signal, onChapterComplete, id as string, settings.format, settings);
-  }, [createPDFAudioBook, id]);
+    return createEPUBAudioBook(onProgress, signal, onChapterComplete, id as string, settings.format, settings);
+  }, [createEPUBAudioBook, id]);
 
   const handleRegenerateChapter = useCallback(async (
     chapterIndex: number,
@@ -132,16 +136,16 @@ export default function PDFViewerPage() {
     settings: AudiobookGenerationSettings,
     signal: AbortSignal
   ) => {
-    return regeneratePDFChapter(chapterIndex, bookId, settings.format, signal, settings);
-  }, [regeneratePDFChapter]);
+    return regenerateEPUBChapter(chapterIndex, bookId, settings.format, signal, settings);
+  }, [regenerateEPUBChapter]);
 
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen">
         <p className="text-red-500 mb-4">{error}</p>
         <Link
-          href="/"
-          onClick={() => { clearCurrDoc(); }}
+          href="/app"
+          onClick={() => clearCurrDoc()}
           className="inline-flex items-center px-3 py-1 bg-base text-foreground rounded-lg hover:bg-offbase transition-all duration-200 ease-in-out hover:scale-[1.04] hover:text-accent"
         >
           <svg className="w-4 h-4 mr-2 text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -158,7 +162,7 @@ export default function PDFViewerPage() {
       <Header
         left={
           <Link
-            href="/"
+            href="/app"
             onClick={() => clearCurrDoc()}
             className="inline-flex items-center py-1 px-2 rounded-md border border-offbase bg-base text-foreground text-xs hover:bg-offbase transition-all duration-200 ease-in-out hover:scale-[1.04] hover:text-accent"
             aria-label="Back to documents"
@@ -171,16 +175,16 @@ export default function PDFViewerPage() {
         }
         title={isLoading ? 'Loading…' : (currDocName || '')}
         right={
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             <DocumentHeaderMenu
-              zoomLevel={zoomLevel}
-              onZoomIncrease={handleZoomIn}
-              onZoomDecrease={handleZoomOut}
+              zoomLevel={padPct}
+              onZoomIncrease={() => setPadPct(p => Math.min(p + 10, 100))}
+              onZoomDecrease={() => setPadPct(p => Math.max(p - 10, 0))}
               onOpenSettings={() => setIsSettingsOpen(true)}
               onOpenAudiobook={() => setIsAudiobookModalOpen(true)}
               showAudiobookExport={canExportAudiobook}
-              minZoom={50}
-              maxZoom={300}
+              minZoom={0}
+              maxZoom={100}
             />
           </div>
         }
@@ -192,14 +196,16 @@ export default function PDFViewerPage() {
             <DocumentSkeleton />
           </div>
         ) : (
-          <PDFViewer zoomLevel={zoomLevel} />
+          <div className="h-full w-full" style={{ paddingLeft: `${Math.round(maxPadPx * ((100 - padPct) / 100))}px`, paddingRight: `${Math.round(maxPadPx * ((100 - padPct) / 100))}px` }}>
+            <EPUBViewer className="h-full" />
+          </div>
         )}
       </div>
       {canExportAudiobook && (
         <AudiobookExportModal
           isOpen={isAudiobookModalOpen}
           setIsOpen={setIsAudiobookModalOpen}
-          documentType="pdf"
+          documentType="epub"
           documentId={id as string}
           onGenerateAudiobook={handleGenerateAudiobook}
           onRegenerateChapter={handleRegenerateChapter}
@@ -213,9 +219,9 @@ export default function PDFViewerPage() {
           </div>
         </div>
       ) : (
-        <TTSPlayer currentPage={currDocPage} numPages={currDocPages} />
+        <TTSPlayer />
       )}
-      <DocumentSettings isOpen={isSettingsOpen} setIsOpen={setIsSettingsOpen} />
+      <DocumentSettings epub isOpen={isSettingsOpen} setIsOpen={setIsSettingsOpen} />
     </>
   );
 }

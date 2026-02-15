@@ -39,30 +39,30 @@ function PrivacyModalBody({
         <div>
           <div className="text-xs font-semibold uppercase tracking-wide text-muted">Stored in your browser (IndexedDB)</div>
           <ul className="mt-2 list-disc space-y-1 pl-5">
-            <li>Uploaded documents (local library)</li>
-            <li>Reading progress (last location)</li>
-            <li>App settings (voice/speed/provider/base URL)</li>
-            <li>Privacy notice acceptance</li>
+            <li>Document and preview cache</li>
+            <li>Settings + privacy acceptance</li>
+            <li>Reading progress (local fallback)</li>
           </ul>
         </div>
 
         <div>
           <div className="text-xs font-semibold uppercase tracking-wide text-muted">Sent to this service</div>
           <ul className="mt-2 list-disc space-y-1 pl-5">
-            <li>Text for audio generation and associated metadata</li>
-            <li>Standard request metadata (e.g. IP address, user agent)</li>
-            <li>Text is forwarded to a TTS provider (Deepinfra) to generate audio</li>
-            <li>Some generated audio may be cached server-side to reduce cost/latency</li>
+            <li>Uploaded files + metadata (PDF/EPUB/HTML; DOCX converted server-side)</li>
+            <li>TTS text + settings (optional custom API key/base URL)</li>
+            <li>Request metadata (IP/user agent) and optional alignment audio/text</li>
           </ul>
         </div>
 
         <div>
           <div className="text-xs font-semibold uppercase tracking-wide text-muted">Stored on this service</div>
           <ul className="mt-2 list-disc space-y-1 pl-5">
+            <li>Uploaded docs, metadata, and preview images</li>
+            <li>Generated audiobooks and temporary TTS cache</li>
             {authEnabled ? (
-              <li>Auth users data and IP rate limiting data are stored in the service database</li>
+              <li>Account/session data, synced preferences/progress, and rate-limit counters</li>
             ) : (
-              <li>Authentication is disabled, so no user/session database is used</li>
+              <li>Auth disabled: no account/session tables</li>
             )}
           </ul>
         </div>
@@ -87,33 +87,30 @@ function PrivacyModalBody({
       <div>
         <div className="text-xs font-semibold uppercase tracking-wide text-muted">Stored in your browser (IndexedDB)</div>
         <ul className="mt-2 list-disc space-y-1 pl-5">
-          <li>Uploaded documents (local library)</li>
-          <li>Reading progress (last location)</li>
-          <li>App settings (voice/speed/provider/base URL)</li>
-          <li>Privacy notice acceptance</li>
+          <li>Document and preview cache</li>
+          <li>Settings + privacy acceptance</li>
+          <li>Reading progress (local fallback)</li>
         </ul>
       </div>
 
       <div>
         <div className="text-xs font-semibold uppercase tracking-wide text-muted">Sent to this server</div>
         <ul className="mt-2 list-disc space-y-1 pl-5">
-          <li>Text for audio generation and associated metadata</li>
-          <li>DOCX document upload and conversion only</li>
-          <li>Your IP address and device ID cookie used for rate limiting</li>
-          <li>(Optionally) Generated audio for word-by-word timestamps</li>
-          <li>(Optionally) Your TTS API key so the server can call your TTS provider</li>
+          <li>Uploaded files + metadata (PDF/EPUB/HTML; DOCX converted server-side)</li>
+          <li>TTS text + settings (optional custom API key/base URL)</li>
+          <li>Request metadata (IP/user agent; device ID if rate limiting is enabled) and optional alignment audio/text</li>
         </ul>
       </div>
 
       <div>
         <div className="text-xs font-semibold uppercase tracking-wide text-muted">Stored on this server</div>
         <ul className="mt-2 list-disc space-y-1 pl-5">
-          <li>Documents synced between your browser and this server</li>
-          <li>Generated audiobooks</li>
+          <li>Uploaded docs, metadata, and preview images</li>
+          <li>Generated audiobooks and temporary TTS cache</li>
           {authEnabled ? (
-            <li>Auth users data and IP rate limiting data are stored in the server&apos;s database</li>
+            <li>Account/session data, synced preferences/progress, and rate-limit counters</li>
           ) : (
-            <li>Authentication is disabled on this server, so no server-side user/session database is used</li>
+            <li>Auth disabled: no account/session tables</li>
           )}
         </ul>
       </div>

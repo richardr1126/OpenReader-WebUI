@@ -1,10 +1,15 @@
 import { Page, expect, type TestInfo, type Locator } from '@playwright/test';
 import fs from 'fs';
 import path from 'path';
+import { createHash } from 'crypto';
 
 const DIR = './tests/files/';
 const TTS_MOCK_PATH = path.join(__dirname, 'files', 'sample.mp3');
 let ttsMockBuffer: Buffer | null = null;
+
+function isAuthEnabledForTests() {
+  return Boolean(process.env.AUTH_SECRET && process.env.BASE_URL);
+}
 
 async function ensureTtsRouteMock(page: Page) {
   if (!ttsMockBuffer) {
@@ -28,6 +33,14 @@ async function ensureTtsRouteMock(page: Page) {
 // Small util to safely use filenames inside regex patterns
 function escapeRegExp(input: string) {
   return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function fixturePath(fileName: string) {
+  return path.join(__dirname, 'files', fileName);
+}
+
+function sha256HexOfFile(filePath: string) {
+  return createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
 }
 
 /**
@@ -66,13 +79,15 @@ export async function uploadAndDisplay(page: Page, fileName: string) {
     } catch {
       // ignore
     }
-    const pdfName = fileName.replace(/\.docx$/i, '.pdf');
-    await page.getByRole('link', { name: new RegExp(escapeRegExp(pdfName), 'i') }).click();
+    const expectedId = sha256HexOfFile(fixturePath(fileName));
+    const targetLink = page.locator(`a[href$="/pdf/${expectedId}"]`).first();
+    await expect(targetLink).toBeVisible({ timeout: 15000 });
+    await targetLink.click();
     await page.waitForSelector('.react-pdf__Document', { timeout: 15000 });
     return;
   }
 
-  await page.getByRole('link', { name: new RegExp(escapeRegExp(fileName), 'i') }).click();
+  await page.getByRole('link', { name: new RegExp(escapeRegExp(fileName), 'i') }).first().click();
 
   if (lower.endsWith('.pdf')) {
     await page.waitForSelector('.react-pdf__Document', { timeout: 10000 });
@@ -121,11 +136,35 @@ export async function pauseTTSAndVerify(page: Page) {
  * Common test setup function
  */
 export async function setupTest(page: Page, testInfo?: TestInfo) {
-  if (testInfo) {
+  const namespace = testInfo ? `${testInfo.project.name}-worker${testInfo.workerIndex}` : null;
+  if (namespace) {
     // Isolate server-side storage per Playwright worker to avoid cross-test flake
     // when running with multiple workers (server-first document storage).
-    const namespace = `${testInfo.project.name}-worker${testInfo.workerIndex}`;
     await page.context().setExtraHTTPHeaders({ 'x-openreader-test-namespace': namespace });
+  }
+
+  // In no-auth mode, all tests in a worker share the same server-side unclaimed identity.
+  // Clear docs at setup to avoid cross-test collisions on duplicate filenames.
+  if (!isAuthEnabledForTests()) {
+    const headers = namespace ? { 'x-openreader-test-namespace': namespace } : undefined;
+    let cleared = false;
+    let attempts = 0;
+    while (!cleared && attempts < 3) {
+      attempts += 1;
+      try {
+        const res = await page.request.delete('/api/documents', { ...(headers ? { headers } : {}) });
+        if (res.ok()) {
+          cleared = true;
+          break;
+        }
+      } catch {
+        // retry
+      }
+      await page.waitForTimeout(200);
+    }
+    if (!cleared) {
+      throw new Error('Failed to clear server documents before test setup');
+    }
   }
 
   // Mock the TTS API so tests don't hit the real TTS service.
@@ -136,8 +175,8 @@ export async function setupTest(page: Page, testInfo?: TestInfo) {
   // server routes that require auth don't intermittently 401 during app startup.
   // await ensureAnonymousSession(page);
 
-  // Navigate to the home page before each test
-  await page.goto('/');
+  // Navigate to the protected app home before each test
+  await page.goto('/app');
   await page.waitForLoadState('networkidle');
 
   // AuthLoader may show a full-screen overlay while session is loading.
@@ -216,7 +255,7 @@ export async function dispatchHtml5DragAndDrop(page: Page, source: Locator, targ
 // Assert a document link containing the given filename appears in the list
 export async function expectDocumentListed(page: Page, fileName: string) {
   await expect(
-    page.getByRole('link', { name: new RegExp(escapeRegExp(fileName), 'i') })
+    page.getByRole('link', { name: new RegExp(escapeRegExp(fileName), 'i') }).first()
   ).toBeVisible({ timeout: 10000 });
 }
 
@@ -291,11 +330,9 @@ export async function openSettingsDocumentsTab(page: Page) {
 // Delete all local documents through Settings and close dialogs
 export async function deleteAllLocalDocuments(page: Page) {
   await openSettingsDocumentsTab(page);
-  // When auth is enabled in tests, button label is "Delete  all user docs".
-  // In our tests, auth is enabled and sessions start anonymous, so label is "Delete anonymous docs".
-  await page.getByRole('button', { name: 'Delete anonymous docs' }).click();
+  await page.getByRole('button', { name: /Delete (anonymous docs|all user docs|server docs)/i }).click();
 
-  const heading = page.getByRole('heading', { name: 'Delete Anonymous Docs' });
+  const heading = page.getByRole('heading', { name: /Delete (Anonymous Docs|All User Docs|Server Docs)/i });
   await expect(heading).toBeVisible({ timeout: 10000 });
 
   const confirmBtn = heading.locator('xpath=ancestor::*[@role="dialog"][1]//button[normalize-space()="Delete"]');

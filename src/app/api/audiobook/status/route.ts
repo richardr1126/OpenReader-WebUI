@@ -8,6 +8,7 @@ import { decodeChapterFileName } from '@/lib/server/audiobook';
 import { pruneAudiobookChaptersNotOnDisk } from '@/lib/server/audiobook-prune';
 import { isS3Configured } from '@/lib/server/s3';
 import { getOpenReaderTestNamespace, getUnclaimedUserIdForNamespace } from '@/lib/server/test-namespace';
+import { buildAllowedAudiobookUserIds, pickAudiobookOwner } from '@/lib/server/audiobook-scope';
 import type { AudiobookGenerationSettings } from '@/types/client';
 import type { TTSAudiobookChapter, TTSAudiobookFormat } from '@/types/tts';
 
@@ -74,15 +75,18 @@ export async function GET(request: NextRequest) {
     const { userId, authEnabled } = ctxOrRes;
     const testNamespace = getOpenReaderTestNamespace(request.headers);
     const unclaimedUserId = getUnclaimedUserIdForNamespace(testNamespace);
-    const storageUserId = userId ?? unclaimedUserId;
-    const allowedUserIds = authEnabled ? [storageUserId, unclaimedUserId] : [unclaimedUserId];
-
-    const [existingBook] = await db
+    const { preferredUserId, allowedUserIds } = buildAllowedAudiobookUserIds(authEnabled, userId, unclaimedUserId);
+    const existingBookRows = await db
       .select({ userId: audiobooks.userId })
       .from(audiobooks)
       .where(and(eq(audiobooks.id, bookId), inArray(audiobooks.userId, allowedUserIds)));
+    const existingBookUserId = pickAudiobookOwner(
+      existingBookRows.map((book: { userId: string }) => book.userId),
+      preferredUserId,
+      unclaimedUserId,
+    );
 
-    if (!existingBook) {
+    if (!existingBookUserId) {
       return NextResponse.json({
         chapters: [],
         exists: false,
@@ -92,20 +96,20 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    const objects = await listAudiobookObjects(bookId, existingBook.userId, testNamespace);
+    const objects = await listAudiobookObjects(bookId, existingBookUserId, testNamespace);
     const objectNames = objects.map((object) => object.fileName);
     const chapterObjects = listChapterObjects(objectNames);
 
     await pruneAudiobookChaptersNotOnDisk(
       bookId,
-      existingBook.userId,
+      existingBookUserId,
       chapterObjects.map((chapter) => chapter.index),
     );
 
     const chapterRows = await db
       .select({ chapterIndex: audiobookChapters.chapterIndex, duration: audiobookChapters.duration })
       .from(audiobookChapters)
-      .where(and(eq(audiobookChapters.bookId, bookId), eq(audiobookChapters.userId, existingBook.userId)));
+      .where(and(eq(audiobookChapters.bookId, bookId), eq(audiobookChapters.userId, existingBookUserId)));
     const durationByIndex = new Map<number, number>();
     for (const row of chapterRows) {
       durationByIndex.set(row.chapterIndex, Number(row.duration ?? 0));
@@ -122,7 +126,7 @@ export async function GET(request: NextRequest) {
 
     let settings: AudiobookGenerationSettings | null = null;
     try {
-      settings = JSON.parse((await getAudiobookObjectBuffer(bookId, existingBook.userId, 'audiobook.meta.json', testNamespace)).toString('utf8')) as AudiobookGenerationSettings;
+      settings = JSON.parse((await getAudiobookObjectBuffer(bookId, existingBookUserId, 'audiobook.meta.json', testNamespace)).toString('utf8')) as AudiobookGenerationSettings;
     } catch (error) {
       if (!isMissingBlobError(error)) throw error;
       settings = null;
@@ -132,8 +136,8 @@ export async function GET(request: NextRequest) {
     const exists = chapters.length > 0 || hasComplete || settings !== null;
 
     if (!exists) {
-      await db.delete(audiobookChapters).where(and(eq(audiobookChapters.bookId, bookId), eq(audiobookChapters.userId, existingBook.userId)));
-      await db.delete(audiobooks).where(and(eq(audiobooks.id, bookId), eq(audiobooks.userId, existingBook.userId)));
+      await db.delete(audiobookChapters).where(and(eq(audiobookChapters.bookId, bookId), eq(audiobookChapters.userId, existingBookUserId)));
+      await db.delete(audiobooks).where(and(eq(audiobooks.id, bookId), eq(audiobooks.userId, existingBookUserId)));
       return NextResponse.json({
         chapters: [],
         exists: false,

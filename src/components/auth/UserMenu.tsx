@@ -16,11 +16,8 @@ export function UserMenu({ className = '' }: { className?: string }) {
 
   const handleDisconnectAccount = async () => {
     const client = getAuthClient(baseUrl);
-    // "Sign out" here means: end the email/social session and immediately
-    // start a fresh anonymous session. The app should never be left without a session.
     await client.signOut();
-    // AuthLoader will create the next anonymous session.
-    router.refresh();
+    router.push('/signin');
   };
 
   if (!session || session.user.isAnonymous) {

@@ -16,6 +16,7 @@ interface AuthRateLimitContextType {
   // Auth Config
   authEnabled: boolean;
   authBaseUrl: string | null;
+  allowAnonymousAuthSessions: boolean;
 
   // Rate Limit
   status: RateLimitStatus | null;
@@ -42,8 +43,8 @@ export function useAuthRateLimit(): AuthRateLimitContextType {
 
 // Re-export specific hooks for backward compatibility or convenience if needed
 export function useAuthConfig() {
-  const { authEnabled, authBaseUrl } = useAuthRateLimit();
-  return { authEnabled, baseUrl: authBaseUrl };
+  const { authEnabled, authBaseUrl, allowAnonymousAuthSessions } = useAuthRateLimit();
+  return { authEnabled, baseUrl: authBaseUrl, allowAnonymousAuthSessions };
 }
 
 export function useRateLimit() {
@@ -86,9 +87,15 @@ interface AuthRateLimitProviderProps {
   children: ReactNode;
   authEnabled: boolean;
   authBaseUrl: string | null;
+  allowAnonymousAuthSessions: boolean;
 }
 
-export function AuthRateLimitProvider({ children, authEnabled, authBaseUrl }: AuthRateLimitProviderProps) {
+export function AuthRateLimitProvider({
+  children,
+  authEnabled,
+  authBaseUrl,
+  allowAnonymousAuthSessions,
+}: AuthRateLimitProviderProps) {
   const [status, setStatus] = useState<RateLimitStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -212,6 +219,7 @@ export function AuthRateLimitProvider({ children, authEnabled, authBaseUrl }: Au
   const contextValue: AuthRateLimitContextType = {
     authEnabled,
     authBaseUrl,
+    allowAnonymousAuthSessions,
     status,
     loading,
     error,

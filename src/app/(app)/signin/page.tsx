@@ -29,7 +29,7 @@ function SignInContent() {
   const [rememberMe, setRememberMe] = useState(true);
   const [sessionExpired, setSessionExpired] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { authEnabled, baseUrl } = useAuthConfig();
+  const { authEnabled, baseUrl, allowAnonymousAuthSessions } = useAuthConfig();
   const { refresh: refreshRateLimit } = useAuthRateLimit();
 
   const isAnyLoading = loadingEmail || loadingGithub || loadingAnonymous;
@@ -37,7 +37,7 @@ function SignInContent() {
   // Check if auth is enabled, redirect home if not
   useEffect(() => {
     if (!authEnabled) {
-      router.push('/');
+      router.push('/app');
     }
   }, [router, authEnabled]);
 
@@ -79,7 +79,7 @@ function SignInContent() {
         // Immediately refresh rate-limit status so the banner clears without a full reload.
         // This is especially important when an anonymous user upgrades to an account.
         await refreshRateLimit();
-        router.push('/');
+        router.push('/app');
       }
     } catch (err) {
       console.error('Sign in error:', err);
@@ -95,7 +95,7 @@ function SignInContent() {
       const client = getAuthClient(baseUrl);
       await client.signIn.social({
         provider: 'github',
-        callbackURL: '/'
+        callbackURL: '/app'
       });
     } finally {
       setLoadingGithub(false);
@@ -109,7 +109,7 @@ function SignInContent() {
       const client = getAuthClient(baseUrl);
       await client.signIn.anonymous();
       await refreshRateLimit();
-      router.push('/');
+      router.push('/app');
     } catch (e) {
       console.error('Anonymous sign-in failed:', e);
       setError('Unable to continue anonymously. Please try again.');
@@ -226,17 +226,19 @@ function SignInContent() {
           </Button>
 
           {/* Anonymous */}
-          <Button
-            type="button"
-            disabled={isAnyLoading}
-            onClick={handleAnonymousContinue}
-            className="w-full rounded-lg bg-background py-2 text-sm font-medium text-foreground 
+          {allowAnonymousAuthSessions && (
+            <Button
+              type="button"
+              disabled={isAnyLoading}
+              onClick={handleAnonymousContinue}
+              className="w-full rounded-lg bg-background py-2 text-sm font-medium text-foreground 
                      hover:bg-offbase focus:outline-none focus:ring-2 focus:ring-accent 
                      focus:ring-offset-2 disabled:opacity-50 border border-offbase 
                      transform transition-transform duration-200 hover:scale-[1.02]"
-          >
-            {loadingAnonymous ? <LoadingSpinner className="w-4 h-4 mx-auto" /> : 'Continue anonymously'}
-          </Button>
+            >
+              {loadingAnonymous ? <LoadingSpinner className="w-4 h-4 mx-auto" /> : 'Continue anonymously'}
+            </Button>
+          )}
         </div>
 
         {/* Footer */}

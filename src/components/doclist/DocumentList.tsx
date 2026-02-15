@@ -11,6 +11,7 @@ import { DocumentListItem } from '@/components/doclist/DocumentListItem';
 import { DocumentFolder } from '@/components/doclist/DocumentFolder';
 import { SortControls } from '@/components/doclist/SortControls';
 import { CreateFolderDialog } from '@/components/doclist/CreateFolderDialog';
+import { DocumentListSkeleton } from '@/components/doclist/DocumentListSkeleton';
 import { Button } from '@headlessui/react';
 import { DocumentUploader } from '@/components/DocumentUploader';
 
@@ -285,7 +286,7 @@ export function DocumentList() {
   }, [createFolder]);
 
   if (isPDFLoading || isEPUBLoading || isHTMLLoading) {
-    return <div className="w-full text-center text-muted">Loading documents...</div>;
+    return <DocumentListSkeleton viewMode={viewMode} />;
   }
 
   if (allDocuments.length === 0) {

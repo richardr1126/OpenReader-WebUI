@@ -6,7 +6,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { db } from "@/db";
 import { rateLimiter } from "@/lib/server/rate-limiter";
-import { isAuthEnabled } from "@/lib/server/auth-config";
+import { isAuthEnabled, isAnonymousAuthSessionsEnabled } from "@/lib/server/auth-config";
 import {
   transferUserAudiobooks,
   transferUserDocuments,
@@ -100,75 +100,79 @@ const createAuth = () => betterAuth({
   },
   plugins: [
     nextCookies(), // Enable Next.js cookie handling
-    anonymous({
-      onLinkAccount: async ({ anonymousUser, newUser }) => {
-        try {
-          // Log when anonymous user links to a real account
-          console.log("Anonymous user linked to account:", {
-            anonymousUserId: anonymousUser.user.id,
-            newUserId: newUser.user.id,
-            newUserEmail: newUser.user.email,
-          });
+    ...(isAnonymousAuthSessionsEnabled()
+      ? [
+          anonymous({
+            onLinkAccount: async ({ anonymousUser, newUser }) => {
+              try {
+                // Log when anonymous user links to a real account
+                console.log("Anonymous user linked to account:", {
+                  anonymousUserId: anonymousUser.user.id,
+                  newUserId: newUser.user.id,
+                  newUserEmail: newUser.user.email,
+                });
 
-          // Transfer rate limiting data (TTS char counts) from anonymous user to authenticated user
-          try {
-            await rateLimiter.transferAnonymousUsage(anonymousUser.user.id, newUser.user.id);
-            console.log(`Successfully transferred rate limit data from anonymous user ${anonymousUser.user.id} to user ${newUser.user.id}`);
-          } catch (error) {
-            console.error("Error transferring rate limit data during account linking:", error);
-            // Don't throw here to prevent blocking the account linking process
-          }
+                // Transfer rate limiting data (TTS char counts) from anonymous user to authenticated user
+                try {
+                  await rateLimiter.transferAnonymousUsage(anonymousUser.user.id, newUser.user.id);
+                  console.log(`Successfully transferred rate limit data from anonymous user ${anonymousUser.user.id} to user ${newUser.user.id}`);
+                } catch (error) {
+                  console.error("Error transferring rate limit data during account linking:", error);
+                  // Don't throw here to prevent blocking the account linking process
+                }
 
-          // Transfer audiobooks from anonymous user to new authenticated user
-          try {
-            const transferred = await transferUserAudiobooks(anonymousUser.user.id, newUser.user.id);
-            if (transferred > 0) {
-              console.log(`Successfully transferred ${transferred} audiobook(s) from anonymous user ${anonymousUser.user.id} to user ${newUser.user.id}`);
-            }
-          } catch (error) {
-            console.error("Error transferring audiobooks during account linking:", error);
-            // Don't throw here to prevent blocking the account linking process
-          }
+                // Transfer audiobooks from anonymous user to new authenticated user
+                try {
+                  const transferred = await transferUserAudiobooks(anonymousUser.user.id, newUser.user.id);
+                  if (transferred > 0) {
+                    console.log(`Successfully transferred ${transferred} audiobook(s) from anonymous user ${anonymousUser.user.id} to user ${newUser.user.id}`);
+                  }
+                } catch (error) {
+                  console.error("Error transferring audiobooks during account linking:", error);
+                  // Don't throw here to prevent blocking the account linking process
+                }
 
-          // Transfer documents from anonymous user to new authenticated user
-          try {
-            const transferred = await transferUserDocuments(anonymousUser.user.id, newUser.user.id);
-            if (transferred > 0) {
-              console.log(`Successfully transferred ${transferred} document(s) from anonymous user ${anonymousUser.user.id} to user ${newUser.user.id}`);
-            }
-          } catch (error) {
-            console.error("Error transferring documents during account linking:", error);
-            // Don't throw here to prevent blocking the account linking process
-          }
+                // Transfer documents from anonymous user to new authenticated user
+                try {
+                  const transferred = await transferUserDocuments(anonymousUser.user.id, newUser.user.id);
+                  if (transferred > 0) {
+                    console.log(`Successfully transferred ${transferred} document(s) from anonymous user ${anonymousUser.user.id} to user ${newUser.user.id}`);
+                  }
+                } catch (error) {
+                  console.error("Error transferring documents during account linking:", error);
+                  // Don't throw here to prevent blocking the account linking process
+                }
 
-          // Transfer preferences from anonymous user to new authenticated user
-          try {
-            const transferred = await transferUserPreferences(anonymousUser.user.id, newUser.user.id);
-            if (transferred > 0) {
-              console.log(`Successfully transferred preferences from anonymous user ${anonymousUser.user.id} to user ${newUser.user.id}`);
-            }
-          } catch (error) {
-            console.error("Error transferring preferences during account linking:", error);
-            // Don't throw here to prevent blocking the account linking process
-          }
+                // Transfer preferences from anonymous user to new authenticated user
+                try {
+                  const transferred = await transferUserPreferences(anonymousUser.user.id, newUser.user.id);
+                  if (transferred > 0) {
+                    console.log(`Successfully transferred preferences from anonymous user ${anonymousUser.user.id} to user ${newUser.user.id}`);
+                  }
+                } catch (error) {
+                  console.error("Error transferring preferences during account linking:", error);
+                  // Don't throw here to prevent blocking the account linking process
+                }
 
-          // Transfer reading progress from anonymous user to new authenticated user
-          try {
-            const transferred = await transferUserProgress(anonymousUser.user.id, newUser.user.id);
-            if (transferred > 0) {
-              console.log(`Successfully transferred ${transferred} progress row(s) from anonymous user ${anonymousUser.user.id} to user ${newUser.user.id}`);
-            }
-          } catch (error) {
-            console.error("Error transferring reading progress during account linking:", error);
-            // Don't throw here to prevent blocking the account linking process
-          }
-        } catch (error) {
-          console.error("Error in onLinkAccount callback:", error);
-          // Don't throw here to prevent blocking the account linking process
-        }
-        // Note: Anonymous user will be automatically deleted after this callback completes
-      },
-    }),
+                // Transfer reading progress from anonymous user to new authenticated user
+                try {
+                  const transferred = await transferUserProgress(anonymousUser.user.id, newUser.user.id);
+                  if (transferred > 0) {
+                    console.log(`Successfully transferred ${transferred} progress row(s) from anonymous user ${anonymousUser.user.id} to user ${newUser.user.id}`);
+                  }
+                } catch (error) {
+                  console.error("Error transferring reading progress during account linking:", error);
+                  // Don't throw here to prevent blocking the account linking process
+                }
+              } catch (error) {
+                console.error("Error in onLinkAccount callback:", error);
+                // Don't throw here to prevent blocking the account linking process
+              }
+              // Note: Anonymous user will be automatically deleted after this callback completes
+            },
+          }),
+        ]
+      : []),
   ],
 });
 
