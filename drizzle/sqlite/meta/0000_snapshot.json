@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "a55d11c6-847c-4e19-9a7c-fbc2401df061",
+  "id": "d7c41fe0-7d08-42af-8f53-d95fd35776c2",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "audiobook_chapters": {
@@ -76,6 +76,21 @@
           ],
           "columnsTo": [
             "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "audiobook_chapters_book_id_user_id_audiobooks_id_user_id_fk": {
+          "name": "audiobook_chapters_book_id_user_id_audiobooks_id_user_id_fk",
+          "tableFrom": "audiobook_chapters",
+          "tableTo": "audiobooks",
+          "columnsFrom": [
+            "book_id",
+            "user_id"
+          ],
+          "columnsTo": [
+            "id",
+            "user_id"
           ],
           "onDelete": "cascade",
           "onUpdate": "no action"

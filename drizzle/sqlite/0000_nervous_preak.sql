@@ -8,7 +8,8 @@ CREATE TABLE `audiobook_chapters` (
 	`file_path` text NOT NULL,
 	`format` text NOT NULL,
 	PRIMARY KEY(`id`, `user_id`),
-	FOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade
+	FOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`book_id`,`user_id`) REFERENCES `audiobooks`(`id`,`user_id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
 CREATE TABLE `audiobooks` (

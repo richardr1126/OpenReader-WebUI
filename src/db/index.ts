@@ -1,5 +1,6 @@
 import { drizzle as drizzlePg } from 'drizzle-orm/node-postgres';
 import { drizzle as drizzleSqlite } from 'drizzle-orm/better-sqlite3';
+import { sql } from 'drizzle-orm';
 import { Pool } from 'pg';
 import Database from 'better-sqlite3';
 import path from 'path';
@@ -8,13 +9,53 @@ import * as schema from './schema';
 import * as authSchemaSqlite from './schema_auth_sqlite';
 import * as authSchemaPostgres from './schema_auth_postgres';
 
+const UNCLAIMED_USER_ID = 'unclaimed';
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let dbInstance: any = null;
+let dbIsPostgres = false;
+
+/** Track which system user IDs we have already ensured exist this process. */
+const seededUserIds = new Set<string>();
+
+/**
+ * Ensure a system/placeholder user row exists in the user table for `userId`.
+ * All user-facing tables now have userId foreign keys with ON DELETE CASCADE
+ * referencing the user table. When auth is disabled the app stores data under
+ * the 'unclaimed' userId (and namespace variants like 'unclaimed::ns'), so
+ * those rows must exist before any data can be inserted.
+ *
+ * This is safe to call repeatedly — it short-circuits via an in-memory Set
+ * and uses INSERT … ON CONFLICT/OR IGNORE at the SQL level.
+ */
+export function ensureSystemUserExists(userId: string) {
+  if (seededUserIds.has(userId)) return;
+  const drizzleDb = getDrizzleDB();
+  try {
+    if (dbIsPostgres) {
+      drizzleDb.execute(sql`
+        INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at, is_anonymous)
+        VALUES (${userId}, 'System User', ${userId + '@local'}, false, now(), now(), false)
+        ON CONFLICT (id) DO NOTHING
+      `).catch(() => { /* table may not exist yet */ });
+    } else {
+      drizzleDb.run(sql`
+        INSERT OR IGNORE INTO user (id, name, email, email_verified, created_at, updated_at, is_anonymous)
+        VALUES (${userId}, 'System User', ${userId + '@local'}, 0, ${Date.now()}, ${Date.now()}, 0)
+      `);
+    }
+    seededUserIds.add(userId);
+  } catch {
+    // Silently ignore – the user table may not exist yet on first boot before migrations run.
+  }
+}
 
 function getDrizzleDB() {
   if (dbInstance) return dbInstance;
 
-  if (process.env.POSTGRES_URL) {
+  dbIsPostgres = !!process.env.POSTGRES_URL;
+
+  if (dbIsPostgres) {
     const pool = new Pool({
       connectionString: process.env.POSTGRES_URL,
     });
@@ -30,6 +71,8 @@ function getDrizzleDB() {
     dbInstance = drizzleSqlite(sqlite, { schema: { ...schema, ...authSchemaSqlite } });
   }
 
+  ensureSystemUserExists(UNCLAIMED_USER_ID);
+
   return dbInstance;
 }
 
@@ -44,3 +87,4 @@ export const db: any = new Proxy({} as any, {
     return typeof value === 'function' ? value.bind(instance) : value;
   },
 });
+

@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, real, primaryKey, index } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, real, primaryKey, index, foreignKey } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
 import { user } from './schema_auth_sqlite';
 
@@ -41,6 +41,10 @@ export const audiobookChapters = sqliteTable('audiobook_chapters', {
   format: text('format').notNull(), // mp3, m4b
 }, (table) => ({
   pk: primaryKey({ columns: [table.id, table.userId] }),
+  bookFk: foreignKey({
+    columns: [table.bookId, table.userId],
+    foreignColumns: [audiobooks.id, audiobooks.userId],
+  }).onDelete('cascade'),
 }));
 
 // Auth tables (user, session, account, verification) are managed by Better Auth.

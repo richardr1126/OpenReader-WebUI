@@ -1,4 +1,4 @@
-import { pgTable, text, integer, real, timestamp, date, bigint, primaryKey, index, jsonb } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, real, timestamp, date, bigint, primaryKey, index, jsonb, foreignKey } from 'drizzle-orm/pg-core';
 import { user } from './schema_auth_postgres';
 
 export const documents = pgTable('documents', {
@@ -40,6 +40,10 @@ export const audiobookChapters = pgTable('audiobook_chapters', {
   format: text('format').notNull(), // mp3, m4b
 }, (table) => ({
   pk: primaryKey({ columns: [table.id, table.userId] }),
+  bookFk: foreignKey({
+    columns: [table.bookId, table.userId],
+    foreignColumns: [audiobooks.id, audiobooks.userId],
+  }).onDelete('cascade'),
 }));
 
 // Auth tables (user, session, account, verification) are managed by Better Auth.

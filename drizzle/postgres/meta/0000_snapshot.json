@@ -1,5 +1,5 @@
 {
-  "id": "369ec851-a528-4b18-a4c9-b8ea703283ca",
+  "id": "ad9a34b6-48d9-4e3a-95cd-38941cb2e055",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -69,6 +69,21 @@
           ],
           "columnsTo": [
             "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "audiobook_chapters_book_id_user_id_audiobooks_id_user_id_fk": {
+          "name": "audiobook_chapters_book_id_user_id_audiobooks_id_user_id_fk",
+          "tableFrom": "audiobook_chapters",
+          "tableTo": "audiobooks",
+          "columnsFrom": [
+            "book_id",
+            "user_id"
+          ],
+          "columnsTo": [
+            "id",
+            "user_id"
           ],
           "onDelete": "cascade",
           "onUpdate": "no action"

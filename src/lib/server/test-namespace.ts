@@ -1,5 +1,6 @@
 import path from 'path';
 import { UNCLAIMED_USER_ID } from '@/lib/server/docstore';
+import { ensureSystemUserExists } from '@/db';
 
 const TEST_NAMESPACE_HEADER = 'x-openreader-test-namespace';
 const SAFE_NAMESPACE_REGEX = /^[a-zA-Z0-9._-]{1,128}$/;
@@ -24,7 +25,8 @@ export function applyOpenReaderTestNamespacePath(baseDir: string, namespace: str
 }
 
 export function getUnclaimedUserIdForNamespace(namespace: string | null): string {
-  if (!namespace) return UNCLAIMED_USER_ID;
-  return `${UNCLAIMED_USER_ID}::${namespace}`;
+  const userId = !namespace ? UNCLAIMED_USER_ID : `${UNCLAIMED_USER_ID}::${namespace}`;
+  ensureSystemUserExists(userId);
+  return userId;
 }
 
