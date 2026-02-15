@@ -74,6 +74,12 @@ function getDrizzleDB() {
       fs.mkdirSync(dir, { recursive: true });
     }
     const sqlite = new Database(dbPath);
+    // WAL mode allows concurrent readers + writer without blocking each other.
+    // busy_timeout retries on SQLITE_BUSY instead of failing immediately,
+    // which prevents 500 errors under concurrent API requests (e.g. multiple
+    // Playwright browser projects hitting the server simultaneously).
+    sqlite.pragma('journal_mode = WAL');
+    sqlite.pragma('busy_timeout = 5000');
     dbInstance = drizzleSqlite(sqlite, { schema: { ...schema, ...authSchemaSqlite } });
   }
 

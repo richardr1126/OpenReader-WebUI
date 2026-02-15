@@ -134,7 +134,9 @@ export function PrivacyModal({ onAccept, authEnabled = false }: PrivacyModalProp
   }, []);
 
   useEffect(() => {
-    checkPrivacyAccepted();
+    checkPrivacyAccepted().catch((err) => {
+      console.error('Privacy acceptance check failed:', err);
+    });
   }, [checkPrivacyAccepted]);
 
   useEffect(() => {

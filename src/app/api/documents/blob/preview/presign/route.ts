@@ -1,13 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { and, eq, inArray } from 'drizzle-orm';
-import { db } from '@/db';
-import { documents } from '@/db/schema';
-import { requireAuthContext } from '@/lib/server/auth';
-import { isValidDocumentId } from '@/lib/server/documents-blobstore';
 import { presignDocumentPreviewGet } from '@/lib/server/document-previews-blobstore';
-import { ensureDocumentPreview, isPreviewableDocumentType } from '@/lib/server/document-previews';
-import { getOpenReaderTestNamespace, getUnclaimedUserIdForNamespace } from '@/lib/server/test-namespace';
-import { isS3Configured } from '@/lib/server/s3';
+import { ensureDocumentPreview } from '@/lib/server/document-previews';
 import { validatePreviewRequest } from '../utils';
 
 export const dynamic = 'force-dynamic';

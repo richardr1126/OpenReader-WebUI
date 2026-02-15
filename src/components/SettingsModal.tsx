@@ -160,7 +160,9 @@ export function SettingsModal({ className = '' }: { className?: string }) {
   }, [setIsOpen]);
 
   useEffect(() => {
-    checkFirstVist();
+    checkFirstVist().catch((err) => {
+      console.error('First visit check failed:', err);
+    });
     setLocalApiKey(apiKey);
     setLocalBaseUrl(baseUrl);
     setLocalTTSProvider(ttsProvider);
@@ -170,7 +172,9 @@ export function SettingsModal({ className = '' }: { className?: string }) {
 
   useEffect(() => {
     const onPrivacyAccepted = () => {
-      checkFirstVist();
+      checkFirstVist().catch((err) => {
+        console.error('First visit check after privacy acceptance failed:', err);
+      });
     };
     window.addEventListener('openreader:privacyAccepted', onPrivacyAccepted);
     return () => {
