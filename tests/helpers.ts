@@ -174,6 +174,12 @@ export async function setupTest(page: Page, testInfo?: TestInfo) {
     }
   }
 
+  // Disable hover:scale CSS transforms to prevent WebKit "element is not stable"
+  // flakiness on CI. See globals.css for the matching rule.
+  await page.addInitScript(() => {
+    document.documentElement.dataset.playwright = 'true';
+  });
+
   // Mock the TTS API so tests don't hit the real TTS service.
   await ensureTtsRouteMock(page);
 
