@@ -5,12 +5,13 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 import * as schema from './schema';
+import * as authSchemaSqlite from './schema_auth_sqlite';
+import * as authSchemaPostgres from './schema_auth_postgres';
 
-// Singleton logic not strictly needed if Next.js handles module caching, but good for safety
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let dbInstance: any = null;
 
-export function getDrizzleDB() {
+function getDrizzleDB() {
   if (dbInstance) return dbInstance;
 
   if (process.env.POSTGRES_URL) {
@@ -18,7 +19,7 @@ export function getDrizzleDB() {
       connectionString: process.env.POSTGRES_URL,
       ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false,
     });
-    dbInstance = drizzlePg(pool, { schema });
+    dbInstance = drizzlePg(pool, { schema: { ...schema, ...authSchemaPostgres } });
   } else {
     // Fallback to SQLite
     const dbPath = path.join(process.cwd(), 'docstore', 'sqlite3.db');
@@ -27,10 +28,20 @@ export function getDrizzleDB() {
       fs.mkdirSync(dir, { recursive: true });
     }
     const sqlite = new Database(dbPath);
-    dbInstance = drizzleSqlite(sqlite, { schema });
+    dbInstance = drizzleSqlite(sqlite, { schema: { ...schema, ...authSchemaSqlite } });
   }
 
   return dbInstance;
 }
 
-export const db = getDrizzleDB();
+// Lazy proxy: the actual DB connection is only opened on first property access.
+// This prevents side effects (e.g. creating an empty sqlite3.db) when modules
+// import `db` but never use it, such as during Better Auth CLI schema generation.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const db: any = new Proxy({} as any, {
+  get(_target, prop, receiver) {
+    const instance = getDrizzleDB();
+    const value = Reflect.get(instance, prop, receiver);
+    return typeof value === 'function' ? value.bind(instance) : value;
+  },
+});

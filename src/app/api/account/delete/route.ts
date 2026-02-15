@@ -1,9 +1,6 @@
 import { headers } from 'next/headers';
 import { NextResponse } from 'next/server';
 import { auth } from '@/lib/server/auth';
-import { db } from '@/db';
-import { user } from '@/db/schema';
-import { eq } from 'drizzle-orm';
 import { isAuthEnabled } from '@/lib/server/auth-config';
 
 export async function DELETE() {
@@ -20,9 +17,11 @@ export async function DELETE() {
   }
 
   try {
-    // Directly delete user from database
-    // Drizzle will handle cascade if configured in foreign keys, but typical cascading happens in DB engine
-    await db.delete(user).where(eq(user.id, session.user.id));
+    // Use Better Auth's built-in deleteUser to handle cascading cleanup
+    await auth.api.deleteUser({
+      headers: await headers(),
+      body: {},
+    });
 
     return NextResponse.json({ success: true });
   } catch (error) {

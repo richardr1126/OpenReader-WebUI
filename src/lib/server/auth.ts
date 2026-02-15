@@ -7,14 +7,14 @@ import type { NextRequest } from 'next/server';
 import { db } from "@/db";
 import { rateLimiter } from "@/lib/server/rate-limiter";
 import { isAuthEnabled, isAnonymousAuthSessionsEnabled } from "@/lib/server/auth-config";
+import * as authSchemaSqlite from "@/db/schema_auth_sqlite";
+import * as authSchemaPostgres from "@/db/schema_auth_postgres";
 import {
   transferUserAudiobooks,
   transferUserDocuments,
   transferUserPreferences,
   transferUserProgress,
 } from "@/lib/server/claim-data";
-
-import * as schema from "@/db/schema"; // Import the dynamic schema
 
 // ...
 
@@ -55,17 +55,13 @@ function envFlagEnabled(name: string, defaultValue: boolean): boolean {
   return defaultValue;
 }
 
+const authSchema = process.env.POSTGRES_URL ? authSchemaPostgres : authSchemaSqlite;
+
 const createAuth = () => betterAuth({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   database: drizzleAdapter(db as any, {
-    provider: process.env.POSTGRES_URL ? "pg" : "sqlite", // Dynamic provider
-    schema: {
-      ...schema,
-      user: schema.user,
-      session: schema.session,
-      account: schema.account,
-      verification: schema.verification,
-    }
+    provider: process.env.POSTGRES_URL ? "pg" : "sqlite",
+    schema: authSchema as Record<string, unknown>,
   }),
   secret: process.env.AUTH_SECRET!,
   baseURL: process.env.BASE_URL!,
@@ -76,6 +72,11 @@ const createAuth = () => betterAuth({
     async sendResetPassword(data) {
       // Send an email to the user with a link to reset their password
       console.log("Password reset requested for:", data.user.email);
+    },
+  },
+  user: {
+    deleteUser: {
+      enabled: true,
     },
   },
   rateLimit: {
