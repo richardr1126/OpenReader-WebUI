@@ -544,7 +544,7 @@ async function collectAudiobookCandidates(audiobooksDir, docstoreDir) {
           if (Number.isInteger(idx) && idx >= 0 && chapterTitle) {
             chapterMetaByIndex.set(idx, chapterTitle);
           }
-        } catch {}
+        } catch { }
       }
 
       const unresolvedSha = [];
@@ -729,6 +729,22 @@ async function migrateDatabaseRows(database, userId, docCandidates, audiobookBoo
     await database.query('UPDATE documents SET file_path = id WHERE file_path <> id');
   }
 
+  // Ensure the user exists to satisfy foreign key constraints (cascade delete)
+  if (!dryRun) {
+    const now = Date.now();
+    if (database.mode === 'sqlite') {
+      await database.query(
+        'INSERT OR IGNORE INTO user (id, name, email, email_verified, created_at, updated_at, is_anonymous) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [userId, 'System User', `${userId}@local`, 0, now, now, 0]
+      );
+    } else {
+      await database.query(
+        "INSERT INTO user (id, name, email, email_verified, created_at, updated_at, is_anonymous) VALUES ($1, $2, $3, $4, to_timestamp($5 / 1000.0), to_timestamp($6 / 1000.0), $7) ON CONFLICT (id) DO NOTHING",
+        [userId, 'System User', `${userId}@local`, false, now, now, false]
+      );
+    }
+  }
+
   const existingDocs = database.mode === 'sqlite'
     ? await database.query('SELECT id FROM documents WHERE user_id = ?', [userId])
     : await database.query('SELECT id FROM documents WHERE user_id = $1', [userId]);
@@ -868,7 +884,7 @@ async function main() {
 
     if (deleteLocal && !dryRun) {
       for (const dirPath of book.sourceDirs) {
-        await fsp.rm(dirPath, { recursive: true, force: true }).catch(() => {});
+        await fsp.rm(dirPath, { recursive: true, force: true }).catch(() => { });
       }
     }
   }

@@ -1,6 +1,6 @@
 'use client';
 
-import { RefObject, useCallback, useState, useEffect, useRef } from 'react';
+import { RefObject, useCallback, useState, useEffect, useRef, useMemo } from 'react';
 import { Document, Page } from 'react-pdf';
 import type { Dest } from 'react-pdf/src/shared/types.js';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
@@ -60,19 +60,16 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
   // IMPORTANT:
   // - pdf.js may transfer/detach ArrayBuffers when sending them to its worker, so we must clone.
   // - react-pdf warns if `file` changes by reference but is deep-equal to the previous value.
-  // Cache a stable `{ data: Uint8Array }` by `currDocId` so reloading the same PDF with
-  // identical bytes doesn't create a new `file` object and trigger the warning.
-  const fileCacheRef = useRef<Map<string, { data: Uint8Array }>>(new Map());
-
-  if (currDocId && currDocData && !fileCacheRef.current.has(currDocId)) {
+  // We use useMemo to create a stable file object that only changes when currDocId or currDocData changes.
+  const documentFile = useMemo(() => {
+    if (!currDocId || !currDocData) return undefined;
     try {
-      fileCacheRef.current.set(currDocId, { data: new Uint8Array(currDocData.slice(0)) });
+      return { data: new Uint8Array(currDocData.slice(0)) };
     } catch (e) {
       console.error('Failed to prepare PDF data for viewer:', e);
+      return undefined;
     }
-  }
-
-  const documentFile = currDocId ? fileCacheRef.current.get(currDocId) : undefined;
+  }, [currDocId, currDocData]);
 
   const layoutKey = `${zoomLevel}:${containerWidth}:${containerHeight}:${viewType}:${currDocPage}`;
 
@@ -251,7 +248,7 @@ export function PDFViewer({ zoomLevel }: PDFViewerProps) {
   const [pageHeight, setPageHeight] = useState<number>(842); // default A4 height
 
   // Calculate which pages to show based on viewType
-  const leftPage = viewType === 'dual' 
+  const leftPage = viewType === 'dual'
     ? (currDocPage % 2 === 0 ? currDocPage - 1 : currDocPage)
     : currDocPage;
   const rightPage = viewType === 'dual'

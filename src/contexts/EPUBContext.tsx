@@ -230,12 +230,14 @@ export function EPUBProvider({ children }: { children: ReactNode }) {
     try {
       const meta = await getDocumentMetadata(id);
       if (!meta) {
+        clearCurrDoc();
         console.error('Document not found on server');
         return;
       }
 
       const doc = await ensureCachedDocument(meta);
       if (doc.type !== 'epub') {
+        clearCurrDoc();
         console.error('Document is not an EPUB');
         return;
       }

@@ -115,7 +115,7 @@ function parseCommandFromArgs(argv) {
 }
 
 function forwardChildStream(stream, target) {
-  if (!stream) return () => {};
+  if (!stream) return () => { };
   const onData = (chunk) => {
     target.write(chunk);
   };
@@ -136,11 +136,16 @@ async function waitForEndpoint(url, timeoutSeconds) {
   const deadline = Date.now() + waitMs;
 
   while (Date.now() < deadline) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 2000);
+
     try {
-      const res = await fetch(url, { method: 'GET' });
+      const res = await fetch(url, { method: 'GET', signal: controller.signal });
       if (res) return;
     } catch {
       // retry
+    } finally {
+      clearTimeout(timeoutId);
     }
     await delay(1000);
   }
@@ -293,8 +298,8 @@ async function main() {
   let weedExitPromise = Promise.resolve();
   let appProc = null;
   let shutdownPromise = null;
-  let stopWeedStdoutForward = () => {};
-  let stopWeedStderrForward = () => {};
+  let stopWeedStdoutForward = () => { };
+  let stopWeedStderrForward = () => { };
   let didExit = false;
 
   const exitOnce = (code) => {

@@ -119,17 +119,17 @@ export function AuthLoader({ children }: { children: ReactNode }) {
         if (!allowAnonymousAuthSessions && session.user.isAnonymous) {
           if (clearingDisallowedAnonymousRef.current) return;
           clearingDisallowedAnonymousRef.current = true;
-          setIsRedirecting(true);
           try {
+            setIsRedirecting(true);
             const client = getAuthClient(baseUrl);
             await client.signOut();
           } catch (err) {
             console.error('[AuthLoader] failed to clear disallowed anonymous session', err);
           } finally {
             clearingDisallowedAnonymousRef.current = false;
-            router.replace('/signin');
-            return;
           }
+          router.replace('/signin');
+          return;
         }
 
         clearingDisallowedAnonymousRef.current = false;
