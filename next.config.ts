@@ -6,7 +6,7 @@ const nextConfig: NextConfig = {
       canvas: '@napi-rs/canvas',
     },
   },
-  serverExternalPackages: ["@napi-rs/canvas", "better-sqlite3", "ffmpeg-static"],
+  serverExternalPackages: ["@napi-rs/canvas", "ffmpeg-static"],
   outputFileTracingIncludes: {
     '/api/audiobook': [
       './node_modules/ffmpeg-static/ffmpeg',
