@@ -352,9 +352,7 @@ async function main() {
       runtimeEnv.AWS_ACCESS_KEY_ID = runtimeEnv.S3_ACCESS_KEY_ID;
       runtimeEnv.AWS_SECRET_ACCESS_KEY = runtimeEnv.S3_SECRET_ACCESS_KEY;
 
-      if (!runtimeEnv.S3_ACCESS_KEY_ID || !runtimeEnv.S3_SECRET_ACCESS_KEY) {
-        throw new Error('Failed to initialize embedded S3 credentials.');
-      }
+
 
       fs.mkdirSync(runtimeEnv.WEED_MINI_DIR, { recursive: true });
 

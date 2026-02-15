@@ -58,7 +58,7 @@ export async function GET(req: NextRequest) {
     const isAnonymous = Boolean(session.user.isAnonymous);
 
     const ip = getClientIp(req);
-    const device = isAnonymous && ttsRateLimitEnabled ? getOrCreateDeviceId(req) : null;
+    const device = isTtsRateLimitEnabled() ? (isAnonymous ? getOrCreateDeviceId(req) : null) : null;
 
     const result = await rateLimiter.getCurrentUsage(
       {

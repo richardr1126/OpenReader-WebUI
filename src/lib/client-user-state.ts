@@ -56,30 +56,69 @@ export async function putUserPreferences(
 type PendingPreferenceSync = {
   patch: SyncedPreferencesPatch;
   timer: ReturnType<typeof setTimeout> | null;
+  sessionId: string | null;
 };
 
 const pendingPreferenceSync: PendingPreferenceSync = {
   patch: {},
   timer: null,
+  sessionId: null,
 };
 
-export function scheduleUserPreferencesSync(patch: SyncedPreferencesPatch, debounceMs: number = 600): void {
+let activeSyncController: AbortController | null = null;
+
+/**
+ * Cancel any pending debounced preference sync and abort in-flight requests.
+ * Call this on session change / sign-out to prevent cross-account writes.
+ */
+export function cancelPendingPreferenceSync(): void {
+  if (pendingPreferenceSync.timer) {
+    clearTimeout(pendingPreferenceSync.timer);
+    pendingPreferenceSync.timer = null;
+  }
+  pendingPreferenceSync.patch = {};
+  pendingPreferenceSync.sessionId = null;
+
+  if (activeSyncController) {
+    activeSyncController.abort();
+    activeSyncController = null;
+  }
+}
+
+export function scheduleUserPreferencesSync(
+  patch: SyncedPreferencesPatch,
+  sessionId: string,
+  debounceMs: number = 600,
+): void {
   Object.assign(pendingPreferenceSync.patch, sanitizePreferencesPatch(patch));
+  pendingPreferenceSync.sessionId = sessionId;
 
   if (pendingPreferenceSync.timer) {
     clearTimeout(pendingPreferenceSync.timer);
   }
 
+  const capturedSessionId = sessionId;
+
   pendingPreferenceSync.timer = setTimeout(async () => {
+    // If the session changed between scheduling and firing, discard.
+    if (pendingPreferenceSync.sessionId !== capturedSessionId) return;
+
     const payload = { ...pendingPreferenceSync.patch };
     pendingPreferenceSync.patch = {};
     pendingPreferenceSync.timer = null;
     if (Object.keys(payload).length === 0) return;
 
+    // Abort any previous in-flight sync and create a fresh controller.
+    if (activeSyncController) activeSyncController.abort();
+    activeSyncController = new AbortController();
+
     try {
-      await putUserPreferences(payload);
+      await putUserPreferences(payload, { signal: activeSyncController.signal });
     } catch (error) {
+      if ((error as Error)?.name === 'AbortError') return;
       console.warn('Failed to sync user preferences:', error);
+    } finally {
+      activeSyncController = null;
     }
   }, debounceMs);
 }

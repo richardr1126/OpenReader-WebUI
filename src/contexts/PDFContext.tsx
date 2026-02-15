@@ -156,6 +156,10 @@ export function PDFProvider({ children }: { children: ReactNode }) {
   const loadSeqRef = useRef(0);
   const emptyRetryRef = useRef<{ page: number; attempt: number; timer: ReturnType<typeof setTimeout> | null } | null>(null);
 
+  // Guards for setCurrentDocument to prevent stale loads from overwriting newer selections.
+  const docLoadSeqRef = useRef(0);
+  const docLoadAbortRef = useRef<AbortController | null>(null);
+
   useEffect(() => {
     pdfDocumentRef.current = pdfDocument;
   }, [pdfDocument]);
@@ -317,6 +321,12 @@ export function PDFProvider({ children }: { children: ReactNode }) {
    * @returns {Promise<void>}
    */
   const setCurrentDocument = useCallback(async (id: string): Promise<void> => {
+    // --- race-condition guard ---
+    const seq = ++docLoadSeqRef.current;
+    docLoadAbortRef.current?.abort();
+    const controller = new AbortController();
+    docLoadAbortRef.current = controller;
+
     try {
       // Reset any state tied to the previously loaded PDF. This prevents calling
       // `getPage()` on a stale/destroyed PDFDocumentProxy after login redirects
@@ -335,13 +345,15 @@ export function PDFProvider({ children }: { children: ReactNode }) {
       setCurrDocName(undefined);
       setCurrDocData(undefined);
 
-      const meta = await getDocumentMetadata(id);
+      const meta = await getDocumentMetadata(id, { signal: controller.signal });
+      if (seq !== docLoadSeqRef.current) return; // stale
       if (!meta) {
         console.error('Document not found on server');
         return;
       }
 
-      const doc = await ensureCachedDocument(meta);
+      const doc = await ensureCachedDocument(meta, { signal: controller.signal });
+      if (seq !== docLoadSeqRef.current) return; // stale
       if (doc.type !== 'pdf') {
         console.error('Document is not a PDF');
         return;
@@ -352,7 +364,13 @@ export function PDFProvider({ children }: { children: ReactNode }) {
       // buffer passed into the worker; we always pass clones to react-pdf.
       setCurrDocData(doc.data.slice(0));
     } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return;
       console.error('Failed to get document:', error);
+    } finally {
+      // Clean up the controller only if it's still ours (a newer call hasn't replaced it).
+      if (docLoadAbortRef.current === controller) {
+        docLoadAbortRef.current = null;
+      }
     }
   }, [setCurrDocId, setCurrDocName, setCurrDocData, setCurrDocPages, setCurrDocText, setPdfDocument]);
 
@@ -364,6 +382,10 @@ export function PDFProvider({ children }: { children: ReactNode }) {
     pdfDocGenerationRef.current += 1;
     pdfDocumentRef.current = undefined;
     loadSeqRef.current += 1;
+    // Invalidate any in-flight setCurrentDocument load.
+    docLoadSeqRef.current += 1;
+    docLoadAbortRef.current?.abort();
+    docLoadAbortRef.current = null;
     if (emptyRetryRef.current?.timer) {
       clearTimeout(emptyRetryRef.current.timer);
     }

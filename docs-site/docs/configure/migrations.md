@@ -76,20 +76,34 @@ pnpm exec drizzle-kit migrate --config drizzle.config.pg.ts
 
 ## Generate migrations
 
-`pnpm generate` creates migration files for both configs in one run:
+`pnpm generate` is a two-phase script for contributors and schema changes:
 
-- `drizzle.config.sqlite.ts`
-- `drizzle.config.pg.ts`
+1. **Better Auth schema generation** — runs the Better Auth CLI twice (once for SQLite, once for Postgres) to produce auto-generated Drizzle schema files for auth tables (`user`, `session`, `account`, `verification`).
+2. **Drizzle migration generation** — runs `drizzle-kit generate` for both `drizzle.config.sqlite.ts` and `drizzle.config.pg.ts`, producing SQL migration files from all schema files (app + auth).
 
 :::note
 Most users do not need to run `pnpm generate`. Use it when contributing or when you have changed Drizzle schema files and need new migration files.
 :::
 
+### Schema ownership
+
+Auth tables are owned by Better Auth. Their Drizzle schema definitions are auto-generated and should **not** be hand-edited:
+
+- `src/db/schema_auth_sqlite.ts`
+- `src/db/schema_auth_postgres.ts`
+
+App-specific tables are manually maintained in the standard Drizzle schema files:
+
+- `src/db/schema_sqlite.ts`
+- `src/db/schema_postgres.ts`
+
+Both sets of schema files are included in the Drizzle configs, so `drizzle-kit generate` and `drizzle-kit migrate` handle all tables together.
+
 <Tabs groupId="generate-migration-commands">
   <TabItem value="project-script" label="Project Script" default>
 
 ```bash
-# Generate migration files for both SQLite and Postgres outputs
+# Full pipeline: Better Auth CLI + Drizzle generate (both dialects)
 pnpm generate
 ```
 
@@ -97,12 +111,16 @@ pnpm generate
   <TabItem value="drizzle-direct" label="Manual Drizzle Cmd">
 
 ```bash
-# Generate SQLite migrations
+# Generate SQLite migrations only (skips Better Auth CLI)
 pnpm exec drizzle-kit generate --config drizzle.config.sqlite.ts
 
-# Generate Postgres migrations
+# Generate Postgres migrations only (skips Better Auth CLI)
 pnpm exec drizzle-kit generate --config drizzle.config.pg.ts
 ```
+
+:::warning
+Running `drizzle-kit generate` directly skips the Better Auth CLI step. If auth schema has changed upstream (e.g. after a Better Auth version bump), run `pnpm generate` instead to regenerate the auth schema files first.
+:::
 
   </TabItem>
 </Tabs>

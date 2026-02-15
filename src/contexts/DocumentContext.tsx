@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, ReactNode } from 'react';
-import type { BaseDocument, DocumentType } from '@/types/documents';
+import type { BaseDocument } from '@/types/documents';
 import { listDocuments, uploadDocuments, deleteDocuments } from '@/lib/client-documents';
 import { putCachedEpub, putCachedHtml, putCachedPdf, evictCachedEpub, evictCachedHtml, evictCachedPdf } from '@/lib/document-cache';
 import { useAuthSession } from '@/hooks/useAuthSession';
@@ -27,9 +27,7 @@ interface DocumentContextType {
 
   refreshDocuments: () => Promise<void>;
 
-  clearPDFs: () => Promise<void>;
-  clearEPUBs: () => Promise<void>;
-  clearHTML: () => Promise<void>;
+
 }
 
 const DocumentContext = createContext<DocumentContextType | undefined>(undefined);
@@ -118,19 +116,7 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
   const removeEPUBDocument = useCallback(async (id: string) => removeById(id), [removeById]);
   const removeHTMLDocument = useCallback(async (id: string) => removeById(id), [removeById]);
 
-  const clearByType = useCallback(async (type: DocumentType) => {
-    const toDelete = (docs ?? []).filter((d) => d.type === type).map((d) => d.id);
-    if (toDelete.length) {
-      await deleteDocuments({ ids: toDelete });
-    }
-    // Evict cache and update local list
-    await Promise.allSettled(toDelete.map((id) => Promise.all([evictCachedPdf(id), evictCachedEpub(id), evictCachedHtml(id)])));
-    setDocs((prev) => (prev ?? []).filter((d) => d.type !== type));
-  }, [docs]);
-
-  const clearPDFs = useCallback(async () => clearByType('pdf'), [clearByType]);
-  const clearEPUBs = useCallback(async () => clearByType('epub'), [clearByType]);
-  const clearHTML = useCallback(async () => clearByType('html'), [clearByType]);
+  // Removed unused clear functions
 
   return (
     <DocumentContext.Provider value={{
@@ -147,9 +133,7 @@ export function DocumentProvider({ children }: { children: ReactNode }) {
       removeHTMLDocument,
       isHTMLLoading: isLoading,
       refreshDocuments,
-      clearPDFs,
-      clearEPUBs,
-      clearHTML,
+
     }}>
       {children}
     </DocumentContext.Provider>

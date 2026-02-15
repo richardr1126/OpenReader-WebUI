@@ -4,7 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, initDB, migrateLegacyDexieDocumentIdsToSha, updateAppConfig } from '@/lib/dexie';
 import { APP_CONFIG_DEFAULTS, type ViewType, type SavedVoices, type AppConfigValues, type AppConfigRow } from '@/types/config';
-import { scheduleUserPreferencesSync, getUserPreferences, putUserPreferences } from '@/lib/client-user-state';
+import { scheduleUserPreferencesSync, cancelPendingPreferenceSync, getUserPreferences, putUserPreferences } from '@/lib/client-user-state';
 import { SYNCED_PREFERENCE_KEYS, type SyncedPreferenceKey, type SyncedPreferencesPatch } from '@/types/user-state';
 import { useAuthSession } from '@/hooks/useAuthSession';
 import { useAuthConfig } from '@/contexts/AuthRateLimitContext';
@@ -64,7 +64,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   const getVoiceKey = (provider: string, model: string) => `${provider}:${model}`;
 
   const queueSyncedPreferencePatch = useCallback((patch: Partial<AppConfigValues>) => {
-    if (!authEnabled) return;
+    if (!authEnabled || sessionKey === 'no-session') return;
 
     const syncedPatch: SyncedPreferencesPatch = {};
     for (const key of SYNCED_PREFERENCE_KEYS) {
@@ -74,8 +74,15 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
       (syncedPatch as Record<SyncedPreferenceKey, unknown>)[key] = value;
     }
     if (Object.keys(syncedPatch).length === 0) return;
-    scheduleUserPreferencesSync(syncedPatch);
-  }, [authEnabled]);
+    scheduleUserPreferencesSync(syncedPatch, sessionKey);
+  }, [authEnabled, sessionKey]);
+
+  // Cancel pending/in-flight preference syncs whenever the session changes or on unmount.
+  useEffect(() => {
+    return () => {
+      cancelPendingPreferenceSync();
+    };
+  }, [sessionKey]);
 
   const buildSyncedPreferencePatch = useCallback((
     source: Partial<AppConfigValues>,
@@ -152,35 +159,44 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     void run();
   }, [isDBReady]);
 
-  const refreshSyncedPreferencesFromServer = useCallback(async () => {
+  const refreshSyncedPreferencesFromServer = useCallback(async (signal?: AbortSignal) => {
     if (!isDBReady || !authEnabled) return;
     try {
-      const remote = await getUserPreferences();
+      const remote = await getUserPreferences({ signal });
       if (!remote?.hasStoredPreferences) return;
       if (!remote.preferences || Object.keys(remote.preferences).length === 0) return;
       await updateAppConfig(remote.preferences as Partial<AppConfigRow>);
     } catch (error) {
+      if ((error as Error)?.name === 'AbortError') return;
       console.warn('Failed to load synced preferences:', error);
     }
   }, [isDBReady, authEnabled]);
 
   useEffect(() => {
     if (!isDBReady || !authEnabled || isSessionPending) return;
-    refreshSyncedPreferencesFromServer().catch((error) => {
+    const controller = new AbortController();
+    refreshSyncedPreferencesFromServer(controller.signal).catch((error) => {
+      if ((error as Error)?.name === 'AbortError') return;
       console.warn('Synced preferences refresh failed:', error);
     });
+    return () => controller.abort();
   }, [isDBReady, authEnabled, isSessionPending, sessionKey, refreshSyncedPreferencesFromServer]);
 
   useEffect(() => {
     if (!isDBReady || !authEnabled) return;
+    let activeController: AbortController | null = null;
     const onFocus = () => {
-      refreshSyncedPreferencesFromServer().catch((error) => {
+      if (activeController) activeController.abort();
+      activeController = new AbortController();
+      refreshSyncedPreferencesFromServer(activeController.signal).catch((error) => {
+        if ((error as Error)?.name === 'AbortError') return;
         console.warn('Focus synced preferences refresh failed:', error);
       });
     };
     window.addEventListener('focus', onFocus);
     return () => {
       window.removeEventListener('focus', onFocus);
+      if (activeController) activeController.abort();
     };
   }, [isDBReady, authEnabled, refreshSyncedPreferencesFromServer]);
 
@@ -206,9 +222,11 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     if (didAttemptInitialPreferenceSeedForSession.current === sessionKey) return;
     didAttemptInitialPreferenceSeedForSession.current = sessionKey;
 
+    const controller = new AbortController();
+
     const run = async () => {
       try {
-        const remote = await getUserPreferences();
+        const remote = await getUserPreferences({ signal: controller.signal });
         if (remote?.hasStoredPreferences) return;
 
         // Seed only user-customized (non-default) values. This prevents fresh/default
@@ -216,15 +234,19 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
         const patch = buildSyncedPreferencePatch(appConfig, { nonDefaultOnly: true });
         if (Object.keys(patch).length === 0) return;
 
-        await putUserPreferences(patch, { clientUpdatedAtMs: Date.now() });
+        await putUserPreferences(patch, { clientUpdatedAtMs: Date.now(), signal: controller.signal });
       } catch (error) {
+        if ((error as Error)?.name === 'AbortError') return;
         console.warn('Failed to seed initial synced preferences from local Dexie:', error);
       }
     };
 
     run().catch((error) => {
+      if ((error as Error)?.name === 'AbortError') return;
       console.warn('Initial synced preferences seed failed:', error);
     });
+
+    return () => controller.abort();
   }, [isDBReady, authEnabled, appConfig, buildSyncedPreferencePatch, isSessionPending, sessionKey]);
 
   // Destructure for convenience and to match context shape

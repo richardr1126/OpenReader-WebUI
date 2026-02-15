@@ -131,6 +131,7 @@ h1, h2, h3, h4, h5, h6 {
 .pdf-page-stage {
   /* Ensure we always paint something (matches app theme) while react-pdf swaps canvases */
   background: var(--background);
+  position: relative;
 }
 
 .pdf-viewer .react-pdf__Page {
@@ -139,16 +140,13 @@ h1, h2, h3, h4, h5, h6 {
   isolation: isolate;
 }
 
+/* Fade-in the freshly rendered canvas (react-pdf replaces the canvas element). */
 .pdf-viewer .react-pdf__Page canvas {
   display: block;
   background: var(--background);
   /* GPU hint; helps reduce flicker on some browsers */
   transform: translateZ(0);
   backface-visibility: hidden;
-}
-
-/* Fade-in the freshly rendered canvas (react-pdf replaces the canvas element). */
-.pdf-viewer .react-pdf__Page canvas {
   opacity: 0;
   animation: pdf-canvas-fade-in 140ms ease-out forwards;
 }
@@ -163,9 +161,7 @@ h1, h2, h3, h4, h5, h6 {
   display: none !important;
 }
 
-.pdf-page-stage {
-  position: relative;
-}
+
 
 /* App shell utility (fullscreen, vertical layout) */
 .app-shell {

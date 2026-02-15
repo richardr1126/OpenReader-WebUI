@@ -25,22 +25,13 @@ async function checkClaimMigrationReadiness(): Promise<NextResponse | null> {
 async function getClaimableCounts(
   unclaimedUserId: string,
 ): Promise<{ documents: number; audiobooks: number; preferences: number; progress: number }> {
-  const [docCount] = await db
-    .select({ count: count() })
-    .from(documents)
-    .where(eq(documents.userId, unclaimedUserId));
-  const [bookCount] = await db
-    .select({ count: count() })
-    .from(audiobooks)
-    .where(eq(audiobooks.userId, unclaimedUserId));
-  const [preferencesCount] = await db
-    .select({ count: count() })
-    .from(userPreferences)
-    .where(eq(userPreferences.userId, unclaimedUserId));
-  const [progressCount] = await db
-    .select({ count: count() })
-    .from(userDocumentProgress)
-    .where(eq(userDocumentProgress.userId, unclaimedUserId));
+  const [[docCount], [bookCount], [preferencesCount], [progressCount]] =
+    await Promise.all([
+      db.select({ count: count() }).from(documents).where(eq(documents.userId, unclaimedUserId)),
+      db.select({ count: count() }).from(audiobooks).where(eq(audiobooks.userId, unclaimedUserId)),
+      db.select({ count: count() }).from(userPreferences).where(eq(userPreferences.userId, unclaimedUserId)),
+      db.select({ count: count() }).from(userDocumentProgress).where(eq(userDocumentProgress.userId, unclaimedUserId)),
+    ]);
 
   return {
     documents: Number(docCount?.count ?? 0),

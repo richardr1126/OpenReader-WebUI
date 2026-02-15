@@ -136,7 +136,7 @@ export async function GET(request: NextRequest) {
     const exists = chapters.length > 0 || hasComplete || settings !== null;
 
     if (!exists) {
-      await db.delete(audiobookChapters).where(and(eq(audiobookChapters.bookId, bookId), eq(audiobookChapters.userId, existingBookUserId)));
+      // Deleting the audiobook row cascades to audiobookChapters via bookFk
       await db.delete(audiobooks).where(and(eq(audiobooks.id, bookId), eq(audiobooks.userId, existingBookUserId)));
       return NextResponse.json({
         chapters: [],

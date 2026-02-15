@@ -19,7 +19,33 @@ interface DocumentPreviewProps {
   doc: DocumentListDocument;
 }
 
+const MAX_TEXT_PREVIEW_CACHE = 100;
 const textPreviewCache = new Map<string, string>();
+
+/** Read from cache and promote entry to most-recently-used. */
+function textPreviewCacheGet(key: string): string | undefined {
+  const value = textPreviewCache.get(key);
+  if (value !== undefined) {
+    // Re-insert to move to end (most-recently-used)
+    textPreviewCache.delete(key);
+    textPreviewCache.set(key, value);
+  }
+  return value;
+}
+
+/** Write to cache, evicting the least-recently-used entry when over the cap. */
+function textPreviewCacheSet(key: string, value: string): void {
+  // If the key already exists, delete first so re-insertion moves it to the end
+  if (textPreviewCache.has(key)) {
+    textPreviewCache.delete(key);
+  }
+  textPreviewCache.set(key, value);
+  if (textPreviewCache.size > MAX_TEXT_PREVIEW_CACHE) {
+    // Map keys iterate in insertion order; first key is the LRU entry
+    const oldest = textPreviewCache.keys().next().value;
+    if (oldest !== undefined) textPreviewCache.delete(oldest);
+  }
+}
 
 export function DocumentPreview({ doc }: DocumentPreviewProps) {
   const isPDF = doc.type === 'pdf';
@@ -71,7 +97,7 @@ export function DocumentPreview({ doc }: DocumentPreviewProps) {
       return;
     }
 
-    const cachedText = textPreviewCache.get(previewKey);
+    const cachedText = textPreviewCacheGet(previewKey);
     if (cachedText) {
       setTextPreview(cachedText);
       setImagePreview(null);
@@ -154,7 +180,7 @@ export function DocumentPreview({ doc }: DocumentPreviewProps) {
             signal: controller.signal,
           });
           if (cancelled) return;
-          textPreviewCache.set(previewKey, snippet);
+          textPreviewCacheSet(previewKey, snippet);
           setTextPreview(snippet);
           setImagePreview(null);
           return;
@@ -238,7 +264,7 @@ export function DocumentPreview({ doc }: DocumentPreviewProps) {
                 doc.id,
                 Number(doc.lastModified),
                 previewKey,
-              ).catch(() => {});
+              ).catch(() => { });
             }}
           />
           {isImageReady ? <div className="absolute inset-0 bg-gradient-to-t from-black/35 via-black/0 to-black/15" /> : null}

@@ -51,6 +51,10 @@ export default function SignUpPage() {
       setError('Please enter a valid email address');
       return;
     }
+    if (password.length < 8) {
+      setError('Password must be at least 8 characters');
+      return;
+    }
     const { strength } = validatePassword(password);
     if (strength < 3) {
       setError('Password is too weak');

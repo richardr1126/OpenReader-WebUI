@@ -8,8 +8,10 @@ export async function DELETE() {
     return NextResponse.json({ error: 'Authentication disabled' }, { status: 403 });
   }
 
+  const reqHeaders = await headers();
+
   const session = await auth.api.getSession({
-    headers: await headers()
+    headers: reqHeaders
   });
 
   if (!session?.user?.id) {
@@ -19,7 +21,7 @@ export async function DELETE() {
   try {
     // Use Better Auth's built-in deleteUser to handle cascading cleanup
     await auth.api.deleteUser({
-      headers: await headers(),
+      headers: reqHeaders,
       body: {},
     });
 

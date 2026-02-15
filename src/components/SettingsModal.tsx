@@ -296,10 +296,10 @@ export function SettingsModal({ className = '' }: { className?: string }) {
     try {
       if (deleteDocsMode === 'user') {
         await deleteDocuments();
-        await refreshDocuments().catch(() => {});
+        await refreshDocuments().catch(() => { });
       } else if (deleteDocsMode === 'unclaimed') {
         await deleteDocuments({ scope: 'unclaimed' });
-        await refreshDocuments().catch(() => {});
+        await refreshDocuments().catch(() => { });
       }
     } catch (error) {
       console.error('Delete failed:', error);
@@ -366,8 +366,8 @@ export function SettingsModal({ className = '' }: { className?: string }) {
   const userDeleteTitle = authEnabled ? (isAnonymous ? 'Delete Anonymous Docs' : 'Delete All User Docs') : 'Delete Server Docs';
   const userDeleteMessage = authEnabled
     ? (isAnonymous
-        ? 'Are you sure you want to delete all anonymous-session documents? This action cannot be undone.'
-        : 'Are you sure you want to delete all of your documents from the server? This action cannot be undone.')
+      ? 'Are you sure you want to delete all anonymous-session documents? This action cannot be undone.'
+      : 'Are you sure you want to delete all of your documents from the server? This action cannot be undone.')
     : 'Are you sure you want to delete all documents from the server? This action cannot be undone.';
 
   const [unclaimedCounts, setUnclaimedCounts] = useState<{ documents: number; audiobooks: number } | null>(null);
@@ -386,7 +386,7 @@ export function SettingsModal({ className = '' }: { className?: string }) {
           setUnclaimedCounts({ documents: data.documents, audiobooks: data.audiobooks });
         }
       })
-      .catch(() => {});
+      .catch(() => { });
   }, [authEnabled, session?.user]);
 
   return (
@@ -661,7 +661,6 @@ export function SettingsModal({ className = '' }: { className?: string }) {
                               setModelValue('kokoro');
                               setCustomModelInput('');
                               setLocalTTSInstructions('');
-                              setLocalTTSInstructions('');
                             }}
                           >
                             Reset
@@ -876,8 +875,8 @@ export function SettingsModal({ className = '' }: { className?: string }) {
                                   <p className="text-sm text-muted mb-3">
                                     {session?.user?.isAnonymous
                                       ? (allowAnonymousAuthSessions
-                                          ? 'You are using an anonymous session. Sign up to save your progress permanently.'
-                                          : 'Anonymous sessions are disabled. Please sign in or create an account.')
+                                        ? 'You are using an anonymous session. Sign up to save your progress permanently.'
+                                        : 'Anonymous sessions are disabled. Please sign in or create an account.')
                                       : 'No active session. Please sign in or create an account.'}
                                   </p>
                                   <div className="grid grid-cols-2 gap-3">

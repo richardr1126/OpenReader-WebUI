@@ -51,8 +51,6 @@ This is the single reference page for OpenReader WebUI environment variables.
 | `FFMPEG_BIN` | Audio runtime | auto-detected (`ffmpeg-static`) | Override ffmpeg binary path |
 | `FFPROBE_BIN` | Audio runtime | auto-detected (`ffprobe-static`) | Override ffprobe binary path |
 
-## Detailed Reference
-
 ## Client Runtime and Feature Flags
 
 ### NEXT_PUBLIC_NODE_ENV

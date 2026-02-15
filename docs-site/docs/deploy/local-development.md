@@ -15,7 +15,7 @@ npm install -g pnpm
 ```
 
 - A reachable TTS API server
-- [SeaweedFS](https://github.com/seaweedfs/seaweedfs) `weed` binary (required)
+- [SeaweedFS](https://github.com/seaweedfs/seaweedfs) `weed` binary (required unless using external S3 storage)
 
 <Tabs groupId="seaweedfs-install">
   <TabItem value="macos" label="macOS" default>
@@ -93,10 +93,10 @@ Optional:
 For all environment variables, see [Environment Variables](../reference/environment-variables).
 :::
 
-For app/auth behavior, see [Auth](../configure/auth).
-For storage configuration, see [Object / Blob Storage](../configure/object-blob-storage).
-For database mode, see [Database](../configure/database).
-For migration behavior and commands, see [Migrations](../configure/migrations).
+See [Auth](../configure/auth) for app/auth behavior.
+Storage configuration details are in [Object / Blob Storage](../configure/object-blob-storage).
+Refer to [Database](../configure/database) for database modes.
+Learn about migration behavior and commands in [Migrations](../configure/migrations).
 
 4. Run DB migrations.
 

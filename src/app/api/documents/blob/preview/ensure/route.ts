@@ -8,57 +8,15 @@ import { presignDocumentPreviewGet } from '@/lib/server/document-previews-blobst
 import { ensureDocumentPreview, isPreviewableDocumentType } from '@/lib/server/document-previews';
 import { getOpenReaderTestNamespace, getUnclaimedUserIdForNamespace } from '@/lib/server/test-namespace';
 import { isS3Configured } from '@/lib/server/s3';
+import { validatePreviewRequest } from '../utils';
 
 export const dynamic = 'force-dynamic';
 
-function s3NotConfiguredResponse(): NextResponse {
-  return NextResponse.json(
-    { error: 'Documents storage is not configured. Set S3_* environment variables.' },
-    { status: 503 },
-  );
-}
-
 export async function GET(req: NextRequest) {
   try {
-    if (!isS3Configured()) return s3NotConfiguredResponse();
-
-    const ctxOrRes = await requireAuthContext(req);
-    if (ctxOrRes instanceof Response) return ctxOrRes;
-
-    const testNamespace = getOpenReaderTestNamespace(req.headers);
-    const unclaimedUserId = getUnclaimedUserIdForNamespace(testNamespace);
-    const storageUserId = ctxOrRes.userId ?? unclaimedUserId;
-    const allowedUserIds = ctxOrRes.authEnabled ? [storageUserId, unclaimedUserId] : [unclaimedUserId];
-
-    const url = new URL(req.url);
-    const id = (url.searchParams.get('id') || '').trim().toLowerCase();
-    if (!isValidDocumentId(id)) {
-      return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
-    }
-
-    const rows = (await db
-      .select({
-        id: documents.id,
-        userId: documents.userId,
-        type: documents.type,
-        lastModified: documents.lastModified,
-      })
-      .from(documents)
-      .where(and(eq(documents.id, id), inArray(documents.userId, allowedUserIds)))) as Array<{
-      id: string;
-      userId: string;
-      type: string;
-      lastModified: number;
-    }>;
-
-    const doc = rows.find((row) => row.userId === storageUserId) ?? rows[0];
-    if (!doc) {
-      return NextResponse.json({ error: 'Not found' }, { status: 404 });
-    }
-
-    if (!isPreviewableDocumentType(doc.type)) {
-      return NextResponse.json({ error: `Preview not supported for type ${doc.type}` }, { status: 415 });
-    }
+    const validation = await validatePreviewRequest(req);
+    if (validation.errorResponse) return validation.errorResponse;
+    const { doc, testNamespace, id } = validation;
 
     const presignUrl = `/api/documents/blob/preview/presign?id=${encodeURIComponent(id)}`;
     const fallbackUrl = `/api/documents/blob/preview/fallback?id=${encodeURIComponent(id)}`;

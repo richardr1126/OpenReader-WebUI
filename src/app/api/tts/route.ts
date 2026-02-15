@@ -13,6 +13,12 @@ import { isAuthEnabled } from '@/lib/server/auth-config';
 import { getClientIp } from '@/lib/server/request-ip';
 import { getOrCreateDeviceId, setDeviceIdCookie } from '@/lib/server/device-id';
 
+function attachDeviceIdCookie(response: NextResponse, deviceId: string | null, didCreate: boolean) {
+  if (didCreate && deviceId) {
+    setDeviceIdCookie(response, deviceId);
+  }
+}
+
 type CustomVoice = string;
 type ExtendedSpeechParams = Omit<SpeechCreateParams, 'voice'> & {
   voice: SpeechCreateParams['voice'] | CustomVoice;
@@ -210,9 +216,7 @@ export async function POST(req: NextRequest) {
             },
           });
 
-          if (didCreateDeviceIdCookie && deviceIdToSet) {
-            setDeviceIdCookie(response, deviceIdToSet);
-          }
+          attachDeviceIdCookie(response, deviceIdToSet, didCreateDeviceIdCookie);
 
           return response;
         }
@@ -286,9 +290,7 @@ export async function POST(req: NextRequest) {
           }
         });
 
-        if (didCreateDeviceIdCookie && deviceIdToSet) {
-          setDeviceIdCookie(response, deviceIdToSet);
-        }
+        attachDeviceIdCookie(response, deviceIdToSet, didCreateDeviceIdCookie);
 
         return response;
       }
@@ -304,9 +306,7 @@ export async function POST(req: NextRequest) {
         }
       });
 
-      if (didCreateDeviceIdCookie && deviceIdToSet) {
-        setDeviceIdCookie(response, deviceIdToSet);
-      }
+      attachDeviceIdCookie(response, deviceIdToSet, didCreateDeviceIdCookie);
 
       return response;
     }
@@ -338,9 +338,7 @@ export async function POST(req: NextRequest) {
           }
         });
 
-        if (didCreateDeviceIdCookie && deviceIdToSet) {
-          setDeviceIdCookie(response, deviceIdToSet);
-        }
+        attachDeviceIdCookie(response, deviceIdToSet, didCreateDeviceIdCookie);
 
         return response;
       } finally {
@@ -392,9 +390,7 @@ export async function POST(req: NextRequest) {
       }
     });
 
-    if (didCreateDeviceIdCookie && deviceIdToSet) {
-      setDeviceIdCookie(response, deviceIdToSet);
-    }
+    attachDeviceIdCookie(response, deviceIdToSet, didCreateDeviceIdCookie);
 
     return response;
   } catch (error) {

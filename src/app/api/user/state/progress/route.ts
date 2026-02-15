@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { db } from '@/db';
 import { userDocumentProgress } from '@/db/schema';
 import type { ReaderType } from '@/types/user-state';
@@ -84,12 +84,12 @@ export async function PUT(req: NextRequest) {
 
     const body = (await req.json().catch(() => null)) as
       | {
-          documentId?: unknown;
-          readerType?: unknown;
-          location?: unknown;
-          progress?: unknown;
-          clientUpdatedAtMs?: unknown;
-        }
+        documentId?: unknown;
+        readerType?: unknown;
+        location?: unknown;
+        progress?: unknown;
+        clientUpdatedAtMs?: unknown;
+      }
       | null;
 
     const documentId = typeof body?.documentId === 'string' ? body.documentId.trim().toLowerCase() : '';
@@ -111,8 +111,8 @@ export async function PUT(req: NextRequest) {
       body?.progress == null
         ? null
         : Number.isFinite(body.progress)
-        ? Math.max(0, Math.min(1, Number(body.progress)))
-        : null;
+          ? Math.max(0, Math.min(1, Number(body.progress)))
+          : null;
     const clientUpdatedAtMs = normalizeClientUpdatedAtMs(body?.clientUpdatedAtMs);
 
     const existingRows = await db
@@ -167,6 +167,7 @@ export async function PUT(req: NextRequest) {
           clientUpdatedAtMs,
           updatedAt,
         },
+        setWhere: sql`${userDocumentProgress.clientUpdatedAtMs} <= ${clientUpdatedAtMs}`,
       });
 
     return NextResponse.json({

@@ -86,7 +86,7 @@ export function DexieMigrationModal() {
     return () => window.removeEventListener('openreader:privacyAccepted', handler as EventListener);
   }, [checkAndMaybePrompt]);
 
-  const title = useMemo(() => `Upload your local documents?`, []);
+  const title = 'Upload your local documents?';
 
   const handleSkip = useCallback(async () => {
     await updateAppConfig({ documentsMigrationPrompted: true });
@@ -124,7 +124,7 @@ export function DexieMigrationModal() {
           const uploaded = await uploadDocuments([file]);
           const stored = uploaded[0] ?? null;
           if (stored) {
-            await cacheStoredDocumentFromBytes(stored, bytes).catch(() => {});
+            await cacheStoredDocumentFromBytes(stored, bytes).catch(() => { });
           }
         } else if (doc.type === 'epub') {
           const full = epubById.get(doc.id) ?? null;
@@ -137,7 +137,7 @@ export function DexieMigrationModal() {
           const uploaded = await uploadDocuments([file]);
           const stored = uploaded[0] ?? null;
           if (stored) {
-            await cacheStoredDocumentFromBytes(stored, bytes).catch(() => {});
+            await cacheStoredDocumentFromBytes(stored, bytes).catch(() => { });
           }
         } else {
           const full = htmlById.get(doc.id) ?? null;
@@ -150,7 +150,7 @@ export function DexieMigrationModal() {
           const uploaded = await uploadDocuments([file]);
           const stored = uploaded[0] ?? null;
           if (stored) {
-            await cacheStoredDocumentFromBytes(stored, bytes).catch(() => {});
+            await cacheStoredDocumentFromBytes(stored, bytes).catch(() => { });
           }
         }
       }

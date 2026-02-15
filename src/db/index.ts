@@ -33,18 +33,24 @@ export function ensureSystemUserExists(userId: string) {
   const drizzleDb = getDrizzleDB();
   try {
     if (dbIsPostgres) {
+      // Fire-and-forget: Postgres drizzle returns a Promise. We intentionally
+      // don't await (to keep this helper synchronous for SQLite compat), but we
+      // only mark the user as seeded once the insert actually resolves.
       drizzleDb.execute(sql`
         INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at, is_anonymous)
         VALUES (${userId}, 'System User', ${userId + '@local'}, false, now(), now(), false)
         ON CONFLICT (id) DO NOTHING
-      `).catch(() => { /* table may not exist yet */ });
+      `).then(() => {
+        seededUserIds.add(userId);
+      }).catch(() => { /* table may not exist yet */ });
     } else {
+      // better-sqlite3 driver is fully synchronous — no Promise returned.
       drizzleDb.run(sql`
         INSERT OR IGNORE INTO user (id, name, email, email_verified, created_at, updated_at, is_anonymous)
         VALUES (${userId}, 'System User', ${userId + '@local'}, 0, ${Date.now()}, ${Date.now()}, 0)
       `);
+      seededUserIds.add(userId);
     }
-    seededUserIds.add(userId);
   } catch {
     // Silently ignore – the user table may not exist yet on first boot before migrations run.
   }

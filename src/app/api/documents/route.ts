@@ -165,9 +165,9 @@ export async function GET(req: NextRequest) {
     const idsParam = url.searchParams.get('ids');
     const targetIds = idsParam
       ? idsParam
-          .split(',')
-          .map((id) => id.trim().toLowerCase())
-          .filter((id) => isValidDocumentId(id))
+        .split(',')
+        .map((id) => id.trim().toLowerCase())
+        .filter((id) => isValidDocumentId(id))
       : null;
 
     if (idsParam && (!targetIds || targetIds.length === 0)) {
@@ -282,7 +282,7 @@ export async function DELETE(req: NextRequest) {
         await deleteDocumentBlob(id, testNamespace);
       } catch (error) {
         if (!isMissingBlobError(error)) {
-          throw error;
+          console.error(`[best-effort] Failed to delete blob for document ${id}, orphaned blob may need manual cleanup:`, error);
         }
       }
 
