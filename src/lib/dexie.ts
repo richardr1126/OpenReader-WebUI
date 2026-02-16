@@ -5,15 +5,16 @@ import {
   EPUBDocument,
   HTMLDocument,
   DocumentListState,
-  SyncedDocument,
   BaseDocument,
   DocumentListDocument,
 } from '@/types/documents';
 import { sha256HexFromBytes, sha256HexFromString } from '@/lib/sha256';
+import { downloadDocumentContent, listDocuments, uploadDocumentSources, type UploadSource } from '@/lib/client-documents';
+import { cacheStoredDocumentFromBytes } from '@/lib/document-cache';
 
 const DB_NAME = 'openreader-db';
 // Managed via Dexie (version bumped from the original manual IndexedDB)
-const DB_VERSION = 6;
+const DB_VERSION = 8;
 
 const PDF_TABLE = 'pdf-documents' as const;
 const EPUB_TABLE = 'epub-documents' as const;
@@ -22,6 +23,20 @@ const CONFIG_TABLE = 'config' as const;
 const APP_CONFIG_TABLE = 'app-config' as const;
 const LAST_LOCATION_TABLE = 'last-locations' as const;
 const DOCUMENT_ID_MAP_TABLE = 'document-id-map' as const;
+const PREVIEW_CACHE_TABLE = 'document-preview-cache' as const;
+const MIB = 1024 * 1024;
+const DOCUMENT_CACHE_MAX_BYTES = 1024 * MIB; // 1 GiB
+const PREVIEW_CACHE_MAX_BYTES = 128 * MIB; // 128 MiB
+
+interface DocumentCacheMeta {
+  cacheCreatedAt?: number;
+  cacheAccessedAt?: number;
+  cacheByteSize?: number;
+}
+
+type PDFCacheRow = PDFDocument & DocumentCacheMeta;
+type EPUBCacheRow = EPUBDocument & DocumentCacheMeta;
+type HTMLCacheRow = HTMLDocument & DocumentCacheMeta;
 
 export interface LastLocationRow {
   docId: string;
@@ -34,19 +49,29 @@ export interface DocumentIdMapRow {
   createdAt: number;
 }
 
+export interface DocumentPreviewCacheRow {
+  docId: string;
+  lastModified: number;
+  contentType: string;
+  data: ArrayBuffer;
+  cachedAt: number;
+  byteSize?: number;
+}
+
 export interface ConfigRow {
   key: string;
   value: string;
 }
 
 type OpenReaderDB = Dexie & {
-  [PDF_TABLE]: EntityTable<PDFDocument, 'id'>;
-  [EPUB_TABLE]: EntityTable<EPUBDocument, 'id'>;
-  [HTML_TABLE]: EntityTable<HTMLDocument, 'id'>;
+  [PDF_TABLE]: EntityTable<PDFCacheRow, 'id'>;
+  [EPUB_TABLE]: EntityTable<EPUBCacheRow, 'id'>;
+  [HTML_TABLE]: EntityTable<HTMLCacheRow, 'id'>;
   [CONFIG_TABLE]: EntityTable<ConfigRow, 'key'>;
   [APP_CONFIG_TABLE]: EntityTable<AppConfigRow, 'id'>;
   [LAST_LOCATION_TABLE]: EntityTable<LastLocationRow, 'docId'>;
   [DOCUMENT_ID_MAP_TABLE]: EntityTable<DocumentIdMapRow, 'oldId'>;
+  [PREVIEW_CACHE_TABLE]: EntityTable<DocumentPreviewCacheRow, 'docId'>;
 };
 
 export const db = new Dexie(DB_NAME) as OpenReaderDB;
@@ -191,15 +216,15 @@ function buildAppConfigFromRaw(raw: RawConfigMap): AppConfigRow {
   return config;
 }
 
-// Version 6: add document-id-map table; keep v5 upgrade to migrate scattered config keys
-// and drop the legacy config table in a single upgrade step.
+// Version 8: add local cache metadata/indexes so document + preview caches can be bounded via LRU pruning.
 db.version(DB_VERSION).stores({
-  [PDF_TABLE]: 'id, type, name, lastModified, size, folderId',
-  [EPUB_TABLE]: 'id, type, name, lastModified, size, folderId',
-  [HTML_TABLE]: 'id, type, name, lastModified, size, folderId',
+  [PDF_TABLE]: 'id, type, name, lastModified, size, folderId, cacheAccessedAt',
+  [EPUB_TABLE]: 'id, type, name, lastModified, size, folderId, cacheAccessedAt',
+  [HTML_TABLE]: 'id, type, name, lastModified, size, folderId, cacheAccessedAt',
   [APP_CONFIG_TABLE]: 'id',
   [LAST_LOCATION_TABLE]: 'docId',
   [DOCUMENT_ID_MAP_TABLE]: 'oldId, id, createdAt',
+  [PREVIEW_CACHE_TABLE]: 'docId, lastModified, cachedAt, byteSize',
   // `null` here means: drop the old 'config' table after upgrade runs,
   // but Dexie still lets us read it inside the upgrade transaction.
   [CONFIG_TABLE]: null,
@@ -230,6 +255,7 @@ db.version(DB_VERSION).stores({
 });
 
 let dbOpenPromise: Promise<void> | null = null;
+const cacheTextEncoder = new TextEncoder();
 
 export async function initDB(): Promise<void> {
   if (dbOpenPromise) {
@@ -245,6 +271,9 @@ export async function initDB(): Promise<void> {
         emitDexieStatus('stalled', { ms: Date.now() - startedAt });
       }, 4000);
       await db.open();
+      await Promise.all([pruneDocumentCacheIfNeededInternal(), prunePreviewCacheIfNeededInternal()]).catch((error) => {
+        console.warn('Dexie cache prune on open failed:', error);
+      });
       clearTimeout(stallTimer);
       console.log('Dexie database opened successfully');
       emitDexieStatus('opened');
@@ -262,6 +291,139 @@ export async function initDB(): Promise<void> {
 async function withDB<T>(operation: () => Promise<T>): Promise<T> {
   await initDB();
   return operation();
+}
+
+type DocumentCacheTableName = typeof PDF_TABLE | typeof EPUB_TABLE | typeof HTML_TABLE;
+
+type DocumentCacheEntryRef = {
+  table: DocumentCacheTableName;
+  id: string;
+  byteSize: number;
+  accessedAt: number;
+};
+
+function toPositiveInt(value: unknown, fallback: number = 0): number {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return fallback;
+  return Math.max(0, Math.floor(n));
+}
+
+function byteSizeForPdfRow(row: PDFCacheRow): number {
+  const cached = toPositiveInt(row.cacheByteSize, 0);
+  if (cached > 0) return cached;
+  return row.data instanceof ArrayBuffer ? row.data.byteLength : toPositiveInt(row.size, 0);
+}
+
+function byteSizeForEpubRow(row: EPUBCacheRow): number {
+  const cached = toPositiveInt(row.cacheByteSize, 0);
+  if (cached > 0) return cached;
+  return row.data instanceof ArrayBuffer ? row.data.byteLength : toPositiveInt(row.size, 0);
+}
+
+function byteSizeForHtmlRow(row: HTMLCacheRow): number {
+  const cached = toPositiveInt(row.cacheByteSize, 0);
+  if (cached > 0) return cached;
+  if (typeof row.data === 'string') return cacheTextEncoder.encode(row.data).byteLength;
+  return toPositiveInt(row.size, 0);
+}
+
+function accessedAtForRow(row: DocumentCacheMeta & { lastModified?: number }): number {
+  return toPositiveInt(row.cacheAccessedAt, toPositiveInt(row.lastModified, Date.now()));
+}
+
+async function deleteDocumentCacheEntryInternal(table: DocumentCacheTableName, id: string): Promise<void> {
+  if (table === PDF_TABLE) {
+    await db[PDF_TABLE].delete(id);
+    return;
+  }
+  if (table === EPUB_TABLE) {
+    await db[EPUB_TABLE].delete(id);
+    return;
+  }
+  await db[HTML_TABLE].delete(id);
+}
+
+async function pruneDocumentCacheIfNeededInternal(): Promise<void> {
+  const budget = DOCUMENT_CACHE_MAX_BYTES;
+  if (!Number.isFinite(budget) || budget <= 0) return;
+
+  const [pdfRows, epubRows, htmlRows] = await Promise.all([
+    db[PDF_TABLE].toArray(),
+    db[EPUB_TABLE].toArray(),
+    db[HTML_TABLE].toArray(),
+  ]);
+
+  const entries: DocumentCacheEntryRef[] = [];
+  let totalBytes = 0;
+
+  for (const row of pdfRows) {
+    const byteSize = byteSizeForPdfRow(row);
+    totalBytes += byteSize;
+    entries.push({
+      table: PDF_TABLE,
+      id: row.id,
+      byteSize,
+      accessedAt: accessedAtForRow(row),
+    });
+  }
+  for (const row of epubRows) {
+    const byteSize = byteSizeForEpubRow(row);
+    totalBytes += byteSize;
+    entries.push({
+      table: EPUB_TABLE,
+      id: row.id,
+      byteSize,
+      accessedAt: accessedAtForRow(row),
+    });
+  }
+  for (const row of htmlRows) {
+    const byteSize = byteSizeForHtmlRow(row);
+    totalBytes += byteSize;
+    entries.push({
+      table: HTML_TABLE,
+      id: row.id,
+      byteSize,
+      accessedAt: accessedAtForRow(row),
+    });
+  }
+
+  if (totalBytes <= budget) return;
+
+  entries.sort((a, b) => a.accessedAt - b.accessedAt);
+  for (const entry of entries) {
+    if (totalBytes <= budget) break;
+    await deleteDocumentCacheEntryInternal(entry.table, entry.id);
+    totalBytes -= entry.byteSize;
+  }
+}
+
+async function prunePreviewCacheIfNeededInternal(): Promise<void> {
+  const budget = PREVIEW_CACHE_MAX_BYTES;
+  if (!Number.isFinite(budget) || budget <= 0) return;
+
+  const rows = await db[PREVIEW_CACHE_TABLE].toArray();
+  let totalBytes = 0;
+  const entries = rows.map((row) => {
+    const byteSize = toPositiveInt(
+      row.byteSize,
+      row.data instanceof ArrayBuffer ? row.data.byteLength : 0,
+    );
+    totalBytes += byteSize;
+    return {
+      docId: row.docId,
+      byteSize,
+      accessedAt: toPositiveInt(row.cachedAt, 0),
+    };
+  });
+
+  if (totalBytes <= budget) return;
+
+  entries.sort((a, b) => a.accessedAt - b.accessedAt);
+  for (const entry of entries) {
+    if (totalBytes <= budget) break;
+    await db[PREVIEW_CACHE_TABLE].delete(entry.docId);
+    totalBytes -= entry.byteSize;
+  }
 }
 
 function isSha256HexId(value: string): boolean {
@@ -324,6 +486,7 @@ async function applyDocumentIdMapping(oldId: string, newId: string): Promise<voi
         db[LAST_LOCATION_TABLE],
         db[APP_CONFIG_TABLE],
         db[DOCUMENT_ID_MAP_TABLE],
+        db[PREVIEW_CACHE_TABLE],
       ],
       async () => {
         await recordDocumentIdMapping(oldId, nextId);
@@ -394,6 +557,15 @@ async function applyDocumentIdMapping(oldId: string, newId: string): Promise<voi
           await db[LAST_LOCATION_TABLE].delete(oldId);
         }
 
+        const preview = await db[PREVIEW_CACHE_TABLE].get(oldId);
+        if (preview) {
+          const existing = await db[PREVIEW_CACHE_TABLE].get(nextId);
+          if (!existing || Number(existing.cachedAt ?? 0) < Number(preview.cachedAt ?? 0)) {
+            await db[PREVIEW_CACHE_TABLE].put({ ...preview, docId: nextId });
+          }
+          await db[PREVIEW_CACHE_TABLE].delete(oldId);
+        }
+
         const appConfig = await db[APP_CONFIG_TABLE].get('singleton');
         if (appConfig?.documentListState) {
           const mapped = rewriteDocumentListStateDocIds(appConfig.documentListState, new Map([[oldId, nextId]]));
@@ -456,7 +628,14 @@ export async function getDocumentIdMappings(): Promise<Array<{ oldId: string; id
 export async function addPdfDocument(document: PDFDocument): Promise<void> {
   await withDB(async () => {
     console.log('Adding PDF document via Dexie:', document.name);
-    await db[PDF_TABLE].put(document);
+    const now = Date.now();
+    await db[PDF_TABLE].put({
+      ...document,
+      cacheCreatedAt: now,
+      cacheAccessedAt: now,
+      cacheByteSize: document.data.byteLength,
+    });
+    await pruneDocumentCacheIfNeededInternal();
   });
 }
 
@@ -464,7 +643,11 @@ export async function getPdfDocument(id: string): Promise<PDFDocument | undefine
   return withDB(async () => {
     console.log('Fetching PDF document via Dexie:', id);
     const resolved = await getMappedDocumentId(id);
-    return db[PDF_TABLE].get(resolved);
+    const row = await db[PDF_TABLE].get(resolved);
+    if (row) {
+      await db[PDF_TABLE].update(resolved, { cacheAccessedAt: Date.now() });
+    }
+    return row;
   });
 }
 
@@ -479,9 +662,10 @@ export async function removePdfDocument(id: string): Promise<void> {
   await withDB(async () => {
     console.log('Removing PDF document via Dexie:', id);
     const resolved = await getMappedDocumentId(id);
-    await db.transaction('readwrite', db[PDF_TABLE], db[LAST_LOCATION_TABLE], async () => {
+    await db.transaction('readwrite', db[PDF_TABLE], db[LAST_LOCATION_TABLE], db[PREVIEW_CACHE_TABLE], async () => {
       await db[PDF_TABLE].delete(resolved);
       await db[LAST_LOCATION_TABLE].delete(resolved);
+      await db[PREVIEW_CACHE_TABLE].delete(resolved);
     });
   });
 }
@@ -507,7 +691,14 @@ export async function addEpubDocument(document: EPUBDocument): Promise<void> {
       actualSize: document.data.byteLength,
     });
 
-    await db[EPUB_TABLE].put(document);
+    const now = Date.now();
+    await db[EPUB_TABLE].put({
+      ...document,
+      cacheCreatedAt: now,
+      cacheAccessedAt: now,
+      cacheByteSize: document.data.byteLength,
+    });
+    await pruneDocumentCacheIfNeededInternal();
   });
 }
 
@@ -515,7 +706,11 @@ export async function getEpubDocument(id: string): Promise<EPUBDocument | undefi
   return withDB(async () => {
     console.log('Fetching EPUB document via Dexie:', id);
     const resolved = await getMappedDocumentId(id);
-    return db[EPUB_TABLE].get(resolved);
+    const row = await db[EPUB_TABLE].get(resolved);
+    if (row) {
+      await db[EPUB_TABLE].update(resolved, { cacheAccessedAt: Date.now() });
+    }
+    return row;
   });
 }
 
@@ -530,9 +725,10 @@ export async function removeEpubDocument(id: string): Promise<void> {
   await withDB(async () => {
     console.log('Removing EPUB document via Dexie:', id);
     const resolved = await getMappedDocumentId(id);
-    await db.transaction('readwrite', db[EPUB_TABLE], db[LAST_LOCATION_TABLE], async () => {
+    await db.transaction('readwrite', db[EPUB_TABLE], db[LAST_LOCATION_TABLE], db[PREVIEW_CACHE_TABLE], async () => {
       await db[EPUB_TABLE].delete(resolved);
       await db[LAST_LOCATION_TABLE].delete(resolved);
+      await db[PREVIEW_CACHE_TABLE].delete(resolved);
     });
   });
 }
@@ -549,7 +745,14 @@ export async function clearEpubDocuments(): Promise<void> {
 export async function addHtmlDocument(document: HTMLDocument): Promise<void> {
   await withDB(async () => {
     console.log('Adding HTML document via Dexie:', document.name);
-    await db[HTML_TABLE].put(document);
+    const now = Date.now();
+    await db[HTML_TABLE].put({
+      ...document,
+      cacheCreatedAt: now,
+      cacheAccessedAt: now,
+      cacheByteSize: cacheTextEncoder.encode(document.data).byteLength,
+    });
+    await pruneDocumentCacheIfNeededInternal();
   });
 }
 
@@ -557,7 +760,11 @@ export async function getHtmlDocument(id: string): Promise<HTMLDocument | undefi
   return withDB(async () => {
     console.log('Fetching HTML document via Dexie:', id);
     const resolved = await getMappedDocumentId(id);
-    return db[HTML_TABLE].get(resolved);
+    const row = await db[HTML_TABLE].get(resolved);
+    if (row) {
+      await db[HTML_TABLE].update(resolved, { cacheAccessedAt: Date.now() });
+    }
+    return row;
   });
 }
 
@@ -572,7 +779,10 @@ export async function removeHtmlDocument(id: string): Promise<void> {
   await withDB(async () => {
     console.log('Removing HTML document via Dexie:', id);
     const resolved = await getMappedDocumentId(id);
-    await db[HTML_TABLE].delete(resolved);
+    await db.transaction('readwrite', db[HTML_TABLE], db[PREVIEW_CACHE_TABLE], async () => {
+      await db[HTML_TABLE].delete(resolved);
+      await db[PREVIEW_CACHE_TABLE].delete(resolved);
+    });
   });
 }
 
@@ -647,6 +857,45 @@ export async function setFirstVisit(value: boolean): Promise<void> {
   await updateAppConfig({ firstVisit: value });
 }
 
+// Document preview cache helpers
+
+export async function getDocumentPreviewCache(docId: string): Promise<DocumentPreviewCacheRow | undefined> {
+  return withDB(async () => {
+    const resolved = await getMappedDocumentId(docId);
+    const row = await db[PREVIEW_CACHE_TABLE].get(resolved);
+    if (row) {
+      await db[PREVIEW_CACHE_TABLE].update(resolved, { cachedAt: Date.now() });
+    }
+    return row;
+  });
+}
+
+export async function putDocumentPreviewCache(row: DocumentPreviewCacheRow): Promise<void> {
+  await withDB(async () => {
+    const resolved = await getMappedDocumentId(row.docId);
+    await db[PREVIEW_CACHE_TABLE].put({
+      ...row,
+      docId: resolved,
+      cachedAt: Date.now(),
+      byteSize: toPositiveInt(row.byteSize, row.data.byteLength),
+    });
+    await prunePreviewCacheIfNeededInternal();
+  });
+}
+
+export async function removeDocumentPreviewCache(docId: string): Promise<void> {
+  await withDB(async () => {
+    const resolved = await getMappedDocumentId(docId);
+    await db[PREVIEW_CACHE_TABLE].delete(resolved);
+  });
+}
+
+export async function clearDocumentPreviewCache(): Promise<void> {
+  await withDB(async () => {
+    await db[PREVIEW_CACHE_TABLE].clear();
+  });
+}
+
 // Sync helpers (server round-trip)
 
 export async function syncDocumentsToServer(
@@ -657,15 +906,26 @@ export async function syncDocumentsToServer(
   const epubDocs = await getAllEpubDocuments();
   const htmlDocs = await getAllHtmlDocuments();
 
-  const documents: SyncedDocument[] = [];
+  const uploads: Array<{ oldId: string; source: UploadSource }> = [];
   const totalDocs = pdfDocs.length + epubDocs.length + htmlDocs.length;
   let processedDocs = 0;
 
+  const textEncoder = new TextEncoder();
+
   for (const doc of pdfDocs) {
-    documents.push({
-      ...doc,
-      type: 'pdf',
-      data: Array.from(new Uint8Array(doc.data)),
+    const bytes = new Uint8Array(doc.data);
+    const id = await sha256HexFromBytes(bytes);
+    uploads.push({
+      oldId: doc.id,
+      source: {
+        id,
+        name: doc.name,
+        type: 'pdf',
+        size: bytes.byteLength,
+        lastModified: doc.lastModified,
+        contentType: 'application/pdf',
+        body: bytes,
+      },
     });
     processedDocs++;
     if (onProgress) {
@@ -674,10 +934,19 @@ export async function syncDocumentsToServer(
   }
 
   for (const doc of epubDocs) {
-    documents.push({
-      ...doc,
-      type: 'epub',
-      data: Array.from(new Uint8Array(doc.data)),
+    const bytes = new Uint8Array(doc.data);
+    const id = await sha256HexFromBytes(bytes);
+    uploads.push({
+      oldId: doc.id,
+      source: {
+        id,
+        name: doc.name,
+        type: 'epub',
+        size: bytes.byteLength,
+        lastModified: doc.lastModified,
+        contentType: 'application/epub+zip',
+        body: bytes,
+      },
     });
     processedDocs++;
     if (onProgress) {
@@ -685,13 +954,20 @@ export async function syncDocumentsToServer(
     }
   }
 
-  const encoder = new TextEncoder();
   for (const doc of htmlDocs) {
-    const encoded = encoder.encode(doc.data);
-    documents.push({
-      ...doc,
-      type: 'html',
-      data: Array.from(encoded),
+    const encoded = textEncoder.encode(doc.data);
+    const id = await sha256HexFromBytes(encoded);
+    uploads.push({
+      oldId: doc.id,
+      source: {
+        id,
+        name: doc.name,
+        type: 'html',
+        size: encoded.byteLength,
+        lastModified: doc.lastModified,
+        contentType: 'text/plain; charset=utf-8',
+        body: encoded,
+      },
     });
     processedDocs++;
     if (onProgress) {
@@ -703,25 +979,11 @@ export async function syncDocumentsToServer(
     onProgress(50, 'Uploading to server...');
   }
 
-  const response = await fetch('/api/documents', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ documents }),
-    signal,
-  });
+  await uploadDocumentSources(uploads.map((entry) => entry.source), { signal });
 
-  if (!response.ok) {
-    throw new Error('Failed to sync documents to server');
-  }
-
-  const payload = (await response.json().catch(() => null)) as
-    | { stored?: Array<{ oldId: string; id: string }> }
-    | null;
-  const stored = payload?.stored ?? [];
-  for (const mapping of stored) {
-    if (!mapping || typeof mapping.oldId !== 'string' || typeof mapping.id !== 'string') continue;
-    if (mapping.oldId === mapping.id) continue;
-    await applyDocumentIdMapping(mapping.oldId, mapping.id);
+  for (const entry of uploads) {
+    if (entry.oldId === entry.source.id) continue;
+    await applyDocumentIdMapping(entry.oldId, entry.source.id);
   }
 
   if (onProgress) {
@@ -736,52 +998,77 @@ export async function syncSelectedDocumentsToServer(
   onProgress?: (progress: number, status?: string) => void,
   signal?: AbortSignal,
 ): Promise<{ lastSync: number }> {
-    // Re-use logic from syncDocumentsToServer but only for specific documents
-    // Actually, syncDocumentsToServer fetches all docs from DB.
-    // We need to fetch the *full content* of the selected docs from DB.
-    
-    const fullDocs: SyncedDocument[] = [];
-    let processed = 0;
-    
-    for (const doc of documents) {
-        if (doc.type === 'pdf') {
-            const data = await getPdfDocument(doc.id);
-            if (data) fullDocs.push({ ...data, type: 'pdf', data: Array.from(new Uint8Array(data.data)) });
-        } else if (doc.type === 'epub') {
-            const data = await getEpubDocument(doc.id);
-            if (data) fullDocs.push({ ...data, type: 'epub', data: Array.from(new Uint8Array(data.data)) });
-        } else {
-            const data = await getHtmlDocument(doc.id);
-            if (data) {
-                const encoder = new TextEncoder();
-                fullDocs.push({ ...data, type: 'html', data: Array.from(encoder.encode(data.data)) });
-            }
-        }
-        processed++;
-        if (onProgress) onProgress((processed / documents.length) * 50, `Preparing ${processed}/${documents.length}...`);
+  const uploads: Array<{ oldId: string; source: UploadSource }> = [];
+  const textEncoder = new TextEncoder();
+  let processed = 0;
+
+  for (const doc of documents) {
+    if (doc.type === 'pdf') {
+      const data = await getPdfDocument(doc.id);
+      if (data) {
+        const bytes = new Uint8Array(data.data);
+        const id = await sha256HexFromBytes(bytes);
+        uploads.push({
+          oldId: data.id,
+          source: {
+            id,
+            name: data.name,
+            type: 'pdf',
+            size: bytes.byteLength,
+            lastModified: data.lastModified,
+            contentType: 'application/pdf',
+            body: bytes,
+          },
+        });
+      }
+    } else if (doc.type === 'epub') {
+      const data = await getEpubDocument(doc.id);
+      if (data) {
+        const bytes = new Uint8Array(data.data);
+        const id = await sha256HexFromBytes(bytes);
+        uploads.push({
+          oldId: data.id,
+          source: {
+            id,
+            name: data.name,
+            type: 'epub',
+            size: bytes.byteLength,
+            lastModified: data.lastModified,
+            contentType: 'application/epub+zip',
+            body: bytes,
+          },
+        });
+      }
+    } else {
+      const data = await getHtmlDocument(doc.id);
+      if (data) {
+        const bytes = textEncoder.encode(data.data);
+        const id = await sha256HexFromBytes(bytes);
+        uploads.push({
+          oldId: data.id,
+          source: {
+            id,
+            name: data.name,
+            type: 'html',
+            size: bytes.byteLength,
+            lastModified: data.lastModified,
+            contentType: 'text/plain; charset=utf-8',
+            body: bytes,
+          },
+        });
+      }
     }
-    
-    if (onProgress) onProgress(50, 'Uploading to server...');
 
-  const response = await fetch('/api/documents', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ documents: fullDocs }),
-    signal,
-  });
-
-  if (!response.ok) {
-    throw new Error('Failed to sync documents to server');
+    processed++;
+    if (onProgress) onProgress((processed / documents.length) * 50, `Preparing ${processed}/${documents.length}...`);
   }
 
-  const payload = (await response.json().catch(() => null)) as
-    | { stored?: Array<{ oldId: string; id: string }> }
-    | null;
-  const stored = payload?.stored ?? [];
-  for (const mapping of stored) {
-    if (!mapping || typeof mapping.oldId !== 'string' || typeof mapping.id !== 'string') continue;
-    if (mapping.oldId === mapping.id) continue;
-    await applyDocumentIdMapping(mapping.oldId, mapping.id);
+  if (onProgress) onProgress(50, 'Uploading to server...');
+  await uploadDocumentSources(uploads.map((entry) => entry.source), { signal });
+
+  for (const entry of uploads) {
+    if (entry.oldId === entry.source.id) continue;
+    await applyDocumentIdMapping(entry.oldId, entry.source.id);
   }
 
   if (onProgress) {
@@ -800,22 +1087,8 @@ export async function loadDocumentsFromServer(
     onProgress(10, 'Starting download...');
   }
 
-  const response = await fetch('/api/documents', { signal });
-  if (!response.ok) {
-    throw new Error('Failed to fetch documents from server');
-  }
-
-  if (onProgress) {
-    onProgress(30, 'Download complete');
-  }
-
-  const { documents } = (await response.json()) as { documents: SyncedDocument[] };
-
-  if (onProgress) {
-    onProgress(40, 'Parsing documents...');
-  }
-
-  await saveSyncedDocumentsLocally(documents, onProgress);
+  const documents = await listDocuments({ signal });
+  await downloadAndCacheServerDocuments(documents, onProgress, signal);
 
   if (onProgress) {
     onProgress(100, 'Load complete!');
@@ -832,26 +1105,9 @@ export async function loadSelectedDocumentsFromServer(
   if (onProgress) {
     onProgress(10, 'Starting download...');
   }
-  
-  // Use new filtered API
-  const idsParam = selectedIds.join(',');
-  const response = await fetch(`/api/documents?ids=${encodeURIComponent(idsParam)}`, { signal });
-  
-  if (!response.ok) {
-    throw new Error('Failed to fetch documents from server');
-  }
 
-  if (onProgress) {
-    onProgress(30, 'Download complete');
-  }
-
-  const { documents } = (await response.json()) as { documents: SyncedDocument[] };
-
-  if (onProgress) {
-    onProgress(40, 'Parsing documents...');
-  }
-
-  await saveSyncedDocumentsLocally(documents, onProgress);
+  const documents = await listDocuments({ ids: selectedIds, signal });
+  await downloadAndCacheServerDocuments(documents, onProgress, signal);
 
   if (onProgress) {
     onProgress(100, 'Load complete!');
@@ -860,52 +1116,23 @@ export async function loadSelectedDocumentsFromServer(
   return { lastSync: Date.now() };
 }
 
-async function saveSyncedDocumentsLocally(documents: SyncedDocument[], onProgress?: (progress: number, status?: string) => void) {
-  const textDecoder = new TextDecoder();
+async function downloadAndCacheServerDocuments(
+  documents: BaseDocument[],
+  onProgress?: (progress: number, status?: string) => void,
+  signal?: AbortSignal,
+) {
+  if (onProgress) onProgress(30, 'List complete');
+  if (documents.length === 0) {
+    if (onProgress) onProgress(95, 'No documents to import');
+    return;
+  }
 
   for (let i = 0; i < documents.length; i++) {
     const doc = documents[i];
-
-    if (doc.type === 'pdf') {
-      const uint8Array = new Uint8Array(doc.data);
-      const documentData: PDFDocument = {
-        id: doc.id,
-        type: 'pdf',
-        name: doc.name,
-        size: doc.size,
-        lastModified: doc.lastModified,
-        data: uint8Array.buffer,
-      };
-      await addPdfDocument(documentData);
-    } else if (doc.type === 'epub') {
-      const uint8Array = new Uint8Array(doc.data);
-      const documentData: EPUBDocument = {
-        id: doc.id,
-        type: 'epub',
-        name: doc.name,
-        size: doc.size,
-        lastModified: doc.lastModified,
-        data: uint8Array.buffer,
-      };
-      await addEpubDocument(documentData);
-    } else if (doc.type === 'html') {
-      const uint8Array = new Uint8Array(doc.data);
-      const decoded = textDecoder.decode(uint8Array);
-      const documentData: HTMLDocument = {
-        id: doc.id,
-        type: 'html',
-        name: doc.name,
-        size: doc.size,
-        lastModified: doc.lastModified,
-        data: decoded,
-      };
-      await addHtmlDocument(documentData);
-    } else {
-      console.warn(`Unknown document type: ${doc.type}`);
-    }
-
+    const bytes = await downloadDocumentContent(doc.id, { signal });
+    await cacheStoredDocumentFromBytes(doc, bytes);
     if (onProgress) {
-      onProgress(40 + ((i + 1) / documents.length) * 50, `Processing document ${i + 1}/${documents.length}...`);
+      onProgress(30 + ((i + 1) / documents.length) * 65, `Downloading ${i + 1}/${documents.length}: ${doc.name}`);
     }
   }
 }
@@ -1007,5 +1234,3 @@ export async function importDocumentsFromLibrary(
     onProgress(100, 'Library import complete!');
   }
 }
-
-

@@ -3,8 +3,20 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   turbopack: {
     resolveAlias: {
-      canvas: './empty-module.ts',
+      canvas: '@napi-rs/canvas',
     },
+  },
+  serverExternalPackages: ["@napi-rs/canvas", "ffmpeg-static", "better-sqlite3"],
+  outputFileTracingIncludes: {
+    '/api/audiobook': [
+      './node_modules/ffmpeg-static/ffmpeg',
+    ],
+    '/api/audiobook/chapter': [
+      './node_modules/ffmpeg-static/ffmpeg',
+    ],
+    '/api/whisper': [
+      './node_modules/ffmpeg-static/ffmpeg',
+    ],
   },
 };
 

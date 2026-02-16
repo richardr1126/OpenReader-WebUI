@@ -1,10 +1,15 @@
-import { Page, expect } from '@playwright/test';
+import { Page, expect, type TestInfo, type Locator } from '@playwright/test';
 import fs from 'fs';
 import path from 'path';
+import { createHash } from 'crypto';
 
 const DIR = './tests/files/';
 const TTS_MOCK_PATH = path.join(__dirname, 'files', 'sample.mp3');
 let ttsMockBuffer: Buffer | null = null;
+
+function isAuthEnabledForTests() {
+  return Boolean(process.env.AUTH_SECRET && process.env.BASE_URL);
+}
 
 async function ensureTtsRouteMock(page: Page) {
   if (!ttsMockBuffer) {
@@ -30,12 +35,33 @@ function escapeRegExp(input: string) {
   return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+function fixturePath(fileName: string) {
+  return path.join(__dirname, 'files', fileName);
+}
+
+function sha256HexOfFile(filePath: string) {
+  return createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
+}
+
 /**
  * Upload a sample epub or pdf
  */
 export async function uploadFile(page: Page, filePath: string) {
-  await page.waitForSelector('input[type=file]', { timeout: 10000 });
-  await page.setInputFiles('input[type=file]', `${DIR}${filePath}`);
+  const input = page.locator('input[type=file]').first();
+  await expect(input).toBeVisible({ timeout: 10000 });
+  await expect(input).toBeEnabled({ timeout: 10000 });
+
+  await input.setInputFiles(`${DIR}${filePath}`);
+
+  // Wait for the uploader to finish processing. The input is disabled while
+  // uploading/converting via react-dropzone's `disabled` prop.
+  // Tolerate extremely fast operations where the disabled state may be missed.
+  try {
+    await expect(input).toBeDisabled({ timeout: 2000 });
+  } catch {
+    // ignore
+  }
+  await expect(input).toBeEnabled({ timeout: 15000 });
 }
 
 /**
@@ -45,16 +71,23 @@ export async function uploadAndDisplay(page: Page, fileName: string) {
   await uploadFile(page, fileName);
 
   const lower = fileName.toLowerCase();
-  
+
   if (lower.endsWith('.docx')) {
-    await expect(page.getByText('Converting DOCX to PDF...')).toBeVisible();
-    const pdfName = fileName.replace(/\.docx$/i, '.pdf');
-    await page.getByRole('link', { name: new RegExp(escapeRegExp(pdfName), 'i') }).click();
+    // Best-effort: conversion can complete before we observe this UI state.
+    try {
+      await expect(page.getByText('Converting DOCX to PDF...')).toBeVisible({ timeout: 5000 });
+    } catch {
+      // ignore
+    }
+    const expectedId = sha256HexOfFile(fixturePath(fileName));
+    const targetLink = page.locator(`a[href$="/pdf/${expectedId}"]`).first();
+    await expect(targetLink).toBeVisible({ timeout: 15000 });
+    await targetLink.click();
     await page.waitForSelector('.react-pdf__Document', { timeout: 15000 });
     return;
   }
 
-  await page.getByRole('link', { name: new RegExp(escapeRegExp(fileName), 'i') }).click();
+  await page.getByRole('link', { name: new RegExp(escapeRegExp(fileName), 'i') }).first().click();
 
   if (lower.endsWith('.pdf')) {
     await page.waitForSelector('.react-pdf__Document', { timeout: 10000 });
@@ -94,7 +127,7 @@ export async function playTTSAndWaitForASecond(page: Page, fileName: string) {
 export async function pauseTTSAndVerify(page: Page) {
   // Click pause to stop playback
   await page.getByRole('button', { name: 'Pause' }).click();
-  
+
   // Check for play button to be visible
   await expect(page.getByRole('button', { name: 'Play' })).toBeVisible({ timeout: 10000 });
 }
@@ -102,13 +135,137 @@ export async function pauseTTSAndVerify(page: Page) {
 /**
  * Common test setup function
  */
-export async function setupTest(page: Page) {
+export async function setupTest(page: Page, testInfo?: TestInfo) {
+  const namespace = testInfo ? `${testInfo.project.name}-worker${testInfo.workerIndex}` : null;
+  if (namespace) {
+    // Isolate server-side storage per Playwright worker to avoid cross-test flake
+    // when running with multiple workers (server-first document storage).
+    await page.context().setExtraHTTPHeaders({ 'x-openreader-test-namespace': namespace });
+  }
+
+  // In no-auth mode, all tests in a worker share the same server-side unclaimed identity.
+  // Clear docs at setup to avoid cross-test collisions on duplicate filenames.
+  if (!isAuthEnabledForTests()) {
+    const headers = namespace ? { 'x-openreader-test-namespace': namespace } : undefined;
+    let cleared = false;
+    let authProtected = false;
+    let attempts = 0;
+    while (!cleared && attempts < 3) {
+      attempts += 1;
+      try {
+        const res = await page.request.delete('/api/documents', { ...(headers ? { headers } : {}) });
+        // If this endpoint requires auth, we're not in no-auth mode for this run.
+        // Skip cleanup rather than hard-failing setup.
+        if (res.status() === 401 || res.status() === 403) {
+          authProtected = true;
+          break;
+        }
+        if (res.ok()) {
+          cleared = true;
+          break;
+        }
+      } catch {
+        // retry
+      }
+      await page.waitForTimeout(200);
+    }
+    if (!cleared && !authProtected) {
+      throw new Error('Failed to clear server documents before test setup');
+    }
+  }
+
+  // Disable hover:scale CSS transforms to prevent WebKit "element is not stable"
+  // flakiness on CI. The addInitScript injects a <style> tag on every navigation
+  // (including SPAs that trigger a full page load) that kills all CSS transitions/
+  // animations and neutralises Tailwind hover:scale variables.
+  await page.addInitScript(() => {
+    // Mark the root for the globals.css fallback rule.
+    document.documentElement.dataset.playwright = 'true';
+
+    // Inject a <style> that overrides transitions, animations, and hover scale.
+    // Using a MutationObserver on <head> to inject as soon as possible.
+    const inject = () => {
+      if (document.getElementById('__pw_no_animations')) return;
+      const style = document.createElement('style');
+      style.id = '__pw_no_animations';
+      style.textContent = `
+        *, *::before, *::after {
+          transition-duration: 0s !important;
+          transition-delay: 0s !important;
+          animation-duration: 0s !important;
+          animation-delay: 0s !important;
+        }
+        *:hover {
+          --tw-scale-x: 1 !important;
+          --tw-scale-y: 1 !important;
+        }
+      `;
+      (document.head || document.documentElement).appendChild(style);
+    };
+    if (document.head) {
+      inject();
+    } else {
+      const observer = new MutationObserver(() => {
+        if (document.head) { inject(); observer.disconnect(); }
+      });
+      observer.observe(document.documentElement, { childList: true });
+    }
+  });
+
   // Mock the TTS API so tests don't hit the real TTS service.
   await ensureTtsRouteMock(page);
 
-  // Navigate to the home page before each test
-  await page.goto('/');
+  // If auth is enabled, establish an anonymous session BEFORE navigation.
+  // This keeps each test self-contained (no shared storageState) while ensuring
+  // server routes that require auth don't intermittently 401 during app startup.
+  // await ensureAnonymousSession(page);
+
+  // Navigate to the protected app home before each test
+  await page.goto('/app');
+
+  // Re-inject style tag post-navigation as a belt-and-suspenders measure.
+  await page.addStyleTag({
+    content: `
+      *, *::before, *::after {
+        transition-duration: 0s !important;
+        transition-delay: 0s !important;
+        animation-duration: 0s !important;
+        animation-delay: 0s !important;
+      }
+      *:hover {
+        --tw-scale-x: 1 !important;
+        --tw-scale-y: 1 !important;
+      }
+    `,
+  });
+
   await page.waitForLoadState('networkidle');
+
+  // AuthLoader may show a full-screen overlay while session is loading.
+  // Wait for it to be gone before interacting with underlying UI.
+  await page
+    .waitForSelector('.fixed.inset-0.bg-base.z-50', { state: 'detached', timeout: 15_000 })
+    .catch(() => { });
+
+  // Privacy modal should come first in onboarding.
+  // Be tolerant if it's already accepted (e.g., reused context).
+  const privacyBtn = page.getByRole('button', { name: 'I Understand' });
+  try {
+    await expect(privacyBtn).toBeVisible({ timeout: 5000 });
+    await privacyBtn.click();
+    // HeadlessUI keeps dialogs in the DOM during leave transitions; "hidden" is enough
+    // (we mainly need to ensure it no longer blocks pointer events).
+    await page.getByRole('dialog', { name: /privacy/i }).waitFor({ state: 'hidden', timeout: 15000 });
+    await expect(page.locator('.overlay-dim:visible')).toHaveCount(0);
+  } catch {
+    // ignore
+  }
+
+  // Settings modal should appear after privacy acceptance on first visit.
+  const saveBtn = page.getByRole('button', { name: 'Save' });
+  await expect(saveBtn).toBeVisible({ timeout: 10000 });
+  // SettingsModal can briefly disable Save while it mirrors a custom model into the input field.
+  await expect(saveBtn).toBeEnabled({ timeout: 15000 });
 
   // If running in CI, select the "Custom OpenAI-Like" model and "Deepinfra" provider
   if (process.env.CI) {
@@ -117,14 +274,50 @@ export async function setupTest(page: Page) {
   }
 
   // Click the "done" button to dismiss the welcome message
-  await page.getByRole('button', { name: 'Save' }).click();
+  await saveBtn.click();
+  await page.getByRole('dialog', { name: 'Settings' }).waitFor({ state: 'hidden', timeout: 15000 });
+  await expect(page.locator('.overlay-dim:visible')).toHaveCount(0);
+}
+
+/**
+ * More reliable than Playwright's `locator.dragTo` when a drop immediately opens a modal
+ * (which can intercept pointer events mid-gesture and cause flakiness).
+ *
+ * This uses DOM drag events directly; our app's doc list DnD logic only needs the events,
+ * not a real OS-level drag interaction.
+ */
+export async function dispatchHtml5DragAndDrop(page: Page, source: Locator, target: Locator): Promise<void> {
+  const sourceHandle = await source.elementHandle();
+  const targetHandle = await target.elementHandle();
+  if (!sourceHandle) throw new Error('drag source element not found');
+  if (!targetHandle) throw new Error('drag target element not found');
+
+  await page.evaluate(
+    async ([src, dst]) => {
+      const dt = typeof DataTransfer !== 'undefined' ? new DataTransfer() : ({} as DataTransfer);
+      const fire = (el: Element, type: string) => {
+        const event = new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt });
+        el.dispatchEvent(event);
+      };
+
+      fire(src, 'dragstart');
+      // Let React flush state updates (draggedDoc) before dispatching drop events.
+      await Promise.resolve();
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      fire(dst, 'dragenter');
+      fire(dst, 'dragover');
+      fire(dst, 'drop');
+      fire(src, 'dragend');
+    },
+    [sourceHandle, targetHandle],
+  );
 }
 
 
 // Assert a document link containing the given filename appears in the list
 export async function expectDocumentListed(page: Page, fileName: string) {
   await expect(
-    page.getByRole('link', { name: new RegExp(escapeRegExp(fileName), 'i') })
+    page.getByRole('link', { name: new RegExp(escapeRegExp(fileName), 'i') }).first()
   ).toBeVisible({ timeout: 10000 });
 }
 
@@ -193,15 +386,15 @@ export async function deleteDocumentByName(page: Page, fileName: string) {
 // Open Settings modal and navigate to Documents tab
 export async function openSettingsDocumentsTab(page: Page) {
   await page.getByRole('button', { name: 'Settings' }).click();
-  await page.getByRole('tab', { name: '📄 Documents' }).click();
+  await page.getByRole('tab', { name: '📄 Docs' }).click();
 }
 
 // Delete all local documents through Settings and close dialogs
 export async function deleteAllLocalDocuments(page: Page) {
   await openSettingsDocumentsTab(page);
-  await page.getByRole('button', { name: 'Delete local' }).click();
+  await page.getByRole('button', { name: /Delete (anonymous docs|all user docs|server docs)/i }).click();
 
-  const heading = page.getByRole('heading', { name: 'Delete Local Documents' });
+  const heading = page.getByRole('heading', { name: /Delete (Anonymous Docs|All User Docs|Server Docs)/i });
   await expect(heading).toBeVisible({ timeout: 10000 });
 
   const confirmBtn = heading.locator('xpath=ancestor::*[@role="dialog"][1]//button[normalize-space()="Delete"]');
@@ -303,8 +496,8 @@ export async function expectMediaState(page: Page, state: 'playing' | 'paused') 
           // Consider playing if not paused AND time has advanced at least a tiny amount
           if (!audio.paused && curr > 0 && curr > last) return true;
         } else {
-            // paused target
-            if (audio.paused) return true;
+          // paused target
+          if (audio.paused) return true;
         }
       }
       return false;

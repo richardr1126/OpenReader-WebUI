@@ -4,7 +4,7 @@ import { useState, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { UploadIcon } from '@/components/icons/Icons';
 import { useDocuments } from '@/contexts/DocumentContext';
-import { convertDocxToPdf as convertDocxToPdfClient } from '@/lib/client';
+import { uploadDocxAsPdf } from '@/lib/client-documents';
 
 const isDev = process.env.NEXT_PUBLIC_NODE_ENV !== 'production' || process.env.NODE_ENV == null;
 
@@ -17,18 +17,12 @@ export function DocumentUploader({ className = '', variant = 'default' }: Docume
   const { 
     addPDFDocument: addPDF, 
     addEPUBDocument: addEPUB,
-    addHTMLDocument: addHTML 
+    addHTMLDocument: addHTML,
+    refreshDocuments,
   } = useDocuments();
   const [isUploading, setIsUploading] = useState(false);
   const [isConverting, setIsConverting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const convertDocxToPdf = async (file: File): Promise<File> => {
-    const pdfBlob = await convertDocxToPdfClient(file);
-    return new File([pdfBlob], file.name.replace(/\.docx$/, '.pdf'), {
-      type: 'application/pdf',
-    });
-  };
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     if (!acceptedFiles || acceptedFiles.length === 0) return;
@@ -45,10 +39,12 @@ export function DocumentUploader({ className = '', variant = 'default' }: Docume
         } else if (file.type === 'text/plain' || file.type === 'text/markdown' || file.name.endsWith('.md')) {
           await addHTML(file);
         } else if (isDev && file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+          // Preserve prior UX: show "Converting DOCX..." state rather than generic uploading.
           setIsUploading(false);
           setIsConverting(true);
-          const pdfFile = await convertDocxToPdf(file);
-          await addPDF(pdfFile);
+          // Convert+upload directly on the server. Use sha(docx) as stable ID to avoid duplicates.
+          await uploadDocxAsPdf(file);
+          await refreshDocuments();
           setIsConverting(false);
           setIsUploading(true);
         }
@@ -60,7 +56,7 @@ export function DocumentUploader({ className = '', variant = 'default' }: Docume
       setIsUploading(false);
       setIsConverting(false);
     }
-  }, [addHTML, addPDF, addEPUB]);
+  }, [addHTML, addPDF, addEPUB, refreshDocuments]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,

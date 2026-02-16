@@ -4,6 +4,7 @@ import path from 'path';
 import { NextRequest, NextResponse } from 'next/server';
 import { parseLibraryRoots } from '@/lib/server/library';
 import type { DocumentType } from '@/types/documents';
+import { auth } from '@/lib/server/auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -41,10 +42,10 @@ function libraryDocumentTypeFromName(name: string): DocumentType {
 
 let cache:
   | {
-      cacheKey: string;
-      cachedAt: number;
-      documents: LibraryDocument[];
-    }
+    cacheKey: string;
+    cachedAt: number;
+    documents: LibraryDocument[];
+  }
   | undefined;
 
 async function scanLibraryRoot(root: string, rootIndex: number, limit: number): Promise<LibraryDocument[]> {
@@ -103,6 +104,12 @@ async function scanLibraryRoot(root: string, rootIndex: number, limit: number): 
 }
 
 export async function GET(req: NextRequest) {
+  // Auth check - require session
+  const session = await auth?.api.getSession({ headers: req.headers });
+  if (auth && !session?.user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
   const url = new URL(req.url);
   const refresh = url.searchParams.get('refresh') === '1';
   const limit = Math.max(1, Math.min(Number(url.searchParams.get('limit') ?? '5000'), 10000));

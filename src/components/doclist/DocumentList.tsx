@@ -11,6 +11,7 @@ import { DocumentListItem } from '@/components/doclist/DocumentListItem';
 import { DocumentFolder } from '@/components/doclist/DocumentFolder';
 import { SortControls } from '@/components/doclist/SortControls';
 import { CreateFolderDialog } from '@/components/doclist/CreateFolderDialog';
+import { DocumentListSkeleton } from '@/components/doclist/DocumentListSkeleton';
 import { Button } from '@headlessui/react';
 import { DocumentUploader } from '@/components/DocumentUploader';
 
@@ -105,28 +106,23 @@ export function DocumentList() {
     }
   }, [sortBy, sortDirection, folders, collapsedFolders, showHint, viewMode, isInitialized]);
 
+  // Reconcile folder state against the current server-backed document list.
+  // If a document no longer exists on the server, drop it from folders to avoid stale UI.
+  useEffect(() => {
+    if (!isInitialized) return;
+    const ids = new Set<string>([...pdfDocs, ...epubDocs, ...htmlDocs].map((d) => d.id));
+    setFolders((prev) =>
+      prev.map((folder) => ({
+        ...folder,
+        documents: folder.documents.filter((d) => ids.has(d.id)),
+      })),
+    );
+  }, [isInitialized, pdfDocs, epubDocs, htmlDocs]);
+
   const allDocuments: DocumentListDocument[] = [
-    ...pdfDocs.map(doc => ({
-      id: doc.id,
-      name: doc.name,
-      size: doc.size,
-      lastModified: doc.lastModified,
-      type: 'pdf' as const,
-    })),
-    ...epubDocs.map(doc => ({
-      id: doc.id,
-      name: doc.name,
-      size: doc.size,
-      lastModified: doc.lastModified,
-      type: 'epub' as const,
-    })),
-    ...htmlDocs.map(doc => ({
-      id: doc.id,
-      name: doc.name,
-      size: doc.size,
-      lastModified: doc.lastModified,
-      type: 'html' as const,
-    })),
+    ...pdfDocs.map((doc) => ({ ...doc, type: 'pdf' as const })),
+    ...epubDocs.map((doc) => ({ ...doc, type: 'epub' as const })),
+    ...htmlDocs.map((doc) => ({ ...doc, type: 'html' as const })),
   ];
 
   const sortDocuments = useCallback((docs: DocumentListDocument[]) => {
@@ -290,7 +286,7 @@ export function DocumentList() {
   }, [createFolder]);
 
   if (isPDFLoading || isEPUBLoading || isHTMLLoading) {
-    return <div className="w-full text-center text-muted">Loading documents...</div>;
+    return <DocumentListSkeleton viewMode={viewMode} />;
   }
 
   if (allDocuments.length === 0) {

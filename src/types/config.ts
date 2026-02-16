@@ -1,6 +1,7 @@
 import type { DocumentListState } from '@/types/documents';
 
 const isDev = process.env.NEXT_PUBLIC_NODE_ENV !== 'production' || process.env.NODE_ENV == null;
+const wordHighlightEnabledByDefault = process.env.NEXT_PUBLIC_ENABLE_WORD_HIGHLIGHT === 'true';
 
 export type ViewType = 'single' | 'dual' | 'scroll';
 
@@ -30,6 +31,8 @@ export interface AppConfigValues {
   epubWordHighlightEnabled: boolean;
   firstVisit: boolean;
   documentListState: DocumentListState;
+  privacyAccepted: boolean;
+  documentsMigrationPrompted: boolean;
 }
 
 export const APP_CONFIG_DEFAULTS: AppConfigValues = {
@@ -51,9 +54,9 @@ export const APP_CONFIG_DEFAULTS: AppConfigValues = {
   savedVoices: {},
   smartSentenceSplitting: true,
   pdfHighlightEnabled: true,
-  pdfWordHighlightEnabled: isDev,
+  pdfWordHighlightEnabled: wordHighlightEnabledByDefault,
   epubHighlightEnabled: true,
-  epubWordHighlightEnabled: isDev,
+  epubWordHighlightEnabled: wordHighlightEnabledByDefault,
   firstVisit: false,
   documentListState: {
     sortBy: 'name',
@@ -63,6 +66,8 @@ export const APP_CONFIG_DEFAULTS: AppConfigValues = {
     showHint: true,
     viewMode: 'grid',
   },
+  privacyAccepted: false,
+  documentsMigrationPrompted: false,
 };
 
 export interface AppConfigRow extends AppConfigValues {
