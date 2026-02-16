@@ -109,22 +109,6 @@ html.mint {
   );
 }
 
-/*
- * Playwright test mode: disable hover scale transforms.
- *
- * WebKit on CI triggers hover during click, activating CSS scale animations.
- * Playwright's actionability check requires two consecutive animation frames
- * with the same bounding box ("element is stable"). An ongoing scale transform
- * prevents this, causing timeouts.
- *
- * Tests set data-playwright="true" on <html> via page.addInitScript().
- * This rule neutralises scale transforms without affecting production.
- */
-html[data-playwright] * {
-  --tw-scale-x: 1 !important;
-  --tw-scale-y: 1 !important;
-}
-
 body {
   color: var(--foreground);
   background: var(--background);

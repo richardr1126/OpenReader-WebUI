@@ -175,9 +175,41 @@ export async function setupTest(page: Page, testInfo?: TestInfo) {
   }
 
   // Disable hover:scale CSS transforms to prevent WebKit "element is not stable"
-  // flakiness on CI. See globals.css for the matching rule.
+  // flakiness on CI. The addInitScript injects a <style> tag on every navigation
+  // (including SPAs that trigger a full page load) that kills all CSS transitions/
+  // animations and neutralises Tailwind hover:scale variables.
   await page.addInitScript(() => {
+    // Mark the root for the globals.css fallback rule.
     document.documentElement.dataset.playwright = 'true';
+
+    // Inject a <style> that overrides transitions, animations, and hover scale.
+    // Using a MutationObserver on <head> to inject as soon as possible.
+    const inject = () => {
+      if (document.getElementById('__pw_no_animations')) return;
+      const style = document.createElement('style');
+      style.id = '__pw_no_animations';
+      style.textContent = `
+        *, *::before, *::after {
+          transition-duration: 0s !important;
+          transition-delay: 0s !important;
+          animation-duration: 0s !important;
+          animation-delay: 0s !important;
+        }
+        *:hover {
+          --tw-scale-x: 1 !important;
+          --tw-scale-y: 1 !important;
+        }
+      `;
+      (document.head || document.documentElement).appendChild(style);
+    };
+    if (document.head) {
+      inject();
+    } else {
+      const observer = new MutationObserver(() => {
+        if (document.head) { inject(); observer.disconnect(); }
+      });
+      observer.observe(document.documentElement, { childList: true });
+    }
   });
 
   // Mock the TTS API so tests don't hit the real TTS service.
@@ -190,6 +222,23 @@ export async function setupTest(page: Page, testInfo?: TestInfo) {
 
   // Navigate to the protected app home before each test
   await page.goto('/app');
+
+  // Re-inject style tag post-navigation as a belt-and-suspenders measure.
+  await page.addStyleTag({
+    content: `
+      *, *::before, *::after {
+        transition-duration: 0s !important;
+        transition-delay: 0s !important;
+        animation-duration: 0s !important;
+        animation-delay: 0s !important;
+      }
+      *:hover {
+        --tw-scale-x: 1 !important;
+        --tw-scale-y: 1 !important;
+      }
+    `,
+  });
+
   await page.waitForLoadState('networkidle');
 
   // AuthLoader may show a full-screen overlay while session is loading.
