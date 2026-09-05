@@ -5,6 +5,21 @@ import { FakeControlPlane } from '../fixtures/fake-control-plane';
 
 const AUTH = { authorization: 'Bearer test-token' };
 
+function snapshotSequence(body: string): Array<{ eventId: number; status: string }> {
+  return body.split('\n\n').flatMap((frame) => {
+    if (!frame.split('\n').includes('event: snapshot')) return [];
+    const id = frame.split('\n').find((line) => line.startsWith('id: '));
+    const data = frame.split('\n').find((line) => line.startsWith('data: '));
+    if (!id || !data) return [];
+    const payload = JSON.parse(data.slice('data: '.length)) as {
+      snapshot?: { status?: unknown };
+    };
+    return typeof payload.snapshot?.status === 'string'
+      ? [{ eventId: Number(id.slice('id: '.length)), status: payload.snapshot.status }]
+      : [];
+  });
+}
+
 describe('compute worker API routes', () => {
   let fake: FakeControlPlane;
   let runtime: Awaited<ReturnType<typeof createComputeWorkerApp>>;
@@ -421,9 +436,10 @@ describe('compute worker API routes', () => {
       return stop;
     });
     const stream = await runtime.app.inject({ method: 'GET', url: '/v1/operations/op-gap/events', headers: AUTH });
-    expect(stream.body).toContain('"status":"running"');
-    expect(stream.body).toContain('"status":"succeeded"');
-    expect(stream.body).not.toContain('"status":"queued"');
+    expect(snapshotSequence(stream.body)).toEqual([
+      { eventId: 0, status: 'running' },
+      { eventId: 2, status: 'succeeded' },
+    ]);
     await vi.waitFor(() => expect(stop).toHaveBeenCalledOnce());
   });
 
@@ -445,9 +461,10 @@ describe('compute worker API routes', () => {
     const stream = await runtime.app.inject({
       method: 'GET', url: '/v1/operations/op-equal-time/events', headers: AUTH,
     });
-    expect(stream.body).toContain('"status":"running"');
-    expect(stream.body).toContain('"status":"succeeded"');
-    expect(stream.body).not.toContain('"status":"queued"');
+    expect(snapshotSequence(stream.body)).toEqual([
+      { eventId: 0, status: 'running' },
+      { eventId: 2, status: 'succeeded' },
+    ]);
     await vi.waitFor(() => expect(stop).toHaveBeenCalledOnce());
   });
 

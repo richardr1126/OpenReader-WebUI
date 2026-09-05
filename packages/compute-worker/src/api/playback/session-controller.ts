@@ -138,21 +138,29 @@ export function createPlaybackSessionController(
         generationSatisfiedThroughOrdinal: null,
         updatedAt: now,
       },
+      resolveTtsPlaybackSessionInstanceId(session),
     );
     const claimedSession = await readModel.readSession(session.sessionId);
     if (
       !claimedSession
       || claimedSession.playbackActive === false
       || claimedSession.generationRunId !== generationRunId
+      || resolveTtsPlaybackSessionInstanceId(claimedSession)
+        !== resolveTtsPlaybackSessionInstanceId(session)
     ) return;
     await ensureOrphanedOpRecovery();
     const op = await deps.orchestrator.enqueueOrReuse(requestOp);
-    await playbackStorage.sessions.patchSessionIfGenerationRun(session.sessionId, generationRunId, {
-      status: op.status === 'failed' ? 'failed' : op.status === 'succeeded' ? 'succeeded' : 'running',
-      workerOpId: op.opId,
-      lastError: op.status === 'failed' ? (op.error?.message ?? 'Failed to enqueue playback continuation') : null,
-      updatedAt: now,
-    }).catch((error) => {
+    await playbackStorage.sessions.patchSessionIfGenerationRun(
+      session.sessionId,
+      generationRunId,
+      {
+        status: op.status === 'failed' ? 'failed' : op.status === 'succeeded' ? 'succeeded' : 'running',
+        workerOpId: op.opId,
+        lastError: op.status === 'failed' ? (op.error?.message ?? 'Failed to enqueue playback continuation') : null,
+        updatedAt: now,
+      },
+      resolveTtsPlaybackSessionInstanceId(session),
+    ).catch((error) => {
       app.log.warn(
         { sessionId: session.sessionId, opId: op.opId, error: toErrorMessage(error) },
         'tts.playback.resume_session_patch_failed',

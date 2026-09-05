@@ -361,6 +361,11 @@ export function createPlaybackSessionReadModel(input: {
           invalidated += 1;
         }
       }
+      for (const key of [...scopeCollections.keys()]) {
+        if (key === prefix || key.startsWith(`${prefix}\0`)) {
+          scopeCollections.delete(key);
+        }
+      }
       return invalidated;
     },
     invalidatePlansUnderPrefix(prefix) {

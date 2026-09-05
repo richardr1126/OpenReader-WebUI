@@ -458,23 +458,23 @@ export const postTtsPlaybackCursor = async (
   sessionId: string,
   ordinal: number,
   headers: TTSRequestHeaders,
-  options?: { keepalive?: boolean; signal?: AbortSignal; playbackActive?: boolean; sessionInstanceId?: string; requireAcknowledgement?: boolean },
+  options: { keepalive?: boolean; signal?: AbortSignal; playbackActive?: boolean; sessionInstanceId: string; requireAcknowledgement?: boolean },
 ): Promise<{ workerOpId: string | null } | null> => {
   const response = await fetch(`/api/tts/stream/${encodeURIComponent(sessionId)}/cursor`, {
     method: 'POST',
     headers: headers as HeadersInit,
     body: JSON.stringify({
       ordinal,
-      ...(options?.sessionInstanceId === undefined ? {} : { sessionInstanceId: options.sessionInstanceId }),
-      ...(options?.playbackActive === undefined
+      sessionInstanceId: options.sessionInstanceId,
+      ...(options.playbackActive === undefined
         ? {}
         : { playbackActive: options.playbackActive }),
     }),
-    keepalive: options?.keepalive ?? false,
-    signal: AbortSignal.any([AbortSignal.timeout(10_000), ...(options?.signal ? [options.signal] : [])]),
+    keepalive: options.keepalive ?? false,
+    signal: AbortSignal.any([AbortSignal.timeout(10_000), ...(options.signal ? [options.signal] : [])]),
   }).catch(() => null);
   if (!response?.ok) {
-    if (options?.requireAcknowledgement) throw new Error('Playback activation could not be confirmed');
+    if (options.requireAcknowledgement) throw new Error('Playback activation could not be confirmed');
     return null;
   }
   return response.json().catch(() => null);

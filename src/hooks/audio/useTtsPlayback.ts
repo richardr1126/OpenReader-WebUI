@@ -528,6 +528,7 @@ export function useTtsPlayback(input: UseTtsPlaybackInput) {
         }
       })();
       if (runId !== playbackRunIdRef.current) return;
+      if (!session.sessionInstanceId) throw new Error('Prepared TTS playback session was missing its instance identity');
 
       playbackSessionRef.current = {
         sessionId: session.sessionId,

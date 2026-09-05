@@ -228,6 +228,30 @@ describe('playback session read model', () => {
       .resolves.toMatchObject([{ ordinal: 2 }]);
   });
 
+  test('does not reuse a pending scope collection after cache invalidation', async () => {
+    const fixture = createFixture();
+    fixture.sidecars.set(0, completedSidecar(0));
+    let release!: (ordinals: number[]) => void;
+    fixture.listSegmentOrdinals.mockReturnValueOnce(new Promise((resolve) => { release = resolve; }));
+    const staleRead = fixture.model.readSegmentIndexRows(session);
+    await vi.waitFor(() => expect(fixture.listSegmentOrdinals).toHaveBeenCalledTimes(1));
+
+    fixture.sidecars.clear();
+    fixture.sidecars.set(1, completedSidecar(1));
+    expect(fixture.model.invalidateSidecarsForScope({
+      storageUserId: session.storageUserId,
+      documentId: session.documentId,
+      documentVersion: session.documentVersion,
+      settingsHash: session.settingsHash,
+    })).toBe(1);
+
+    await expect(fixture.model.readSegmentIndexRows(session))
+      .resolves.toMatchObject([{ ordinal: 1 }]);
+    expect(fixture.listSegmentOrdinals).toHaveBeenCalledTimes(2);
+    release([0]);
+    await staleRead;
+  });
+
   test('invalidates cached sidecars by exact scope and parsed plans by prefix', async () => {
     const fixture = createFixture();
     fixture.sidecars.set(0, completedSidecar(0));

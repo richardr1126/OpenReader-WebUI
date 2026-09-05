@@ -13,6 +13,7 @@ import type {
   TtsPlaybackSessionPrepareRequest,
   TtsPlaybackSessionPrepareResponse,
   TtsPlaybackCursorResponse,
+  TtsPlaybackCursorUpdateRequest,
   TtsPlaybackExportArtifactRequest,
   TtsPlaybackExportArtifactResolution,
   TtsPlaybackPlanRequest,
@@ -203,19 +204,15 @@ export class ComputeWorkerClient {
     return this.requestJson('GET', `/v1/tts-playback/sessions/${encodeURIComponent(input.sessionId)}/segments${suffix}`);
   }
 
-  updateTtsPlaybackCursor(input: {
-    sessionId: string;
-    sessionInstanceId?: string;
-    ordinal: number;
-    playbackActive?: boolean;
-    expiresAt?: number;
-  }): Promise<TtsPlaybackCursorResponse> {
-    return this.requestJson('PUT', `/v1/tts-playback/sessions/${encodeURIComponent(input.sessionId)}/cursor`, {
-      ...(input.sessionInstanceId === undefined ? {} : { sessionInstanceId: input.sessionInstanceId }),
-      ordinal: input.ordinal,
-      ...(input.playbackActive === undefined ? {} : { playbackActive: input.playbackActive }),
-      ...(input.expiresAt === undefined ? {} : { expiresAt: input.expiresAt }),
-    });
+  updateTtsPlaybackCursor(
+    input: TtsPlaybackCursorUpdateRequest & { sessionId: string },
+  ): Promise<TtsPlaybackCursorResponse> {
+    const { sessionId, ...body } = input;
+    return this.requestJson(
+      'PUT',
+      `/v1/tts-playback/sessions/${encodeURIComponent(sessionId)}/cursor`,
+      body,
+    );
   }
 
   clearTtsPlaybackScope(input: {

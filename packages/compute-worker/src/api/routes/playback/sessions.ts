@@ -196,7 +196,7 @@ export function registerPlaybackSessionRoutes(
     }
     const now = Date.now();
     const sessionInstanceId = resolveTtsPlaybackSessionInstanceId(session);
-    if (parsed.data.sessionInstanceId !== undefined && parsed.data.sessionInstanceId !== sessionInstanceId) {
+    if (parsed.data.sessionInstanceId !== sessionInstanceId) {
       return reply.code(409).send({ error: 'Playback session was replaced' });
     }
     await playbackStorage?.sessions.patchSession(sessionId, {

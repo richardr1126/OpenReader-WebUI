@@ -5417,6 +5417,7 @@
                   }
                 },
                 "required": [
+                  "sessionInstanceId",
                   "ordinal"
                 ],
                 "additionalProperties": false

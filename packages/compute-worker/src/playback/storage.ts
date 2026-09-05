@@ -88,6 +88,7 @@ export interface TtsPlaybackSessionStore {
     sessionId: string,
     expectedGenerationRunId: string | null,
     patch: Partial<Omit<TtsPlaybackSessionState, 'schemaVersion' | 'sessionId'>>,
+    expectedSessionInstanceId?: string,
   ): Promise<boolean>;
   updateCursor(
     sessionId: string,
@@ -405,12 +406,22 @@ export function createTtsPlaybackKvStore(input: {
       await patchSessionRecord(sessionId, recordPatch, undefined, sessionInstanceId);
     },
 
-    async patchSessionIfGenerationRun(sessionId, expectedGenerationRunId, patch) {
+    async patchSessionIfGenerationRun(
+      sessionId,
+      expectedGenerationRunId,
+      patch,
+      expectedSessionInstanceId,
+    ) {
       const recordPatch: Partial<TtsPlaybackSessionState> = { ...patch };
       delete recordPatch.cursorOrdinal;
       delete recordPatch.cursorUpdatedAt;
       delete recordPatch.playbackActive;
-      return patchSessionRecord(sessionId, recordPatch, expectedGenerationRunId);
+      return patchSessionRecord(
+        sessionId,
+        recordPatch,
+        expectedGenerationRunId,
+        expectedSessionInstanceId,
+      );
     },
 
     async updateCursor(sessionId, ordinal, expectedSessionInstanceId, updatedAt = Date.now()) {

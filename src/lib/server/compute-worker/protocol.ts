@@ -32,6 +32,8 @@ export type TtsPlaybackSessionPrepareResponse =
   paths['/v1/tts-playback/sessions/prepare']['post']['responses'][200]['content']['application/json'];
 export type TtsPlaybackCursorResponse =
   paths['/v1/tts-playback/sessions/{sessionId}/cursor']['put']['responses'][200]['content']['application/json'];
+export type TtsPlaybackCursorUpdateRequest =
+  paths['/v1/tts-playback/sessions/{sessionId}/cursor']['put']['requestBody']['content']['application/json'];
 export type TtsPlaybackPlanRequest =
   Omit<TtsPlaybackRequest, 'sessionId' | 'planObjectKey' | 'generationRunId' | 'expiresAt' | 'aheadWindow' | 'backgroundExtent' | 'generationExtent'>;
 export type TtsPlaybackSessionResolveRequest =

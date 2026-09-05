@@ -589,7 +589,7 @@ export interface paths {
             requestBody: {
                 content: {
                     "application/json": {
-                        sessionInstanceId?: string;
+                        sessionInstanceId: string;
                         ordinal: number;
                         playbackActive?: boolean;
                         expiresAt?: number;

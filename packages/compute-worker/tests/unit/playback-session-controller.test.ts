@@ -70,8 +70,11 @@ function createFixture(
     _sessionId: string,
     expectedGenerationRunId: string | null,
     patch: Partial<PlaybackSessionRow>,
+    expectedSessionInstanceId?: string,
   ) => {
     if ((session.generationRunId ?? null) !== expectedGenerationRunId) return false;
+    if (expectedSessionInstanceId !== undefined
+      && resolveTtsPlaybackSessionInstanceId(session) !== expectedSessionInstanceId) return false;
     session = { ...session, ...patch };
     return true;
   });
@@ -116,6 +119,7 @@ function createFixture(
     enqueueOrReuse,
     updateCursor,
     currentSession: () => session,
+    replaceSession: (next: PlaybackSessionRow) => { session = next; },
     context,
     readModel,
   };
@@ -131,6 +135,17 @@ describe('playback session continuation controller', () => {
     expect(fixture.enqueueOrReuse.mock.calls[1][0].opKey).not.toBe(first);
     expect(fixture.currentSession().sessionInstanceId).toBe(instance);
     expect(fixture.currentSession().sessionId).toBe('session-1');
+  });
+
+  test('does not claim a replacement session that reuses the generation run id', async () => {
+    const fixture = createFixture(playbackSession());
+    const staleSession = fixture.currentSession();
+    fixture.replaceSession({ ...staleSession, sessionInstanceId: 'instance-2' });
+
+    await fixture.controller.enqueueContinuationIfNeeded(staleSession, Date.now(), 'cursor');
+
+    expect(fixture.enqueueOrReuse).not.toHaveBeenCalled();
+    expect(fixture.currentSession().sessionInstanceId).toBe('instance-2');
   });
 
   test('preparation queues nothing until activation and rejects a delayed old pause', async () => {
@@ -151,6 +166,11 @@ describe('playback session continuation controller', () => {
       await fixture.controller.updateCursor('session-1', 12, { ensureGeneration: true });
       expect(fixture.enqueueOrReuse).not.toHaveBeenCalled();
       const firstInstance = prepared.json().sessionInstanceId;
+      const missingInstance = await app.inject({
+        method: 'PUT', url: '/v1/tts-playback/sessions/session-1/cursor',
+        payload: { ordinal: 12, playbackActive: true },
+      });
+      expect(missingInstance.statusCode).toBe(400);
       const activated = await app.inject({ method: 'PUT', url: '/v1/tts-playback/sessions/session-1/cursor',
         payload: { ordinal: 12, playbackActive: true, sessionInstanceId: firstInstance } });
       expect(activated.statusCode).toBe(200);

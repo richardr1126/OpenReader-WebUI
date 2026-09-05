@@ -464,6 +464,51 @@ describe('TTS playback storage', () => {
     });
   });
 
+  test('rejects a generation patch from a replaced session instance', async () => {
+    const kv = new MemoryKv();
+    const store = createTtsPlaybackKvStore({ getKv: async () => kv });
+    const initial = {
+      schemaVersion: 1 as const,
+      sessionId: 'session-instance-guard',
+      userId: 'user-1',
+      storageUserId: 'storage-1',
+      documentId: 'a'.repeat(64),
+      documentVersion: 1,
+      readerType: 'epub' as const,
+      status: 'running' as const,
+      settingsHash: 'settings-hash',
+      settingsJson: { voice: 'v' },
+      playbackActive: true,
+      generationRunId: 'shared-run',
+      sessionInstanceId: 'instance-old',
+      generationStartOrdinal: 10,
+      cursorOrdinal: 10,
+      cursorUpdatedAt: 100,
+      planObjectKey: 'plans/session-instance-guard.json',
+      expiresAt: 1234,
+      lastError: null,
+      updatedAt: 100,
+    };
+    await store.putSessionIfNewer(initial);
+    await store.putSessionIfNewer({
+      ...initial,
+      sessionInstanceId: 'instance-new',
+      expiresAt: 1235,
+      updatedAt: 101,
+    });
+
+    expect(await store.patchSessionIfGenerationRun(
+      initial.sessionId,
+      'shared-run',
+      { generationRunId: 'stale-claim' },
+      'instance-old',
+    )).toBe(false);
+    expect(await store.getSession(initial.sessionId)).toMatchObject({
+      sessionInstanceId: 'instance-new',
+      generationRunId: 'shared-run',
+    });
+  });
+
   test('does not let an older session request overwrite a newer overlapping request', async () => {
     class InterleavingKv extends MemoryKv {
       beforeNextUpdate: (() => Promise<void>) | null = null;
