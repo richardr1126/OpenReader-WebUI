@@ -146,6 +146,18 @@ export type PlaybackControlPresentation = {
   statusText: 'Preparing audio…' | 'Loading audio…' | null;
 };
 
+export function isPlaybackPhaseProcessing(
+  isPlaying: boolean,
+  phase: TtsPlaybackPhase,
+): boolean {
+  return isPlaying && (
+    phase === 'planning'
+    || phase === 'ready'
+    || phase === 'seeking'
+    || phase === 'buffering'
+  );
+}
+
 export function resolvePlaybackControlPresentation(
   isPlaying: boolean,
   phase: TtsPlaybackPhase,

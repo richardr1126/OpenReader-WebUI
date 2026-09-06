@@ -12,7 +12,6 @@ export function usePlaybackMediaResume(input: {
   playbackRequestHeadersRef: MutableRefObject<TTSRequestHeaders | null>;
   playbackRunIdRef: MutableRefObject<number>;
   setIsPlaying: (value: boolean) => void;
-  setIsProcessing: (value: boolean) => void;
   setPlaybackPhase: (phase: TtsPlaybackPhase) => void;
   setWorkerPlaybackActive: (active: boolean) => void;
   startPlaybackForegroundSync: (runId: number, headers: TTSRequestHeaders) => void;
@@ -20,7 +19,7 @@ export function usePlaybackMediaResume(input: {
 }) {
   const {
     audioSpeed, isPlayingRef, playbackInFlightRef, playbackRequestHeadersRef,
-    playbackRunIdRef, setIsPlaying, setIsProcessing, setPlaybackPhase,
+    playbackRunIdRef, setIsPlaying, setPlaybackPhase,
     setWorkerPlaybackActive, startPlaybackForegroundSync, checkRecovery,
   } = input;
   return useCallback((audio: HTMLAudioElement) => {
@@ -31,7 +30,6 @@ export function usePlaybackMediaResume(input: {
     audio.playbackRate = audioSpeed;
     playbackInFlightRef.current = true;
     setPlaybackPhase('buffering');
-    setIsProcessing(true);
     isPlayingRef.current = true;
     setIsPlaying(true);
     // Recovery also watches play() promises that never settle. Neither path
@@ -41,7 +39,7 @@ export function usePlaybackMediaResume(input: {
     )).then((result) => { if (result.status === 'stale') checkRecovery(); });
   }, [
     audioSpeed, isPlayingRef, playbackInFlightRef, playbackRequestHeadersRef,
-    playbackRunIdRef, setIsPlaying, setIsProcessing, setPlaybackPhase,
+    playbackRunIdRef, setIsPlaying, setPlaybackPhase,
     setWorkerPlaybackActive, startPlaybackForegroundSync, checkRecovery,
   ]);
 }

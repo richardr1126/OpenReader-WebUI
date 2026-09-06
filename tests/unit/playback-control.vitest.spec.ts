@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest';
 
 import {
   isPlaybackAbortError,
+  isPlaybackPhaseProcessing,
   isPlaybackStartBufferReady,
   measurePlaybackStartBuffer,
   resumePlaybackMedia,
@@ -38,6 +39,16 @@ describe('playback media resume', () => {
 });
 
 describe('playback control presentation', () => {
+  test('derives processing from playback intent and lifecycle phase', () => {
+    expect(isPlaybackPhaseProcessing(true, 'planning')).toBe(true);
+    expect(isPlaybackPhaseProcessing(true, 'ready')).toBe(true);
+    expect(isPlaybackPhaseProcessing(true, 'buffering')).toBe(true);
+    expect(isPlaybackPhaseProcessing(true, 'seeking')).toBe(true);
+    expect(isPlaybackPhaseProcessing(true, 'playing')).toBe(false);
+    expect(isPlaybackPhaseProcessing(false, 'ready')).toBe(false);
+    expect(isPlaybackPhaseProcessing(true, 'failed')).toBe(false);
+  });
+
   test('does not claim playback is audible while planning or buffering', () => {
     expect(resolvePlaybackControlPresentation(true, 'planning')).toEqual({
       isPending: true,
