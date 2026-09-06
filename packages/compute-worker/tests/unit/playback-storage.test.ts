@@ -130,6 +130,17 @@ class WatchableMemoryKv extends MemoryKv {
 }
 
 describe('TTS playback storage', () => {
+  test('lists existing segment ordinals only within the exact artifact scope', async () => {
+    const storage = new MemoryStorage();
+    const artifacts = createTtsPlaybackSegmentArtifactStore({ storage, s3Prefix: 'openreader' });
+    const scope = { storageUserId: 'user-1', documentId: 'a'.repeat(64), documentVersion: 1, settingsHash: 'settings-1' };
+    await storage.putObject(artifacts.sidecarKey({ ...scope, ordinal: 9000 }), Buffer.from('{}'));
+    await storage.putObject(artifacts.sidecarKey({ ...scope, ordinal: 2 }), Buffer.from('{}'));
+    await storage.putObject(artifacts.sidecarKey({ ...scope, settingsHash: 'other-settings', ordinal: 3 }), Buffer.from('{}'));
+    await storage.putObject(artifacts.sidecarKey({ ...scope, ordinal: 4 }) + '.tmp', Buffer.from('{}'));
+    expect(await artifacts.listSegmentOrdinals(scope)).toEqual([2, 9000]);
+  });
+
   test('stores sessions and updates cursors in KV', async () => {
     const kv = new MemoryKv();
     const store = createTtsPlaybackKvStore({ getKv: async () => kv });
@@ -183,6 +194,12 @@ describe('TTS playback storage', () => {
     });
 
     await store.patchSession('session-1', { status: 'running', updatedAt: 400 });
+    await store.patchSession('session-1', {
+      playbackActive: true, cursorOrdinal: 99, cursorUpdatedAt: 450, expiresAt: 9999,
+    }, 'replaced-instance');
+    expect(await store.getSession('session-1')).toMatchObject({
+      playbackActive: false, cursorOrdinal: 42, expiresAt: 1234,
+    });
     await store.updateCursor('session-1', 43, 'instance-1', 500);
     expect(await store.getSession('session-1')).toMatchObject({
       status: 'running',
@@ -444,6 +461,51 @@ describe('TTS playback storage', () => {
       generationRunId: 'run-new',
       generationSatisfiedFromOrdinal: null,
       generationSatisfiedThroughOrdinal: null,
+    });
+  });
+
+  test('rejects a generation patch from a replaced session instance', async () => {
+    const kv = new MemoryKv();
+    const store = createTtsPlaybackKvStore({ getKv: async () => kv });
+    const initial = {
+      schemaVersion: 1 as const,
+      sessionId: 'session-instance-guard',
+      userId: 'user-1',
+      storageUserId: 'storage-1',
+      documentId: 'a'.repeat(64),
+      documentVersion: 1,
+      readerType: 'epub' as const,
+      status: 'running' as const,
+      settingsHash: 'settings-hash',
+      settingsJson: { voice: 'v' },
+      playbackActive: true,
+      generationRunId: 'shared-run',
+      sessionInstanceId: 'instance-old',
+      generationStartOrdinal: 10,
+      cursorOrdinal: 10,
+      cursorUpdatedAt: 100,
+      planObjectKey: 'plans/session-instance-guard.json',
+      expiresAt: 1234,
+      lastError: null,
+      updatedAt: 100,
+    };
+    await store.putSessionIfNewer(initial);
+    await store.putSessionIfNewer({
+      ...initial,
+      sessionInstanceId: 'instance-new',
+      expiresAt: 1235,
+      updatedAt: 101,
+    });
+
+    expect(await store.patchSessionIfGenerationRun(
+      initial.sessionId,
+      'shared-run',
+      { generationRunId: 'stale-claim' },
+      'instance-old',
+    )).toBe(false);
+    expect(await store.getSession(initial.sessionId)).toMatchObject({
+      sessionInstanceId: 'instance-new',
+      generationRunId: 'shared-run',
     });
   });
 

@@ -10,6 +10,10 @@ import type {
   AccountExportResolveRequest,
   AccountExportResolution,
   TtsPlaybackRequest,
+  TtsPlaybackSessionPrepareRequest,
+  TtsPlaybackSessionPrepareResponse,
+  TtsPlaybackCursorResponse,
+  TtsPlaybackCursorUpdateRequest,
   TtsPlaybackExportArtifactRequest,
   TtsPlaybackExportArtifactResolution,
   TtsPlaybackPlanRequest,
@@ -135,6 +139,13 @@ export class ComputeWorkerClient {
     return this.requestJson('POST', '/v1/tts-playback/plans/jobs', input);
   }
 
+  prepareTtsPlaybackSession(
+    input: TtsPlaybackSessionPrepareRequest,
+    init?: { signal?: AbortSignal },
+  ): Promise<TtsPlaybackSessionPrepareResponse> {
+    return this.requestJson('POST', '/v1/tts-playback/sessions/prepare', input, init);
+  }
+
   createTtsPlaybackExportArtifactOperation(input: TtsPlaybackExportArtifactRequest): Promise<ComputeOperation> {
     return this.requestJson('POST', '/v1/tts-playback/exports/jobs', input);
   }
@@ -193,17 +204,15 @@ export class ComputeWorkerClient {
     return this.requestJson('GET', `/v1/tts-playback/sessions/${encodeURIComponent(input.sessionId)}/segments${suffix}`);
   }
 
-  updateTtsPlaybackCursor(input: {
-    sessionId: string;
-    ordinal: number;
-    playbackActive?: boolean;
-    expiresAt?: number;
-  }): Promise<{ sessionId: string; cursorOrdinal: number; playbackActive: boolean; expiresAt: number }> {
-    return this.requestJson('PUT', `/v1/tts-playback/sessions/${encodeURIComponent(input.sessionId)}/cursor`, {
-      ordinal: input.ordinal,
-      ...(input.playbackActive === undefined ? {} : { playbackActive: input.playbackActive }),
-      ...(input.expiresAt === undefined ? {} : { expiresAt: input.expiresAt }),
-    });
+  updateTtsPlaybackCursor(
+    input: TtsPlaybackCursorUpdateRequest & { sessionId: string },
+  ): Promise<TtsPlaybackCursorResponse> {
+    const { sessionId, ...body } = input;
+    return this.requestJson(
+      'PUT',
+      `/v1/tts-playback/sessions/${encodeURIComponent(sessionId)}/cursor`,
+      body,
+    );
   }
 
   clearTtsPlaybackScope(input: {
@@ -212,7 +221,7 @@ export class ComputeWorkerClient {
     documentVersion?: number;
     readerType?: 'pdf' | 'epub' | 'html';
     namespace: string | null;
-  }): Promise<{
+  }, init?: { signal?: AbortSignal }): Promise<{
     deletedAudioObjects: number;
     deletedSidecarObjects: number;
     deletedPlanObjects: number;
@@ -220,7 +229,7 @@ export class ComputeWorkerClient {
     invalidatedPlaybackSessions: number;
     invalidatedJobOperations: number;
   }> {
-    return this.requestJson('POST', '/v1/tts-playback/cache/clear', input);
+    return this.requestJson('POST', '/v1/tts-playback/cache/clear', input, init);
   }
 
   cleanupUserStorage(input: {

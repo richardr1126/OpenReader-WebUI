@@ -10,14 +10,17 @@ import { errorResponse } from '@/lib/server/errors/next-response';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-function parseCursorUpdate(value: unknown): { ordinal: number; playbackActive?: boolean } | null {
+function parseCursorUpdate(value: unknown): { ordinal: number; playbackActive?: boolean; sessionInstanceId: string } | null {
   if (!value || typeof value !== 'object') return null;
   const record = value as Record<string, unknown>;
   const ordinal = Number(record.ordinal);
   if (!Number.isFinite(ordinal)) return null;
   if (record.playbackActive !== undefined && typeof record.playbackActive !== 'boolean') return null;
+  if (typeof record.sessionInstanceId !== 'string'
+    || !record.sessionInstanceId.trim() || record.sessionInstanceId.length > 256) return null;
   return {
     ordinal: Math.max(0, Math.floor(ordinal)),
+    sessionInstanceId: record.sessionInstanceId,
     ...(typeof record.playbackActive === 'boolean' ? { playbackActive: record.playbackActive } : {}),
   };
 }
@@ -43,13 +46,14 @@ export async function POST(
 
     const cursorUpdate = parseCursorUpdate(await request.json().catch(() => null));
     if (cursorUpdate === null) {
-      return NextResponse.json({ error: 'Invalid cursor ordinal' }, { status: 400 });
+      return NextResponse.json({ error: 'Invalid playback cursor update' }, { status: 400 });
     }
 
     const now = Date.now();
     const expiresAt = now + TTS_PLAYBACK_SESSION_TTL_MS;
-    await getComputeWorkerClient().updateTtsPlaybackCursor({
+    const updated = await getComputeWorkerClient().updateTtsPlaybackCursor({
       sessionId: session.sessionId,
+      sessionInstanceId: cursorUpdate.sessionInstanceId,
       ordinal: cursorUpdate.ordinal,
       ...(cursorUpdate.playbackActive === undefined
         ? {}
@@ -59,6 +63,7 @@ export async function POST(
 
     return NextResponse.json({
       sessionId: session.sessionId,
+      workerOpId: updated.workerOpId,
       cursorOrdinal: cursorUpdate.ordinal,
       playbackActive: cursorUpdate.playbackActive ?? session.playbackActive ?? true,
       expiresAt,

@@ -1,9 +1,24 @@
-import { afterEach, beforeEach, describe, expect, test } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { createComputeWorkerApp } from '../../src/api/app';
 import { buildTtsPlaybackOperationKey } from '../../src/operations/keys';
 import { FakeControlPlane } from '../fixtures/fake-control-plane';
 
 const AUTH = { authorization: 'Bearer test-token' };
+
+function snapshotSequence(body: string): Array<{ eventId: number; status: string }> {
+  return body.split('\n\n').flatMap((frame) => {
+    if (!frame.split('\n').includes('event: snapshot')) return [];
+    const id = frame.split('\n').find((line) => line.startsWith('id: '));
+    const data = frame.split('\n').find((line) => line.startsWith('data: '));
+    if (!id || !data) return [];
+    const payload = JSON.parse(data.slice('data: '.length)) as {
+      snapshot?: { status?: unknown };
+    };
+    return typeof payload.snapshot?.status === 'string'
+      ? [{ eventId: Number(id.slice('id: '.length)), status: payload.snapshot.status }]
+      : [];
+  });
+}
 
 describe('compute worker API routes', () => {
   let fake: FakeControlPlane;
@@ -405,6 +420,52 @@ describe('compute worker API routes', () => {
     expect(stream.body).toContain('event: snapshot');
     expect(stream.body).toContain('id: 7');
     expect(stream.body).toContain('"status":"succeeded"');
+  });
+
+  test('cleans up a subscription that replays completion before returning its teardown', async () => {
+    const now = Date.now();
+    const initial = {
+      opId: 'op-gap', opKey: 'k-gap', kind: 'pdf_layout' as const,
+      jobId: 'job-gap', status: 'running' as const, queuedAt: now, updatedAt: now,
+    };
+    fake.seedState(initial);
+    const stop = vi.fn();
+    vi.spyOn(fake.deps.operationEventStream, 'subscribe').mockImplementationOnce(async ({ onEvent }) => {
+      await onEvent({ eventId: 1, snapshot: { ...initial, status: 'queued', updatedAt: now - 1 } });
+      await onEvent({ eventId: 2, snapshot: { ...initial, status: 'succeeded', updatedAt: now + 1 } });
+      return stop;
+    });
+    const stream = await runtime.app.inject({ method: 'GET', url: '/v1/operations/op-gap/events', headers: AUTH });
+    expect(snapshotSequence(stream.body)).toEqual([
+      { eventId: 0, status: 'running' },
+      { eventId: 2, status: 'succeeded' },
+    ]);
+    await vi.waitFor(() => expect(stop).toHaveBeenCalledOnce());
+  });
+
+  test('does not replace the initial operation snapshot with an older equal-time replay', async () => {
+    const now = Date.now();
+    const initial = {
+      opId: 'op-equal-time', opKey: 'k-equal-time', kind: 'pdf_layout' as const,
+      jobId: 'job-equal-time', status: 'running' as const, queuedAt: now, updatedAt: now,
+    };
+    fake.seedState(initial);
+    const stop = vi.fn();
+    vi.spyOn(fake.deps.operationEventStream, 'subscribe').mockImplementationOnce(async ({ onEvent }) => {
+      await onEvent({ eventId: 1, snapshot: { ...initial, status: 'queued' } });
+      const succeeded = { ...initial, status: 'succeeded' as const };
+      fake.seedState(succeeded);
+      await onEvent({ eventId: 2, snapshot: succeeded });
+      return stop;
+    });
+    const stream = await runtime.app.inject({
+      method: 'GET', url: '/v1/operations/op-equal-time/events', headers: AUTH,
+    });
+    expect(snapshotSequence(stream.body)).toEqual([
+      { eventId: 0, status: 'running' },
+      { eventId: 2, status: 'succeeded' },
+    ]);
+    await vi.waitFor(() => expect(stop).toHaveBeenCalledOnce());
   });
 
   test('streams TTS playback completed-count progress in SSE snapshots', async () => {

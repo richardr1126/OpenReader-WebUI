@@ -28,6 +28,7 @@ export interface PlaybackSessionController {
     requestBody: typeof ttsPlaybackOperationCreateSchema._output,
     status: PlaybackSessionRow['status'],
     workerOpId: string | null,
+    playbackActive?: boolean,
   ): Promise<void>;
 }
 
@@ -94,10 +95,13 @@ export function createPlaybackSessionController(
       ) return;
     }
 
-    // Cursor heartbeats and audio consumption are two signals for the same
-    // active cursor, not two independent generation runs. Sharing the token
-    // lets operation idempotency collapse races between both drivers.
-    const generationRunId = `active:${cursorOrdinal}`;
+    // Collapse concurrent signals for the same predecessor, not every future
+    // visit to this cursor. A paused/superseded job can finish successfully
+    // without filling its window; reusing its key would never resume synthesis.
+    const predecessor = hashOpKey(JSON.stringify([
+      resolveTtsPlaybackSessionInstanceId(session), session.generationRunId ?? null,
+    ])).slice(0, 24);
+    const generationRunId = `active:${cursorOrdinal}:${predecessor}`;
     const requestBody: typeof ttsPlaybackOperationCreateSchema._output = {
       sessionId: session.sessionId,
       userId: session.userId,
@@ -134,21 +138,29 @@ export function createPlaybackSessionController(
         generationSatisfiedThroughOrdinal: null,
         updatedAt: now,
       },
+      resolveTtsPlaybackSessionInstanceId(session),
     );
     const claimedSession = await readModel.readSession(session.sessionId);
     if (
       !claimedSession
       || claimedSession.playbackActive === false
       || claimedSession.generationRunId !== generationRunId
+      || resolveTtsPlaybackSessionInstanceId(claimedSession)
+        !== resolveTtsPlaybackSessionInstanceId(session)
     ) return;
     await ensureOrphanedOpRecovery();
     const op = await deps.orchestrator.enqueueOrReuse(requestOp);
-    await playbackStorage.sessions.patchSessionIfGenerationRun(session.sessionId, generationRunId, {
-      status: op.status === 'failed' ? 'failed' : op.status === 'succeeded' ? 'succeeded' : 'running',
-      workerOpId: op.opId,
-      lastError: op.status === 'failed' ? (op.error?.message ?? 'Failed to enqueue playback continuation') : null,
-      updatedAt: now,
-    }).catch((error) => {
+    await playbackStorage.sessions.patchSessionIfGenerationRun(
+      session.sessionId,
+      generationRunId,
+      {
+        status: op.status === 'failed' ? 'failed' : op.status === 'succeeded' ? 'succeeded' : 'running',
+        workerOpId: op.opId,
+        lastError: op.status === 'failed' ? (op.error?.message ?? 'Failed to enqueue playback continuation') : null,
+        updatedAt: now,
+      },
+      resolveTtsPlaybackSessionInstanceId(session),
+    ).catch((error) => {
       app.log.warn(
         { sessionId: session.sessionId, opId: op.opId, error: toErrorMessage(error) },
         'tts.playback.resume_session_patch_failed',
@@ -190,7 +202,7 @@ export function createPlaybackSessionController(
       // spawning one worker operation per spoken segment.
       if (session) await enqueueContinuationIfNeeded(session, now, 'stream');
     },
-    async putSessionState(requestBody, status, workerOpId) {
+    async putSessionState(requestBody, status, workerOpId, playbackActive = true) {
       const now = Date.now();
       const startOrdinal = Math.max(0, Math.floor(Number(requestBody.planning.selectedOrdinal)));
       await playbackStorage?.sessions.putSessionIfNewer({
@@ -208,7 +220,7 @@ export function createPlaybackSessionController(
         aheadWindow: requestBody.aheadWindow ?? null,
         backgroundExtent: requestBody.backgroundExtent ?? null,
         generationExtent: requestBody.generationExtent ?? null,
-        playbackActive: true,
+        playbackActive,
         generationRunId: requestBody.generationRunId ?? null,
         generationSatisfiedFromOrdinal: null,
         generationSatisfiedThroughOrdinal: null,
