@@ -10,7 +10,6 @@ import {
 import {
   createTtsPlaybackSession,
   getTtsPlaybackSeekLayout,
-  postTtsPlaybackCursor,
   type TtsPlaybackPlanPayload,
   type TtsPlaybackSeekLayout,
   type TtsPlaybackSessionPayload,
@@ -19,12 +18,12 @@ import type { TTSRequestHeaders } from '@/types/client';
 import type { TtsPlaybackPlan } from '@/lib/shared/playback-plan';
 import {
   isPlaybackAbortError,
-  isPlaybackStartBufferReady,
   resumePlaybackMedia,
   waitForPlaybackStartBuffer,
 } from '@/lib/client/tts/playback-control';
 import { usePlaybackAudioElement } from '@/hooks/audio/usePlaybackAudioElement';
 import { usePlaybackMediaResume } from '@/hooks/audio/usePlaybackMediaResume';
+import { usePlaybackSeek } from '@/hooks/audio/usePlaybackSeek';
 import { createPlaybackRecovery, createTtsMediaRecovery } from '@/lib/client/tts/playback-recovery';
 import { installPlaybackMediaEvents } from '@/lib/client/tts/playback-media-events';
 import { usePlaybackForegroundSync } from '@/hooks/audio/usePlaybackForegroundSync';
@@ -93,8 +92,6 @@ export function useTtsPlayback(input: UseTtsPlaybackInput) {
   const playbackInFlightRef = useRef(false);
   const playbackSessionRef = useRef<PlaybackSessionState | null>(null);
   const playbackActiveRef = useRef(false);
-  const pendingResyncRef = useRef<{ ordinal: number } | null>(null);
-  const resyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const playbackRequestHeadersRef = useRef<TTSRequestHeaders | null>(null);
   const playbackRequestAbortRef = useRef<AbortController | null>(null);
   const playbackRecoveryRef = useRef<ReturnType<typeof createPlaybackRecovery> | null>(null);
@@ -135,6 +132,7 @@ export function useTtsPlayback(input: UseTtsPlaybackInput) {
     setWorkerPlaybackActive,
     startPlaybackForegroundSync,
     stopPlaybackForegroundSync,
+    updateWorkerPlaybackCursor,
   } = usePlaybackForegroundSync({
     playbackCursorOrdinalRef,
     playbackRequestHeadersRef,
@@ -143,18 +141,31 @@ export function useTtsPlayback(input: UseTtsPlaybackInput) {
     refreshPlaybackTimeline,
     setPlaybackSeekLayout,
   });
-
-  const stopSeekResync = useCallback(() => {
-    if (resyncTimerRef.current) {
-      clearTimeout(resyncTimerRef.current);
-      resyncTimerRef.current = null;
-    }
-  }, []);
-
-  const cancelSeekResync = useCallback(() => {
-    stopSeekResync();
-    pendingResyncRef.current = null;
-  }, [stopSeekResync]);
+  const {
+    cancelPendingSeek,
+    getPendingSeekOrdinal,
+    hasPendingSeek,
+    seekPlaybackTo,
+    seekPlaybackToOrdinal,
+    startPendingSeek,
+    syncActivePlaybackToOrdinal,
+  } = usePlaybackSeek({
+    audioRef: unlockedAudioRef,
+    audioSpeed,
+    isPlayingRef,
+    playbackActiveRef,
+    playbackRunIdRef,
+    playbackSeekLayout,
+    playbackSessionRef,
+    projectPlaybackTime,
+    publishPlaybackTimeSec,
+    refreshPlaybackTimeline,
+    setAudioDocumentTime,
+    setPlaybackPhase,
+    setSelectedOrdinal,
+    syncPlaybackLocator,
+    updateWorkerPlaybackCursor,
+  });
 
   const stopPlaybackRecovery = useCallback(() => {
     playbackRecoveryRef.current?.stop();
@@ -186,12 +197,12 @@ export function useTtsPlayback(input: UseTtsPlaybackInput) {
   const abortAudio = useCallback(() => {
     setWorkerPlaybackActive(false);
     invalidatePlaybackRun();
-    cancelSeekResync();
+    cancelPendingSeek();
     resetPlaybackSession();
     clearAudioSource();
     setCurrentWordIndex(null);
   }, [
-    cancelSeekResync,
+    cancelPendingSeek,
     clearAudioSource,
     invalidatePlaybackRun,
     resetPlaybackSession,
@@ -225,176 +236,8 @@ export function useTtsPlayback(input: UseTtsPlaybackInput) {
     setWorkerPlaybackActive,
     stopPlaybackForegroundSync,
     stopPlaybackProjectionLoop,
+    unlockedAudioRef,
   ]);
-
-  const startSeekResync = useCallback((ordinal: number) => {
-    pendingResyncRef.current = { ordinal };
-    setPlaybackPhase('buffering');
-    const runId = playbackRunIdRef.current;
-    const deadline = Date.now() + 60_000;
-    const tick = async () => {
-      const pending = pendingResyncRef.current;
-      const session = playbackSessionRef.current;
-      if (!pending || pending.ordinal !== ordinal || runId !== playbackRunIdRef.current || !session?.seekLayoutUrl) {
-        return;
-      }
-      if (Date.now() > deadline) {
-        pendingResyncRef.current = null;
-        return;
-      }
-      const headers = playbackRequestHeadersRef.current;
-      if (headers) void postTtsPlaybackCursor(session.sessionId, ordinal, headers, { sessionInstanceId: session.sessionInstanceId });
-
-      const layout = await getTtsPlaybackSeekLayout(session.seekLayoutUrl).catch(() => null);
-      if (runId !== playbackRunIdRef.current || pendingResyncRef.current?.ordinal !== ordinal) return;
-      const slot = layout?.segments.find((segment) => segment.ordinal === ordinal) ?? null;
-
-      if (slot?.generated && layout && isPlaybackStartBufferReady({
-        segments: layout.segments,
-        startOrdinal: ordinal,
-        playbackRate: audioSpeed,
-      })) {
-        if (layout) setPlaybackSeekLayout(layout);
-        await refreshPlaybackTimeline(session.timelineUrl).catch(() => undefined);
-        if (runId !== playbackRunIdRef.current || pendingResyncRef.current?.ordinal !== ordinal) return;
-        const targetSec = Math.max(0, slot.startMs / 1000);
-        setSelectedOrdinal(ordinal);
-        const audio = unlockedAudioRef.current;
-        if (audio && playbackActiveRef.current && audio.src) {
-          try {
-            setAudioDocumentTime(audio, targetSec, ordinal, targetSec);
-          } catch {
-            // Best-effort; projection below still updates the UI.
-          }
-          if (isPlayingRef.current) {
-            audio.playbackRate = audioSpeed;
-            void audio.play().catch(() => undefined);
-            setPlaybackPhase('playing');
-          } else {
-            setPlaybackPhase('ready');
-          }
-        }
-        publishPlaybackTimeSec(targetSec, { force: true });
-        projectPlaybackTime(targetSec);
-        pendingResyncRef.current = null;
-        return;
-      }
-
-      resyncTimerRef.current = setTimeout(() => { void tick(); }, 600);
-    };
-    stopSeekResync();
-    void tick();
-  }, [
-    audioSpeed,
-    isPlayingRef,
-    playbackRunIdRef,
-    projectPlaybackTime,
-    publishPlaybackTimeSec,
-    refreshPlaybackTimeline,
-    setPlaybackPhase,
-    setPlaybackSeekLayout,
-    setSelectedOrdinal,
-    setAudioDocumentTime,
-    stopSeekResync,
-  ]);
-
-  const seekPlaybackTo = useCallback((seconds: number) => {
-    const layout = playbackSeekLayout;
-    if (!layout || layout.segments.length === 0) return;
-    setPlaybackPhase('seeking');
-    const durationSec = Math.max(0, layout.durationMs / 1000);
-    const targetSec = Math.max(0, Math.min(seconds, durationSec));
-    const targetMs = targetSec * 1000;
-    const target = layout.segments.find((segment) => targetMs >= segment.startMs && targetMs < segment.endMs)
-      ?? layout.segments[layout.segments.length - 1];
-    if (!target) return;
-
-    const targetStartSec = Math.max(0, target.startMs / 1000);
-    publishPlaybackTimeSec(target.generated ? targetSec : targetStartSec, { force: true });
-    setSelectedOrdinal(target.ordinal);
-    if (target.locator && typeof target.locator === 'object') {
-      syncPlaybackLocator?.(target.locator as import('@/types/client').TTSSegmentLocator);
-    }
-
-    const session = playbackSessionRef.current;
-    const headers = playbackRequestHeadersRef.current;
-    if (session && headers) {
-      void postTtsPlaybackCursor(session.sessionId, target.ordinal, headers, { sessionInstanceId: session.sessionInstanceId });
-    }
-
-    const audio = unlockedAudioRef.current;
-
-    const hasReadyBuffer = target.generated && isPlaybackStartBufferReady({
-      segments: layout.segments,
-      startOrdinal: target.ordinal,
-      playbackRate: audioSpeed,
-      offsetWithinStartSegmentMs: Math.max(0, targetMs - target.startMs),
-    });
-
-    if (hasReadyBuffer) {
-      cancelSeekResync();
-      if (audio && playbackActiveRef.current && audio.src) {
-        try {
-          setAudioDocumentTime(audio, targetSec, target.ordinal, targetStartSec);
-        } catch {
-          // Best-effort; the projection still updates immediately below.
-        }
-        if (isPlayingRef.current) {
-          audio.playbackRate = audioSpeed;
-          void audio.play().catch(() => undefined);
-          setPlaybackPhase('playing');
-        } else {
-          setPlaybackPhase('ready');
-        }
-      }
-      projectPlaybackTime(targetSec);
-      return;
-    }
-
-    if (isPlayingRef.current && audio) {
-      try {
-        audio.pause();
-      } catch {
-        // ignore
-      }
-      setPlaybackPhase('buffering');
-    }
-    if (audio && playbackActiveRef.current && audio.src) {
-      try {
-        setAudioDocumentTime(audio, targetStartSec, target.ordinal, targetStartSec);
-      } catch {
-        // Best-effort; the resync re-seeks accurately when the audio is ready.
-      }
-    }
-    projectPlaybackTime(targetStartSec);
-    startSeekResync(target.ordinal);
-  }, [
-    audioSpeed,
-    cancelSeekResync,
-    isPlayingRef,
-    playbackSeekLayout,
-    projectPlaybackTime,
-    publishPlaybackTimeSec,
-    setPlaybackPhase,
-    setSelectedOrdinal,
-    setAudioDocumentTime,
-    startSeekResync,
-    syncPlaybackLocator,
-  ]);
-
-  const seekPlaybackToOrdinal = useCallback((ordinal: number): boolean => {
-    const layout = playbackSeekLayout;
-    if (!layout || !Number.isFinite(ordinal)) return false;
-    const target = layout.segments.find((entry) => entry.ordinal === Math.max(0, Math.floor(ordinal)));
-    if (!target) return false;
-    seekPlaybackTo(target.startMs / 1000);
-    return true;
-  }, [playbackSeekLayout, seekPlaybackTo]);
-
-  const syncActivePlaybackToOrdinal = useCallback((ordinal: number): boolean => {
-    if (!playbackActiveRef.current || !playbackSessionRef.current) return false;
-    return seekPlaybackToOrdinal(ordinal);
-  }, [seekPlaybackToOrdinal]);
 
   const playWorkerPlaybackStream = useCallback(async () => {
     const runId = playbackRunIdRef.current;
@@ -467,7 +310,7 @@ export function useTtsPlayback(input: UseTtsPlaybackInput) {
       playbackCursorOrdinalRef.current = requestedStartOrdinal;
       await setWorkerPlaybackActive(true, true);
       if (runId !== playbackRunIdRef.current || !isPlayingRef.current) return;
-      startPlaybackForegroundSync(runId, headers);
+      startPlaybackForegroundSync(runId);
 
       const initialSeekLayout = await waitForPlaybackStartBuffer({
         loadLayout: () => getTtsPlaybackSeekLayout(session.seekLayoutUrl).catch(() => null),
@@ -538,7 +381,7 @@ export function useTtsPlayback(input: UseTtsPlaybackInput) {
         sessionUrl: session.audioUrl,
         isCurrent: () => runId === playbackRunIdRef.current && isPlayingRef.current
           && playbackActiveRef.current && playbackSessionRef.current === activeSession
-          && !pendingResyncRef.current,
+          && !hasPendingSeek(),
         getDocumentTime: () => documentTimeForAudio(audio),
         getOrdinal: () => playbackCursorOrdinalRef.current,
         getLayout: () => latestSeekLayoutRef.current,
@@ -583,6 +426,7 @@ export function useTtsPlayback(input: UseTtsPlaybackInput) {
     checkRecovery,
     documentTimeForAudio,
     ensureAudio,
+    hasPendingSeek,
     isPlayingRef,
     onAdvance,
     pauseActivePlayback,
@@ -608,7 +452,6 @@ export function useTtsPlayback(input: UseTtsPlaybackInput) {
     audioSpeed,
     isPlayingRef,
     playbackInFlightRef,
-    playbackRequestHeadersRef,
     playbackRunIdRef,
     checkRecovery,
     setIsPlaying,
@@ -619,19 +462,21 @@ export function useTtsPlayback(input: UseTtsPlaybackInput) {
 
   const togglePlay = useCallback(() => {
     if (isPlaying) {
-      cancelSeekResync();
+      cancelPendingSeek();
       pauseActivePlayback();
       setIsPlaying(false);
       return;
     }
 
-    if (pendingResyncRef.current) {
+    const pendingSeekOrdinal = getPendingSeekOrdinal();
+    if (pendingSeekOrdinal !== null) {
       unlockAudioOnUserGesture(playbackActiveRef.current);
       setWorkerPlaybackActive(true);
       setPlaybackPhase('buffering');
       isPlayingRef.current = true;
       setIsPlaying(true);
-      startSeekResync(pendingResyncRef.current.ordinal);
+      startPlaybackForegroundSync(playbackRunIdRef.current);
+      startPendingSeek(pendingSeekOrdinal);
       return;
     }
 
@@ -646,16 +491,20 @@ export function useTtsPlayback(input: UseTtsPlaybackInput) {
     isPlayingRef.current = true;
     setIsPlaying(true);
   }, [
-    cancelSeekResync,
+    cancelPendingSeek,
+    getPendingSeekOrdinal,
     isPlaying,
     isPlayingRef,
     pauseActivePlayback,
+    playbackRunIdRef,
     resumeActivePlayback,
     setIsPlaying,
     setPlaybackPhase,
     setWorkerPlaybackActive,
-    startSeekResync,
+    startPendingSeek,
+    startPlaybackForegroundSync,
     unlockAudioOnUserGesture,
+    unlockedAudioRef,
   ]);
 
   useEffect(() => {
@@ -691,15 +540,14 @@ export function useTtsPlayback(input: UseTtsPlaybackInput) {
     };
     document.addEventListener('visibilitychange', onVisibilityChange);
     return () => document.removeEventListener('visibilitychange', onVisibilityChange);
-  }, [documentTimeForAudio, projectPlaybackTime, refreshPlaybackTimeline]);
+  }, [documentTimeForAudio, projectPlaybackTime, refreshPlaybackTimeline, unlockedAudioRef]);
 
   return {
     playbackActiveRef,
     playbackPhase,
     playbackTimeSec,
-    publishPlaybackTimeSec,
     abortAudio,
-    cancelSeekResync,
+    cancelPendingSeek,
     invalidatePlaybackRun,
     pauseActivePlayback,
     seekPlaybackTo,

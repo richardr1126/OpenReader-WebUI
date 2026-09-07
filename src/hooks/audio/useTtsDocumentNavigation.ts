@@ -54,7 +54,7 @@ type UseTtsDocumentNavigationInput = {
   playbackSyncNavigationRef: MutableRefObject<boolean>;
   resumeAfterLocationChangeRef: MutableRefObject<boolean>;
   abortAudio: () => void;
-  cancelSeekResync: () => void;
+  cancelPendingSeek: () => void;
   invalidatePlaybackRun: () => void;
   pauseActivePlayback: () => void;
   seekPlaybackToOrdinal: (ordinal: number) => boolean;
@@ -84,7 +84,7 @@ export function useTtsDocumentNavigation(input: UseTtsDocumentNavigationInput) {
     playbackSyncNavigationRef,
     resumeAfterLocationChangeRef,
     abortAudio,
-    cancelSeekResync,
+    cancelPendingSeek,
     invalidatePlaybackRun,
     pauseActivePlayback,
     seekPlaybackToOrdinal,
@@ -104,11 +104,11 @@ export function useTtsDocumentNavigation(input: UseTtsDocumentNavigationInput) {
   const pause = useCallback(() => {
     resumeAfterLocationChangeRef.current = false;
     pauseEpochRef.current += 1;
-    cancelSeekResync();
+    cancelPendingSeek();
     pauseActivePlayback();
     setIsPlaying(false);
   }, [
-    cancelSeekResync,
+    cancelPendingSeek,
     pauseActivePlayback,
     pauseEpochRef,
     resumeAfterLocationChangeRef,

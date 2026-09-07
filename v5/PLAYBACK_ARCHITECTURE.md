@@ -381,6 +381,16 @@ the `<audio>` element, Safari/iOS gesture unlocking, playback-rate updates,
 source clearing, and unmount cleanup. Session, seek, and recovery policy remain
 in the media controller and do not leak into this browser-specific hook.
 
+`usePlaybackSeek` owns document-time targeting, generated-buffer checks, and one
+pending-seek state. Cached and not-yet-generated seeks share the same media
+positioning path. Pending readiness reacts to the seek layout already refreshed
+by foreground SSE; it does not run a second HTTP polling loop.
+
+`usePlaybackForegroundSync` is the only client owner of worker cursor writes. It
+coalesces rapid updates to the newest ordinal, retargets the operation SSE from
+the cursor response, and uses the same writer for the foreground heartbeat and
+explicit seeks.
+
 Full teardown has one entrypoint: `abortAudio` invalidates the active run,
 aborts session creation, stops recovery/foreground work, and resets the session
 and projection. That reset is idempotent so unmount and replacement races are

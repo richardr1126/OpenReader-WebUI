@@ -393,9 +393,8 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
   const {
     playbackPhase,
     playbackTimeSec,
-    publishPlaybackTimeSec,
     abortAudio: controllerAbortAudio,
-    cancelSeekResync: controllerCancelSeekResync,
+    cancelPendingSeek: controllerCancelPendingSeek,
     invalidatePlaybackRun: controllerInvalidatePlaybackRun,
     pauseActivePlayback: controllerPauseActivePlayback,
     seekPlaybackTo: controllerSeekPlaybackTo,
@@ -424,7 +423,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
   });
 
   const abortAudio = controllerAbortAudio;
-  const cancelSeekResync = controllerCancelSeekResync;
+  const cancelPendingSeek = controllerCancelPendingSeek;
   const invalidatePlaybackRun = controllerInvalidatePlaybackRun;
   const pauseActivePlayback = controllerPauseActivePlayback;
   const seekPlaybackTo = controllerSeekPlaybackTo;
@@ -455,7 +454,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     playbackSyncNavigationRef,
     resumeAfterLocationChangeRef,
     abortAudio,
-    cancelSeekResync,
+    cancelPendingSeek,
     invalidatePlaybackRun,
     pauseActivePlayback,
     seekPlaybackToOrdinal,
