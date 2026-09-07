@@ -185,8 +185,9 @@ caused conflicts, high CPU, misleading failures, and overheating.
 
 ## Current Handoff — 2026-09-07
 
-- `main` is at `23ddb846`, the squash merge of PR #139,
-  “refactor(playback): simplify client lifecycle and seek readiness.”
+- `main` contains `23ddb846`, the squash merge of PR #139,
+  “refactor(playback): simplify client lifecycle and seek readiness.” The later
+  commits that add or maintain this guide are documentation-only.
 - PR #139 passed Vitest, Playwright, Vercel, and CodeRabbit. Three valid review
   findings were fixed before merge: stale SSE subscription retargeting,
   non-terminal pending-seek expiry, and missing foreground-sync unmount cleanup.
