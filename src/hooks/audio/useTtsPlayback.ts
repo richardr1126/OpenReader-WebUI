@@ -23,6 +23,7 @@ import {
   resumePlaybackMedia,
   waitForPlaybackStartBuffer,
 } from '@/lib/client/tts/playback-control';
+import { usePlaybackAudioElement } from '@/hooks/audio/usePlaybackAudioElement';
 import { usePlaybackMediaResume } from '@/hooks/audio/usePlaybackMediaResume';
 import { createPlaybackRecovery, createTtsMediaRecovery } from '@/lib/client/tts/playback-recovery';
 import { installPlaybackMediaEvents } from '@/lib/client/tts/playback-media-events';
@@ -68,10 +69,6 @@ type UseTtsPlaybackInput = {
   controller: PlaybackController;
 };
 
-// Tiny silent WAV used to unlock HTML5 audio on iOS/Safari.
-const SILENT_WAV_DATA_URI =
-  'data:audio/wav;base64,UklGRkQDAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YSADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==';
-
 export function useTtsPlayback(input: UseTtsPlaybackInput) {
   const {
     audioContext,
@@ -93,8 +90,6 @@ export function useTtsPlayback(input: UseTtsPlaybackInput) {
     onAdvance,
     controller,
   } = input;
-  const unlockedAudioRef = useRef<HTMLAudioElement | null>(null);
-  const audioUnlockAttemptRef = useRef(0);
   const playbackInFlightRef = useRef(false);
   const playbackSessionRef = useRef<PlaybackSessionState | null>(null);
   const playbackActiveRef = useRef(false);
@@ -107,6 +102,12 @@ export function useTtsPlayback(input: UseTtsPlaybackInput) {
   useEffect(() => { latestSeekLayoutRef.current = playbackSeekLayout; }, [playbackSeekLayout]);
   const checkRecovery = useCallback(() => { playbackRecoveryRef.current?.check(); }, []);
   const [playbackPhase, setPlaybackPhase] = useState<TtsPlaybackPhase>('idle');
+  const {
+    audioRef: unlockedAudioRef,
+    clearAudioSource,
+    ensureAudio,
+    unlockAudioOnUserGesture,
+  } = usePlaybackAudioElement({ audioContext, audioSpeed });
 
   const {
     playbackCursorOrdinalRef,
@@ -172,54 +173,6 @@ export function useTtsPlayback(input: UseTtsPlaybackInput) {
     abortPlaybackRequest();
   }, [abortPlaybackRequest, playbackRunIdRef, stopPlaybackRecovery]);
 
-  const unlockPlaybackOnUserGesture = useCallback(() => {
-    audioUnlockAttemptRef.current += 1;
-    const attempt = audioUnlockAttemptRef.current;
-
-    try {
-      void audioContext?.resume();
-    } catch {
-      // ignore
-    }
-
-    try {
-      let el = unlockedAudioRef.current;
-      if (!el) {
-        el = new Audio();
-        try {
-          el.setAttribute('playsinline', 'true');
-        } catch {
-          // ignore
-        }
-        el.preload = 'auto';
-        unlockedAudioRef.current = el;
-      }
-      if (playbackActiveRef.current && el.src && el.src !== SILENT_WAV_DATA_URI) {
-        return;
-      }
-      el.src = SILENT_WAV_DATA_URI;
-      el.volume = 0;
-
-      const p = el.play();
-      if (p && typeof (p as Promise<void>).then === 'function') {
-        void (p as Promise<void>)
-          .then(() => {
-            if (audioUnlockAttemptRef.current !== attempt) return;
-            try {
-              el!.pause();
-              el!.currentTime = 0;
-              el!.volume = 1;
-            } catch {
-              // ignore
-            }
-          })
-          .catch(() => undefined);
-      }
-    } catch {
-      // ignore
-    }
-  }, [audioContext]);
-
   const resetPlaybackSession = useCallback(() => {
     stopPlaybackRecovery();
     stopPlaybackForegroundSync();
@@ -235,19 +188,11 @@ export function useTtsPlayback(input: UseTtsPlaybackInput) {
     invalidatePlaybackRun();
     cancelSeekResync();
     resetPlaybackSession();
-    const audio = unlockedAudioRef.current;
-    if (audio) {
-      try {
-        audio.pause();
-        audio.removeAttribute('src');
-        audio.load();
-      } catch {
-        // ignore teardown errors
-      }
-    }
+    clearAudioSource();
     setCurrentWordIndex(null);
   }, [
     cancelSeekResync,
+    clearAudioSource,
     invalidatePlaybackRun,
     resetPlaybackSession,
     setWorkerPlaybackActive,
@@ -468,15 +413,7 @@ export function useTtsPlayback(input: UseTtsPlaybackInput) {
 
     resetPlaybackSession();
     setPlaybackPhase('planning');
-    if (unlockedAudioRef.current) {
-      try {
-        unlockedAudioRef.current.pause();
-        unlockedAudioRef.current.removeAttribute('src');
-        unlockedAudioRef.current.load();
-      } catch {
-        // ignore stale audio teardown
-      }
-    }
+    clearAudioSource();
 
     try {
       const plan = controller.getPlaybackPlan();
@@ -557,13 +494,7 @@ export function useTtsPlayback(input: UseTtsPlaybackInput) {
         return Math.max(0, slot.startMs / 1000);
       })();
 
-      let audio = unlockedAudioRef.current;
-      if (!audio) {
-        audio = new Audio();
-        audio.preload = 'auto';
-        audio.setAttribute('playsinline', 'true');
-        unlockedAudioRef.current = audio;
-      }
+      const audio = ensureAudio();
       audio.defaultPlaybackRate = audioSpeed;
       audio.playbackRate = audioSpeed;
       audio.volume = 1;
@@ -647,9 +578,11 @@ export function useTtsPlayback(input: UseTtsPlaybackInput) {
     }
   }, [
     audioSpeed,
+    clearAudioSource,
     controller,
     checkRecovery,
     documentTimeForAudio,
+    ensureAudio,
     isPlayingRef,
     onAdvance,
     pauseActivePlayback,
@@ -693,7 +626,7 @@ export function useTtsPlayback(input: UseTtsPlaybackInput) {
     }
 
     if (pendingResyncRef.current) {
-      unlockPlaybackOnUserGesture();
+      unlockAudioOnUserGesture(playbackActiveRef.current);
       setWorkerPlaybackActive(true);
       setPlaybackPhase('buffering');
       isPlayingRef.current = true;
@@ -702,7 +635,7 @@ export function useTtsPlayback(input: UseTtsPlaybackInput) {
       return;
     }
 
-    unlockPlaybackOnUserGesture();
+    unlockAudioOnUserGesture(playbackActiveRef.current);
 
     const audio = unlockedAudioRef.current;
     if (audio && playbackActiveRef.current && audio.src) {
@@ -722,7 +655,7 @@ export function useTtsPlayback(input: UseTtsPlaybackInput) {
     setPlaybackPhase,
     setWorkerPlaybackActive,
     startSeekResync,
-    unlockPlaybackOnUserGesture,
+    unlockAudioOnUserGesture,
   ]);
 
   useEffect(() => {
@@ -761,7 +694,6 @@ export function useTtsPlayback(input: UseTtsPlaybackInput) {
   }, [documentTimeForAudio, projectPlaybackTime, refreshPlaybackTimeline]);
 
   return {
-    unlockedAudioRef,
     playbackActiveRef,
     playbackPhase,
     playbackTimeSec,

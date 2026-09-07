@@ -367,7 +367,6 @@ identity and are not serialized into worker requests.
 
 `useTtsPlayback` is the media controller. It owns:
 
-- The unlocked `<audio>` element ref.
 - Playback phase state.
 - Playback session/timeline refs.
 - Playback session creation through the Next proxy.
@@ -376,6 +375,11 @@ identity and are not serialized into worker requests.
 - Timeline refresh and playback projection from `audio.currentTime`.
 - Foreground SSE sync, cursor heartbeat, visibility resync, and projection loop.
 - The in-flight playback guard and false-to-true playback driver edge.
+
+`usePlaybackAudioElement` owns the browser media primitive: creating and reusing
+the `<audio>` element, Safari/iOS gesture unlocking, playback-rate updates,
+source clearing, and unmount cleanup. Session, seek, and recovery policy remain
+in the media controller and do not leak into this browser-specific hook.
 
 Full teardown has one entrypoint: `abortAudio` invalidates the active run,
 aborts session creation, stops recovery/foreground work, and resets the session
@@ -501,10 +505,10 @@ longer send reader coordinates or text/key hints.
 
 ### 3. Extract the Playback Controller
 
-`useTtsPlayback` owns the media controller: phase, unlocked audio ref, session
-and timeline refs, playback time, stream creation, audio events, seek/resync,
-and the in-flight driver. Foreground SSE/timeline synchronization, cursor
-heartbeats, and playhead projection are delegated to focused hooks;
+`useTtsPlayback` owns the media controller: phase, session and timeline refs,
+playback time, stream creation, audio events, seek/resync, and the in-flight
+driver. Browser audio-element lifecycle, foreground SSE/timeline synchronization,
+cursor heartbeats, and playhead projection are delegated to focused hooks;
 `TTSContext` remains the app-level state/actions facade.
 
 ### 4. Collapse Duplicate Client State

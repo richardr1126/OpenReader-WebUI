@@ -391,7 +391,6 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
   ]);
 
   const {
-    unlockedAudioRef,
     playbackPhase,
     playbackTimeSec,
     publishPlaybackTimeSec,
@@ -528,12 +527,6 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
       }
     }
   }, [availableVoices, voice, configVoice, configModelPolicy]);
-
-  useEffect(() => {
-    if (unlockedAudioRef.current) {
-      unlockedAudioRef.current.playbackRate = audioSpeed;
-    }
-  }, [audioSpeed, unlockedAudioRef]);
 
   /**
    * Stops the current audio playback and resets all state
