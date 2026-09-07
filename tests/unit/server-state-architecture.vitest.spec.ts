@@ -582,6 +582,7 @@ describe('server-state architecture', () => {
     expect(playbackSeek).not.toContain('postTtsPlaybackCursor');
     expect(playbackSeek).not.toContain('getTtsPlaybackSeekLayout');
     expect(playbackSeek).not.toContain('setTimeout(() => { void tick(); }, 600)');
+    expect(playbackSeek).toContain('onPendingSeekExpired();');
     // Heartbeats and explicit seeks share the playhead cursor writer. It uses
     // the projected ordinal when no seek target is supplied and never derives
     // the cursor from UI indexes. `null` means no faithful playhead yet.

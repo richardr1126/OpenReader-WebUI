@@ -384,7 +384,9 @@ in the media controller and do not leak into this browser-specific hook.
 `usePlaybackSeek` owns document-time targeting, generated-buffer checks, and one
 pending-seek state. Cached and not-yet-generated seeks share the same media
 positioning path. Pending readiness reacts to the seek layout already refreshed
-by foreground SSE; it does not run a second HTTP polling loop.
+by foreground SSE; it does not run a second HTTP polling loop. Its bounded
+expiry returns paused playback to ready and stops active playback with visible
+failure feedback rather than leaving the client indefinitely buffering.
 
 `usePlaybackForegroundSync` is the only client owner of worker cursor writes. It
 coalesces rapid updates to the newest ordinal, retargets the operation SSE from

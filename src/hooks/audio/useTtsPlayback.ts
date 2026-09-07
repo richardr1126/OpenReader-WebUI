@@ -141,6 +141,29 @@ export function useTtsPlayback(input: UseTtsPlaybackInput) {
     refreshPlaybackTimeline,
     setPlaybackSeekLayout,
   });
+  const onPendingSeekExpired = useCallback(() => {
+    if (!isPlayingRef.current) {
+      setPlaybackPhase('ready');
+      return;
+    }
+    isPlayingRef.current = false;
+    setWorkerPlaybackActive(false);
+    stopPlaybackProjectionLoop();
+    stopPlaybackForegroundSync();
+    playbackInFlightRef.current = false;
+    setIsPlaying(false);
+    setPlaybackPhase('failed');
+    toast.error('Audio was not ready after waiting. Try Play again.', {
+      id: 'tts-playback-error',
+      duration: 7000,
+    });
+  }, [
+    isPlayingRef,
+    setIsPlaying,
+    setWorkerPlaybackActive,
+    stopPlaybackForegroundSync,
+    stopPlaybackProjectionLoop,
+  ]);
   const {
     cancelPendingSeek,
     getPendingSeekOrdinal,
@@ -153,6 +176,7 @@ export function useTtsPlayback(input: UseTtsPlaybackInput) {
     audioRef: unlockedAudioRef,
     audioSpeed,
     isPlayingRef,
+    onPendingSeekExpired,
     playbackActiveRef,
     playbackRunIdRef,
     playbackSeekLayout,
@@ -522,7 +546,8 @@ export function useTtsPlayback(input: UseTtsPlaybackInput) {
   useEffect(() => () => {
     stopPlaybackRecovery();
     abortPlaybackRequest();
-  }, [abortPlaybackRequest, stopPlaybackRecovery]);
+    stopPlaybackForegroundSync();
+  }, [abortPlaybackRequest, stopPlaybackForegroundSync, stopPlaybackRecovery]);
 
   useEffect(() => {
     const onVisibilityChange = () => {

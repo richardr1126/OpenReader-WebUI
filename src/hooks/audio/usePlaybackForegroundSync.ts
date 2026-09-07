@@ -82,13 +82,15 @@ export function usePlaybackForegroundSync(input: UsePlaybackForegroundSyncInput)
           const session = playbackSessionRef.current;
           const headers = playbackRequestHeadersRef.current;
           const runId = playbackRunIdRef.current;
+          const events = playbackEventsRef.current;
           if (!session || !headers) continue;
           const updated = await postTtsPlaybackCursor(session.sessionId, nextOrdinal, headers, {
             sessionInstanceId: session.sessionInstanceId,
           }).catch(() => null);
           if (updated && runId === playbackRunIdRef.current
-            && playbackSessionRef.current === session) {
-            playbackEventsRef.current?.update(updated.workerOpId);
+            && playbackSessionRef.current === session
+            && playbackEventsRef.current === events) {
+            events?.update(updated.workerOpId);
           }
         }
       } finally {

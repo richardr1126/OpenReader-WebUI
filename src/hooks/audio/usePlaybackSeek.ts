@@ -18,6 +18,7 @@ type UsePlaybackSeekInput = {
   audioRef: MutableRefObject<HTMLAudioElement | null>;
   audioSpeed: number;
   isPlayingRef: MutableRefObject<boolean>;
+  onPendingSeekExpired: () => void;
   playbackActiveRef: MutableRefObject<boolean>;
   playbackRunIdRef: MutableRefObject<number>;
   playbackSeekLayout: TtsPlaybackSeekLayout | null;
@@ -42,6 +43,7 @@ export function usePlaybackSeek(input: UsePlaybackSeekInput) {
     audioRef,
     audioSpeed,
     isPlayingRef,
+    onPendingSeekExpired,
     playbackActiveRef,
     playbackRunIdRef,
     playbackSeekLayout,
@@ -108,10 +110,12 @@ export function usePlaybackSeek(input: UsePlaybackSeekInput) {
     if (!pendingSeek) return undefined;
     const delay = Math.max(0, pendingSeek.expiresAt - Date.now());
     const timeout = setTimeout(() => {
-      if (pendingSeekRef.current === pendingSeek) setPendingSeek(null);
+      if (pendingSeekRef.current !== pendingSeek) return;
+      setPendingSeek(null);
+      onPendingSeekExpired();
     }, delay);
     return () => clearTimeout(timeout);
-  }, [pendingSeek, setPendingSeek]);
+  }, [onPendingSeekExpired, pendingSeek, setPendingSeek]);
 
   useEffect(() => {
     if (!pendingSeek) return undefined;
