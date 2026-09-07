@@ -359,6 +359,7 @@ describe('server-state architecture', () => {
     const planController = source('src/hooks/audio/useTtsPlanController.ts');
     const playbackProjection = source('src/hooks/audio/usePlaybackProjection.ts');
     const playbackForegroundSync = source('src/hooks/audio/usePlaybackForegroundSync.ts');
+    const playbackSeek = source('src/hooks/audio/usePlaybackSeek.ts');
     const playbackControl = source('src/lib/client/tts/playback-control.ts');
     const playbackSelection = source('src/lib/client/tts/playback-selection.ts');
     const documentNavigation = source('src/hooks/audio/useTtsDocumentNavigation.ts');
@@ -576,13 +577,18 @@ describe('server-state architecture', () => {
     expect(streamSessionRoute).toContain('TTS_PLAYBACK_AHEAD_WINDOW');
     expect(streamSessionRoute).toContain('backgroundExtent');
     expect(playbackForegroundSync).toContain('subscribeTtsPlaybackEvents');
-    expect(playbackHook).toContain('postTtsPlaybackCursor');
-    // The heartbeat cursor is the playhead's projected ordinal (the same value
-    // that drives the highlight), held in playbackCursorOrdinalRef. It must NOT
-    // be re-derived from derived UI indexes. `null` => no faithful playhead yet → skip.
-    expect(playbackForegroundSync).toContain('const cursorOrdinal = playbackCursorOrdinalRef.current');
-    expect(playbackForegroundSync).toContain('if (cursorOrdinal == null) return');
-    expect(playbackForegroundSync).toContain('const cursor = Math.max(0, cursorOrdinal)');
+    expect(playbackHook).toContain('usePlaybackSeek');
+    expect(playbackForegroundSync).toContain('updateWorkerPlaybackCursor');
+    expect(playbackSeek).not.toContain('postTtsPlaybackCursor');
+    expect(playbackSeek).not.toContain('getTtsPlaybackSeekLayout');
+    expect(playbackSeek).not.toContain('setTimeout(() => { void tick(); }, 600)');
+    expect(playbackSeek).toContain('onPendingSeekExpired();');
+    // Heartbeats and explicit seeks share the playhead cursor writer. It uses
+    // the projected ordinal when no seek target is supplied and never derives
+    // the cursor from UI indexes. `null` means no faithful playhead yet.
+    expect(playbackForegroundSync).toContain('const requestedOrdinal = ordinal ?? playbackCursorOrdinalRef.current');
+    expect(playbackForegroundSync).toContain('if (requestedOrdinal == null || !Number.isFinite(requestedOrdinal)) return');
+    expect(playbackForegroundSync).toContain('const cursor = Math.max(0, Math.floor(requestedOrdinal))');
     expect(context).not.toContain('const currentSegment = playbackSegmentsRef.current[currentIndexRef.current]');
     expect(playbackProjection).toContain('playbackCursorOrdinalRef.current = targetOrdinal');
     expect(playbackSelection).toContain('function pdfLocatorPage(locator: TTSSegmentLocator | null | undefined)');
@@ -618,7 +624,8 @@ describe('server-state architecture', () => {
     expect(documentNavigation).toContain("if (activeReaderType === 'pdf' || activeReaderType === 'html')");
     expect(documentNavigation).toContain('resolveFirstPlanIndexForDocumentAnchor(');
     expect(playbackHook).toContain('seekPlaybackTo');
-    expect(playbackHook).toContain('setAudioDocumentTime(audio, targetSec');
+    expect(playbackSeek).toContain('const applyReadyMediaPosition = useCallback');
+    expect(playbackSeek).toContain('setAudioDocumentTime(audio, documentTimeSec');
     expect(playbackProjection).toContain('const targetOrdinal = projection.segment.ordinal;');
     expect(playbackProjection).toContain('setSelectedOrdinal(targetOrdinal)');
     expect(playbackProjection).toContain('shouldSyncPlaybackLocator(previous?.locatorKey, locatorKey)');

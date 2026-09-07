@@ -43,6 +43,7 @@ import { useTtsPlanController } from '@/hooks/audio/useTtsPlanController';
 import { useTtsPlaybackModel } from '@/hooks/audio/useTtsPlaybackModel';
 import { useTtsPlaybackSettings } from '@/hooks/audio/useTtsPlaybackSettings';
 import type { TtsPlaybackSeekLayout } from '@/lib/client/api/tts';
+import { isPlaybackPhaseProcessing } from '@/lib/client/tts/playback-control';
 import {
   pdfLocatorPage,
   resolveDocumentAnchorSelectionOrdinal,
@@ -209,7 +210,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
    */
   const [isPlaying, setIsPlaying] = useState(false);
   const [isEPUB, setIsEPUB] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [isInteractionProcessing, setIsProcessing] = useState(false);
 
   /**
    * Resolved reader type for playback/session scoping. Consumers use this to
@@ -390,12 +391,10 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
   ]);
 
   const {
-    unlockedAudioRef,
     playbackPhase,
     playbackTimeSec,
-    publishPlaybackTimeSec,
     abortAudio: controllerAbortAudio,
-    cancelSeekResync: controllerCancelSeekResync,
+    cancelPendingSeek: controllerCancelPendingSeek,
     invalidatePlaybackRun: controllerInvalidatePlaybackRun,
     pauseActivePlayback: controllerPauseActivePlayback,
     seekPlaybackTo: controllerSeekPlaybackTo,
@@ -413,7 +412,6 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     selectedOrdinalRef,
     playbackRunIdRef,
     setIsPlaying,
-    setIsProcessing,
     setCurrDocPage,
     syncPlaybackLocator,
     setSelectedOrdinal,
@@ -425,7 +423,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
   });
 
   const abortAudio = controllerAbortAudio;
-  const cancelSeekResync = controllerCancelSeekResync;
+  const cancelPendingSeek = controllerCancelPendingSeek;
   const invalidatePlaybackRun = controllerInvalidatePlaybackRun;
   const pauseActivePlayback = controllerPauseActivePlayback;
   const seekPlaybackTo = controllerSeekPlaybackTo;
@@ -456,7 +454,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     playbackSyncNavigationRef,
     resumeAfterLocationChangeRef,
     abortAudio,
-    cancelSeekResync,
+    cancelPendingSeek,
     invalidatePlaybackRun,
     pauseActivePlayback,
     seekPlaybackToOrdinal,
@@ -529,21 +527,12 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     }
   }, [availableVoices, voice, configVoice, configModelPolicy]);
 
-  useEffect(() => {
-    if (unlockedAudioRef.current) {
-      unlockedAudioRef.current.playbackRate = audioSpeed;
-    }
-  }, [audioSpeed, unlockedAudioRef]);
-
   /**
    * Stops the current audio playback and resets all state
    */
   const stop = useCallback(() => {
-    // Cancel any ongoing request
-    invalidatePlaybackRun();
     abortAudio();
     setIsPlaying(false);
-    publishPlaybackTimeSec(0, { force: true });
     resetPlaybackPlan();
     playbackAnchorRef.current = null;
     setPlaybackAnchor(null);
@@ -554,7 +543,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     sentenceAlignmentCacheRef.current.clear();
     setCurrentSentenceAlignment(undefined);
     setCurrentWordIndex(null);
-  }, [abortAudio, invalidatePlaybackRun, publishPlaybackTimeSec, resetPlaybackPlan]);
+  }, [abortAudio, resetPlaybackPlan]);
 
   const initializeReaderSession = useCallback((input: {
     readerType: ReaderType;
@@ -625,6 +614,8 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     reacquirePlaybackPlan,
   });
 
+  const isProcessing = isInteractionProcessing
+    || isPlaybackPhaseProcessing(isPlaying, playbackPhase);
 
   /**
    * Provides the TTS context value to child components

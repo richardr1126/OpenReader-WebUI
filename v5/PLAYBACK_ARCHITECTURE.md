@@ -345,6 +345,14 @@ owns document/config inputs that are outside the media controller:
 - Settings mutations for voice, speed, provider, language, and PDF skip kinds.
 - Segment/word highlight state and current document anchor.
 - EPUB cursor-follow navigation guards.
+- Non-playback interaction busy state for navigation and settings changes.
+
+The exposed `isProcessing` value is derived from that interaction state plus the
+authoritative playback phase. The media controller does not maintain a second
+processing boolean, so a stale async callback cannot disagree with the playback
+lifecycle about whether audio is preparing, buffering, seeking, or playing.
+Planning, ready-to-start, seeking, and buffering are processing phases only while
+playback intent remains active; paused, playing, ended, failed, and idle are not.
 
 `useTtsPlaybackModel` is the single client model for worker-plan state:
 
@@ -359,7 +367,6 @@ identity and are not serialized into worker requests.
 
 `useTtsPlayback` is the media controller. It owns:
 
-- The unlocked `<audio>` element ref.
 - Playback phase state.
 - Playback session/timeline refs.
 - Playback session creation through the Next proxy.
@@ -368,6 +375,29 @@ identity and are not serialized into worker requests.
 - Timeline refresh and playback projection from `audio.currentTime`.
 - Foreground SSE sync, cursor heartbeat, visibility resync, and projection loop.
 - The in-flight playback guard and false-to-true playback driver edge.
+
+`usePlaybackAudioElement` owns the browser media primitive: creating and reusing
+the `<audio>` element, Safari/iOS gesture unlocking, playback-rate updates,
+source clearing, and unmount cleanup. Session, seek, and recovery policy remain
+in the media controller and do not leak into this browser-specific hook.
+
+`usePlaybackSeek` owns document-time targeting, generated-buffer checks, and one
+pending-seek state. Cached and not-yet-generated seeks share the same media
+positioning path. Pending readiness reacts to the seek layout already refreshed
+by foreground SSE; it does not run a second HTTP polling loop. Its bounded
+expiry returns paused playback to ready and stops active playback with visible
+failure feedback rather than leaving the client indefinitely buffering.
+
+`usePlaybackForegroundSync` is the only client owner of worker cursor writes. It
+coalesces rapid updates to the newest ordinal, retargets the operation SSE from
+the cursor response, and uses the same writer for the foreground heartbeat and
+explicit seeks.
+
+Full teardown has one entrypoint: `abortAudio` invalidates the active run,
+aborts session creation, stops recovery/foreground work, and resets the session
+and projection. That reset is idempotent so unmount and replacement races are
+safe. Pausing intentionally does not use full teardown: it preserves the active
+session and cached stream so resume does not create a new playback timeline.
 
 For EPUB specifically, the client owns only reader rendering/navigation concerns:
 
@@ -487,10 +517,10 @@ longer send reader coordinates or text/key hints.
 
 ### 3. Extract the Playback Controller
 
-`useTtsPlayback` owns the media controller: phase, unlocked audio ref, session
-and timeline refs, playback time, stream creation, audio events, seek/resync,
-and the in-flight driver. Foreground SSE/timeline synchronization, cursor
-heartbeats, and playhead projection are delegated to focused hooks;
+`useTtsPlayback` owns the media controller: phase, session and timeline refs,
+playback time, stream creation, audio events, seek/resync, and the in-flight
+driver. Browser audio-element lifecycle, foreground SSE/timeline synchronization,
+cursor heartbeats, and playhead projection are delegated to focused hooks;
 `TTSContext` remains the app-level state/actions facade.
 
 ### 4. Collapse Duplicate Client State
