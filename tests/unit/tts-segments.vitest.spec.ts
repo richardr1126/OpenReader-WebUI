@@ -2,7 +2,6 @@ import { describe, expect, test } from 'vitest';
 import {
   buildTtsPlaybackSegmentAudioKey,
   buildTtsPlaybackSettingsHash,
-  buildProportionalAlignment,
   buildTtsPlaybackAudioContentHash,
   buildTtsSegmentSettingsJson,
   buildTtsSegmentSettingsHash,
@@ -233,44 +232,4 @@ describe('tts segment helpers', () => {
     });
   });
 
-  test('builds proportional alignment preserving order', () => {
-    const alignment = buildProportionalAlignment({
-      sentence: normalizeSegmentText('Hello world again'),
-      sentenceIndex: 5,
-      durationMs: 1500,
-    });
-    expect(alignment.sentenceIndex).toBe(5);
-    expect(alignment.words.length).toBe(3);
-    const first = alignment.words[0];
-    const second = alignment.words[1];
-    const third = alignment.words[2];
-    expect(first).toBeDefined();
-    expect(second).toBeDefined();
-    expect(third).toBeDefined();
-    expect(first!.startSec).toBe(0);
-    expect(third!.endSec).toBeGreaterThan(1.4);
-    expect(first!.charStart).toBeDefined();
-    expect(second!.charStart).toBeDefined();
-    const firstCharStart = first!.charStart;
-    const secondCharStart = second!.charStart;
-    if (firstCharStart === undefined || secondCharStart === undefined) {
-      throw new Error('Expected proportional alignment words to include charStart offsets');
-    }
-    expect(secondCharStart).toBeGreaterThan(firstCharStart);
-  });
-
-  test('builds proportional alignment for no-space languages', () => {
-    const sentence = 'これは日本語です';
-    const alignment = buildProportionalAlignment({
-      sentence,
-      sentenceIndex: 2,
-      durationMs: 1200,
-      language: 'ja',
-    });
-
-    expect(alignment.words.length).toBeGreaterThan(1);
-    for (const word of alignment.words) {
-      expect(sentence.slice(word.charStart, word.charEnd)).toBe(word.text);
-    }
-  });
 });

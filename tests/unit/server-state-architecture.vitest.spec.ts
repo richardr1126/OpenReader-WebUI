@@ -392,7 +392,8 @@ describe('server-state architecture', () => {
     expect(context).toContain('resetBootstrapPlanAdoption();');
     expect(planController).not.toContain('attempt < 20');
     expect(planController.match(/getTtsPlaybackSeekLayout\(/g) ?? []).toHaveLength(1);
-    expect(playbackHook).toContain('getTtsPlaybackSeekLayout(session.seekLayoutUrl');
+    expect(playbackHook).not.toContain('getTtsPlaybackSeekLayout(session.seekLayoutUrl');
+    expect(playbackHook).toContain('startPlaybackForegroundSync(runId)');
     expect(planController).toContain('applyPlaybackPlan(plan)');
     expect(clientTts).not.toContain("fetch('/api/tts/playback/plans'");
     expect(clientTts).not.toContain('planOnly');
@@ -494,8 +495,7 @@ describe('server-state architecture', () => {
     expect(workerRoutes).not.toContain("/v1/tts-playback/:sessionId/audio");
     expect(workerRoutes).not.toContain("/v1/tts-playback-plans/operations");
     expect(workerRoutes).toContain("Readable.from(streamRange(), { objectMode: false, highWaterMark: 64 * 1024 })");
-    // The audio stream is seekable (range-capable + finite Content-Length) so the
-    // browser honors post-generation playbackRate, including on Safari.
+    // WebKit probes bytes=0-1 before playing. Keep the byte-range contract.
     expect(workerRoutes).toContain("reply.header('Accept-Ranges', 'bytes')");
     expect(workerRoutes).toContain('parseRangeHeader');
     expect(workerRoutes).toContain('verifyTtsPlaybackToken');

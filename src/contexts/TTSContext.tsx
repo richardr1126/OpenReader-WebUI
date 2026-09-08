@@ -97,6 +97,7 @@ interface TTSContextType extends TTSPlaybackState {
   sentences: string[];
   currentSentenceOrdinal: number | null;
   playbackPhase: TtsPlaybackPhase;
+  audioSpeed: number;
   playbackTimeSec: number;
   playbackDurationSec: number;
   playbackSeekLayout: TtsPlaybackSeekLayout | null;
@@ -628,6 +629,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     sentences,
     currentSentenceOrdinal: selectedOrdinal,
     playbackPhase,
+    audioSpeed,
     playbackTimeSec,
     playbackDurationSec: playbackSeekLayout ? playbackSeekLayout.durationMs / 1000 : 0,
     playbackSeekLayout,
@@ -678,6 +680,7 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     startDocumentAudioExport,
     selectedOrdinal,
     playbackPhase,
+    audioSpeed,
     currDocPage,
     currDocPageNumber,
     currDocPages,

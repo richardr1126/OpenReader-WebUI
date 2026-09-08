@@ -70,16 +70,16 @@ describe('playback grid mapping', () => {
       generationStartOrdinal: 0,
       durationMs: 2000,
       segments: [
-        { ordinal: 1, segmentKey: 'b', startMs: 1000, endMs: 2000, durationMs: 1000, generated: true, alignmentSource: 'proportional' },
+        { ordinal: 1, segmentKey: 'b', startMs: 1000, endMs: 2000, durationMs: 1000, generated: true, alignmentSource: null },
         { ordinal: 0, segmentKey: 'a', startMs: 0, endMs: 1000, durationMs: 1000, estimated: true },
       ],
     });
     expect(normalized.segments.map((segment) => segment.ordinal)).toEqual([0, 1]);
     expect(normalized.segments.map((segment) => segment.audioState)).toEqual(['pending', 'ready']);
     expect(normalized.segments.map((segment) => segment.durationSource)).toEqual(['estimated', 'exact']);
-    expect(normalized.segments.map((segment) => segment.alignmentSource)).toEqual([null, 'proportional']);
+    expect(normalized.segments.map((segment) => segment.alignmentSource)).toEqual([null, null]);
     expect(shouldRefreshPlaybackSegmentTiming(normalized.segments[0])).toBe(true);
-    expect(shouldRefreshPlaybackSegmentTiming(normalized.segments[1])).toBe(true);
+    expect(shouldRefreshPlaybackSegmentTiming(normalized.segments[1])).toBe(false);
     expect(shouldRefreshPlaybackSegmentTiming(grid.segments[1])).toBe(false);
   });
 

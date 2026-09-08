@@ -3,14 +3,12 @@ import { mkdtemp, rm, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { preprocessSentenceForAudio } from './nlp';
-import { normalizeUnicodeToken, segmentWords } from './language';
 import { locatorIdentityKey, normalizeLocator } from './locator';
 import { ffprobeAudio } from './probe';
 import type {
   TTSSegmentLocator,
   TTSSegmentSettings,
 } from './types';
-import type { TTSSentenceAlignment, TTSSentenceWord } from './types';
 
 function stableStringify(value: unknown): string {
   if (value === null || typeof value !== 'object') {
@@ -233,62 +231,4 @@ export async function probeAudioDurationMsFromBuffer(buffer: Buffer, signal?: Ab
       await rm(workDir, { recursive: true, force: true }).catch(() => {});
     }
   }
-}
-
-function alignWordsToText(
-  sentence: string,
-  language?: string,
-): Array<{ text: string; charStart: number; charEnd: number }> {
-  return segmentWords(sentence, language).map((token) => ({
-    text: token.text,
-    charStart: token.start,
-    charEnd: token.end,
-  }));
-}
-
-export function buildProportionalAlignment(input: {
-  sentence: string;
-  sentenceIndex: number;
-  durationMs: number;
-  language?: string;
-}): TTSSentenceAlignment {
-  const wordsWithOffsets = alignWordsToText(input.sentence, input.language);
-  if (wordsWithOffsets.length === 0 || input.durationMs <= 0) {
-    return {
-      sentence: input.sentence,
-      sentenceIndex: input.sentenceIndex,
-      words: [],
-    };
-  }
-
-  const weighted = wordsWithOffsets.map((word) => ({
-    ...word,
-    weight: Math.max(1, normalizeUnicodeToken(word.text).length),
-  }));
-  const totalWeight = weighted.reduce((sum, word) => sum + word.weight, 0);
-
-  let consumedMs = 0;
-  const alignedWords: TTSSentenceWord[] = weighted.map((word, index) => {
-    const remainingMs = Math.max(0, input.durationMs - consumedMs);
-    const sliceMs = index === weighted.length - 1
-      ? remainingMs
-      : Math.max(1, Math.round((input.durationMs * word.weight) / Math.max(1, totalWeight)));
-
-    const startMs = consumedMs;
-    consumedMs += Math.min(sliceMs, remainingMs);
-
-    return {
-      text: word.text,
-      startSec: startMs / 1000,
-      endSec: consumedMs / 1000,
-      charStart: word.charStart,
-      charEnd: word.charEnd,
-    };
-  });
-
-  return {
-    sentence: input.sentence,
-    sentenceIndex: input.sentenceIndex,
-    words: alignedWords,
-  };
 }

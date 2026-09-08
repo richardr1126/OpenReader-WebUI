@@ -157,11 +157,11 @@ export function usePlaybackForegroundSync(input: UsePlaybackForegroundSyncInput)
             : null;
           toast.loading(
             percent === null
-              ? 'Downloading word-timing model…'
-              : `Downloading word-timing model… ${percent}%`,
+              ? 'Preparing word-timing model in the cloud…'
+              : `Preparing word-timing model in the cloud… ${percent}%`,
             { id: MODEL_DOWNLOAD_TOAST_ID },
           );
-          // Audio is already available with proportional timing. Download-only
+          // Audio is already available without exact word timing. Download-only
           // progress does not change either playback read model, so avoid two
           // redundant HTTP reads for every model checkpoint.
           return;

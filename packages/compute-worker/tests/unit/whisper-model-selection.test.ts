@@ -1,0 +1,37 @@
+import { describe, expect, test } from 'vitest';
+import { resolveTtsLanguage } from '@openreader/tts/language';
+import {
+  getWhisperModelPaths,
+  resolveWhisperModelVariant,
+} from '../../src/inference/whisper/model';
+
+describe('Whisper alignment model selection', () => {
+  test('uses the English-only tiny model for English language tags', () => {
+    expect(resolveWhisperModelVariant('en')).toBe('tiny-english');
+    expect(resolveWhisperModelVariant('en-US')).toBe('tiny-english');
+    expect(resolveWhisperModelVariant('EN_gb')).toBe('tiny-english');
+  });
+
+  test('uses the English-only tiny model for Auto with a plain English voice', () => {
+    const resolvedLanguage = resolveTtsLanguage({
+      configuredLanguage: 'auto',
+      voice: 'F1',
+    });
+
+    expect(resolvedLanguage).toBe('en');
+    expect(resolveWhisperModelVariant(resolvedLanguage)).toBe('tiny-english');
+  });
+
+  test('keeps the multilingual base model for other or unknown languages', () => {
+    expect(resolveWhisperModelVariant('es')).toBe('base-multilingual');
+    expect(resolveWhisperModelVariant('fr-CA')).toBe('base-multilingual');
+    expect(resolveWhisperModelVariant()).toBe('base-multilingual');
+  });
+
+  test('stores each model in its own durable artifact directory', () => {
+    expect(getWhisperModelPaths('tiny-english').modelDir).toContain('whisper-tiny.en_timestamped');
+    expect(getWhisperModelPaths('base-multilingual').modelDir).toContain('whisper-base_timestamped');
+    expect(getWhisperModelPaths('tiny-english').modelDir)
+      .not.toBe(getWhisperModelPaths('base-multilingual').modelDir);
+  });
+});

@@ -5,7 +5,10 @@ import { parsePdf } from './pdf/parse';
 import type { ModelDownloadProgressHandler } from './model-download';
 
 export async function ensureComputeModels(): Promise<void> {
-  await Promise.all([ensureWhisperModel(), ensurePdfLayoutModel()]);
+  await Promise.all([
+    ensureWhisperModel({ variant: 'tiny-english' }),
+    ensurePdfLayoutModel(),
+  ]);
 }
 
 export async function runWhisperAlignmentFromAudioBuffer(input: {

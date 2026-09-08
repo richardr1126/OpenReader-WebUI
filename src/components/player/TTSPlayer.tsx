@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useTTS } from '@/contexts/TTSContext';
+import { measurePlaybackBuffer } from '@openreader/tts/playback-buffer';
 import {
   PlayIcon,
   PauseIcon,
@@ -25,6 +26,7 @@ export default function TTSPlayer({ currentPage, numPages, isPlaybackReady = tru
   const {
     isPlaying,
     playbackPhase,
+    audioSpeed,
     togglePlay,
     skipForward,
     skipBackward,
@@ -43,6 +45,19 @@ export default function TTSPlayer({ currentPage, numPages, isPlaybackReady = tru
   const shownSec = previewSec ?? playbackTimeSec;
   const canSeek = playbackDurationSec > 0 && Boolean(playbackSeekLayout);
   const playbackControl = resolvePlaybackControlPresentation(isPlaying, playbackPhase);
+  const aheadBuffer = useMemo(() => {
+    if (!playbackSeekLayout || playbackSeekLayout.segments.length === 0) return null;
+    const segment = playbackSeekLayout.segments.find(
+      (entry) => playbackTimeSec * 1000 >= entry.startMs && playbackTimeSec * 1000 < entry.endMs,
+    );
+    if (!segment) return null;
+    return measurePlaybackBuffer({
+      segments: playbackSeekLayout.segments,
+      startOrdinal: segment.ordinal,
+      offsetWithinStartSegmentMs: Math.max(0, playbackTimeSec * 1000 - segment.startMs),
+      playbackRate: audioSpeed,
+    });
+  }, [audioSpeed, playbackSeekLayout, playbackTimeSec]);
   const scrubberTrackBackground = useMemo(() => {
     if (!playbackSeekLayout || playbackSeekLayout.durationMs <= 0 || playbackSeekLayout.segments.length === 0) {
       return 'color-mix(in srgb, var(--foreground) 14%, transparent)';
@@ -61,16 +76,16 @@ export default function TTSPlayer({ currentPage, numPages, isPlaybackReady = tru
   }, [playbackSeekLayout]);
 
   return (
-    <div className="sticky bottom-0 z-30 w-full border-t border-line-soft bg-surface-solid backdrop-blur-sm" data-app-ttsbar>
+    <div className="sticky bottom-0 z-30 w-full border-t border-line-soft bg-surface-solid shadow-[0_-10px_30px_color-mix(in_srgb,var(--background)_45%,transparent)] backdrop-blur-sm sm:shadow-none" data-app-ttsbar>
       {/* Top Edge Scrubber bar */}
-      <div className="group/scrubber absolute -top-[5px] left-0 right-0 h-2.5 z-40">
+      <div className="group/scrubber absolute -top-2.5 left-0 right-0 z-40 h-5 sm:-top-[5px] sm:h-2.5">
         {/* Track Base Rail (Empty Track) */}
-        <div className="pointer-events-none absolute left-0 right-0 top-1/2 h-[2px] -translate-y-1/2 bg-line-soft transition-[height] duration-fast group-hover/scrubber:h-[4px] group-active/scrubber:h-[4px] rounded-full" />
+        <div className="pointer-events-none absolute left-0 right-0 top-1/2 h-[3px] -translate-y-1/2 rounded-full bg-line-soft transition-[height] duration-fast group-hover/scrubber:h-[4px] group-active/scrubber:h-[4px] sm:h-[2px]" />
         
         {/* Generated Segments Track */}
         <div
           aria-hidden
-          className="pointer-events-none absolute left-0 right-0 top-1/2 h-[2px] -translate-y-1/2 transition-[height] duration-fast group-hover/scrubber:h-[4px] group-active/scrubber:h-[4px] rounded-full"
+          className="pointer-events-none absolute left-0 right-0 top-1/2 h-[3px] -translate-y-1/2 rounded-full transition-[height] duration-fast group-hover/scrubber:h-[4px] group-active/scrubber:h-[4px] sm:h-[2px]"
           style={{ background: scrubberTrackBackground }}
         />
         {/* Hidden active range slider overlay */}
@@ -96,14 +111,16 @@ export default function TTSPlayer({ currentPage, numPages, isPlaybackReady = tru
           }}
           className="absolute inset-0 h-full w-full cursor-pointer appearance-none bg-transparent disabled:cursor-not-allowed disabled:opacity-40
             [&::-webkit-slider-runnable-track]:h-[2px] [&::-webkit-slider-runnable-track]:bg-transparent
-            [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-[3px] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-accent [&::-webkit-slider-thumb]:-mt-[5px] [&::-webkit-slider-thumb]:transition-transform [&::-webkit-slider-thumb]:duration-fast
+            [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-1 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-accent [&::-webkit-slider-thumb]:-mt-[7px] [&::-webkit-slider-thumb]:transition-transform [&::-webkit-slider-thumb]:duration-fast
             [&::-webkit-slider-thumb]:shadow-[0_0_0_1px_color-mix(in_srgb,var(--background)_70%,transparent),0_1px_6px_color-mix(in_srgb,var(--accent)_55%,transparent)]
             group-hover/scrubber:[&::-webkit-slider-thumb]:scale-y-125 group-active/scrubber:[&::-webkit-slider-thumb]:scale-y-150
+            sm:[&::-webkit-slider-thumb]:h-3 sm:[&::-webkit-slider-thumb]:w-[3px] sm:[&::-webkit-slider-thumb]:-mt-[5px]
             
-            [&::-moz-range-track]:h-[2px] [&::-moz-range-track]:bg-transparent
-            [&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:w-[3px] [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-accent [&::-moz-range-thumb]:transition-transform [&::-moz-range-thumb]:duration-fast
+            [&::-moz-range-track]:h-[3px] [&::-moz-range-track]:bg-transparent sm:[&::-moz-range-track]:h-[2px]
+            [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-1 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-accent [&::-moz-range-thumb]:transition-transform [&::-moz-range-thumb]:duration-fast
             [&::-moz-range-thumb]:shadow-[0_0_0_1px_color-mix(in_srgb,var(--background)_70%,transparent),0_1px_6px_color-mix(in_srgb,var(--accent)_55%,transparent)]
-            group-hover/scrubber:[&::-moz-range-thumb]:scale-y-125 group-active/scrubber:[&::-moz-range-thumb]:scale-y-150"
+            group-hover/scrubber:[&::-moz-range-thumb]:scale-y-125 group-active/scrubber:[&::-moz-range-thumb]:scale-y-150
+            sm:[&::-moz-range-thumb]:h-3 sm:[&::-moz-range-thumb]:w-[3px]"
         />
         {/* Tooltip Popup */}
         {previewSec !== null && playbackDurationSec > 0 && (
@@ -118,29 +135,32 @@ export default function TTSPlayer({ currentPage, numPages, isPlaybackReady = tru
         )}
       </div>
 
-      {/* Main Single Row Controls Layout */}
-      <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-3 py-1.5 pb-[max(0.375rem,env(safe-area-inset-bottom))]">
+      <div className="mx-auto grid max-w-5xl grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] grid-rows-[auto_auto] items-center gap-x-2 gap-y-1 px-3 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:flex sm:justify-between sm:gap-4 sm:py-1.5 sm:pb-[max(0.375rem,env(safe-area-inset-bottom))]">
         {/* Left side: Speed control & Voice control */}
-        <div className="flex items-center gap-1 flex-1 min-w-0 justify-start">
-          <SpeedControl
-            disabled={isProcessing}
-            setSpeedAndRestart={setSpeedAndRestart}
-            setAudioPlayerSpeedAndRestart={setAudioPlayerSpeedAndRestart}
-          />
-          <VoicesControl
-            availableVoices={availableVoices}
-            disabled={isProcessing}
-            setVoiceAndRestart={setVoiceAndRestart}
-          />
+        <div className="contents sm:flex sm:min-w-0 sm:flex-1 sm:items-center sm:justify-start sm:gap-1">
+          <div className="col-start-1 row-start-2 justify-self-start">
+            <SpeedControl
+              disabled={isProcessing}
+              setSpeedAndRestart={setSpeedAndRestart}
+              setAudioPlayerSpeedAndRestart={setAudioPlayerSpeedAndRestart}
+            />
+          </div>
+          <div className="col-start-3 row-start-2 justify-self-end">
+            <VoicesControl
+              availableVoices={availableVoices}
+              disabled={isProcessing}
+              setVoiceAndRestart={setVoiceAndRestart}
+            />
+          </div>
         </div>
 
         {/* Center: Primary playback controls */}
-        <div className="flex items-center gap-1.5">
+        <div className="col-start-2 row-start-2 flex items-center gap-2 sm:gap-1.5">
           <IconButton
             onClick={skipBackward}
             aria-label="Skip backward"
             disabled={isProcessing || !isPlaybackReady || !hasReadableContent}
-            className="relative"
+            className="relative h-9 w-9 rounded-full sm:h-8 sm:w-8 sm:rounded-md"
           >
             {isProcessing ? <LoadingSpinner /> : <SkipBackwardIcon className="w-5 h-5" />}
           </IconButton>
@@ -153,7 +173,7 @@ export default function TTSPlayer({ currentPage, numPages, isPlaybackReady = tru
             aria-label={playbackControl.ariaLabel}
             aria-busy={playbackControl.isPending}
             disabled={!isPlaying && (!isPlaybackReady || !hasReadableContent)}
-            className="relative"
+            className="relative h-11 w-11 rounded-full bg-accent text-background shadow-[0_3px_12px_color-mix(in_srgb,var(--accent)_35%,transparent)] hover:bg-secondary-accent hover:text-background sm:h-8 sm:w-8 sm:rounded-md sm:bg-transparent sm:text-soft sm:shadow-none sm:hover:bg-accent-wash sm:hover:text-accent"
           >
             {!hasReadableContent
               ? <PlayIcon className="w-5 h-5" />
@@ -168,27 +188,40 @@ export default function TTSPlayer({ currentPage, numPages, isPlaybackReady = tru
             onClick={skipForward}
             aria-label="Skip forward"
             disabled={isProcessing || !isPlaybackReady || !hasReadableContent}
-            className="relative"
+            className="relative h-9 w-9 rounded-full sm:h-8 sm:w-8 sm:rounded-md"
           >
             {isProcessing ? <LoadingSpinner /> : <SkipForwardIcon className="w-5 h-5" />}
           </IconButton>
         </div>
 
         {/* Right side: Page Navigator & Timer display */}
-        <div className="flex items-center gap-3 flex-1 justify-end">
+        <div className="contents sm:flex sm:flex-1 sm:items-center sm:justify-end sm:gap-3">
           {currentPage && numPages && (
-            <Navigator
-              currentPage={currentPage}
-              numPages={numPages}
-              skipToLocation={skipToLocation}
-            />
+            <div className="col-span-3 row-start-3 mt-0.5 justify-self-center sm:mt-0">
+              <Navigator
+                currentPage={currentPage}
+                numPages={numPages}
+                skipToLocation={skipToLocation}
+              />
+            </div>
           )}
-          <div className="text-[11px] text-soft font-mono tabular-nums select-none whitespace-nowrap">
+          <div className="col-span-2 col-start-1 row-start-1 justify-self-start whitespace-nowrap font-mono text-[11px] tabular-nums text-soft select-none">
             {hasReadableContent
               ? playbackControl.statusText
                 ?? `${formatPlaybackTime(shownSec)} / ${formatPlaybackTime(playbackDurationSec)}`
               : 'No readable text'}
           </div>
+          {aheadBuffer && (isPlaying || playbackPhase === 'buffering') && (
+            <div
+              className="col-start-3 row-start-1 justify-self-end whitespace-nowrap rounded-full bg-accent-wash px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-accent sm:rounded-none sm:bg-transparent sm:px-0 sm:py-0 sm:font-normal sm:text-soft"
+              aria-live="polite"
+              aria-label={`${Math.floor(aheadBuffer.wallMs / 1000)} seconds ready ahead`}
+            >
+              {playbackPhase === 'buffering'
+                ? `Loading ahead · ${Math.floor(aheadBuffer.wallMs / 1000)}s ready`
+                : `${Math.floor(aheadBuffer.wallMs / 1000)}s ahead`}
+            </div>
+          )}
         </div>
       </div>
     </div>

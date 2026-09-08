@@ -151,27 +151,32 @@ describe('playback start buffer', () => {
   test('waits through partial layouts and stops when the requested run is replaced', async () => {
     const layouts = [
       {
+        sessionId: 'session-current',
         status: 'running',
         generationStartOrdinal: 50,
         segments: [segment(50, 2_000), segment(51, 9_000, false)],
       },
       {
+        sessionId: 'session-current',
         status: 'running',
         generationStartOrdinal: 50,
         segments: [segment(50, 2_000), segment(51, 9_000)],
       },
     ];
     expect(await waitForPlaybackStartBuffer({
+      sessionId: 'session-current',
       loadLayout: async () => layouts.shift() ?? null,
       isCurrent: () => true,
       playbackRate: 1,
       pollMs: 0,
     })).toEqual({
+      sessionId: 'session-current',
       status: 'running',
       generationStartOrdinal: 50,
       segments: [segment(50, 2_000), segment(51, 9_000)],
     });
     expect(await waitForPlaybackStartBuffer({
+      sessionId: 'session-current',
       loadLayout: async () => null,
       isCurrent: () => false,
       playbackRate: 1,
@@ -179,9 +184,39 @@ describe('playback start buffer', () => {
     })).toBeNull();
   });
 
+  test('ignores a ready layout from the previous playback session', async () => {
+    const layouts = [
+      {
+        sessionId: 'session-previous',
+        status: 'succeeded',
+        generationStartOrdinal: 10,
+        segments: [segment(10, 12_000)],
+      },
+      {
+        sessionId: 'session-current',
+        status: 'running',
+        generationStartOrdinal: 40,
+        segments: [segment(40, 12_000)],
+      },
+    ];
+
+    await expect(waitForPlaybackStartBuffer({
+      sessionId: 'session-current',
+      loadLayout: async () => layouts.shift() ?? null,
+      isCurrent: () => true,
+      playbackRate: 1,
+      pollMs: 0,
+    })).resolves.toMatchObject({
+      sessionId: 'session-current',
+      generationStartOrdinal: 40,
+    });
+  });
+
   test('fails immediately when generation reaches a terminal failure', async () => {
     await expect(waitForPlaybackStartBuffer({
+      sessionId: 'session-current',
       loadLayout: async () => ({
+        sessionId: 'session-current',
         status: 'failed',
         generationStartOrdinal: 60,
         segments: [segment(60, 8_000, false)],

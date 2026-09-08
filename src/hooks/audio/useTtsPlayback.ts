@@ -9,7 +9,6 @@ import {
 } from '@/types/tts';
 import {
   createTtsPlaybackSession,
-  getTtsPlaybackSeekLayout,
   type TtsPlaybackPlanPayload,
   type TtsPlaybackSeekLayout,
   type TtsPlaybackSessionPayload,
@@ -96,7 +95,17 @@ export function useTtsPlayback(input: UseTtsPlaybackInput) {
   const playbackRequestAbortRef = useRef<AbortController | null>(null);
   const playbackRecoveryRef = useRef<ReturnType<typeof createPlaybackRecovery> | null>(null);
   const latestSeekLayoutRef = useRef(playbackSeekLayout);
-  useEffect(() => { latestSeekLayoutRef.current = playbackSeekLayout; }, [playbackSeekLayout]);
+  useEffect(() => {
+    const activeSessionId = playbackSessionRef.current?.sessionId;
+    if (playbackSeekLayout && activeSessionId && playbackSeekLayout.sessionId !== activeSessionId) return;
+    latestSeekLayoutRef.current = playbackSeekLayout;
+  }, [playbackSeekLayout]);
+  const setActivePlaybackSeekLayout = useCallback((layout: TtsPlaybackSeekLayout | null) => {
+    const activeSessionId = playbackSessionRef.current?.sessionId;
+    if (layout && (!activeSessionId || layout.sessionId !== activeSessionId)) return;
+    latestSeekLayoutRef.current = layout;
+    setPlaybackSeekLayout(layout);
+  }, [setPlaybackSeekLayout]);
   const checkRecovery = useCallback(() => { playbackRecoveryRef.current?.check(); }, []);
   const [playbackPhase, setPlaybackPhase] = useState<TtsPlaybackPhase>('idle');
   const {
@@ -139,7 +148,7 @@ export function useTtsPlayback(input: UseTtsPlaybackInput) {
     playbackRunIdRef,
     playbackSessionRef,
     refreshPlaybackTimeline,
-    setPlaybackSeekLayout,
+    setPlaybackSeekLayout: setActivePlaybackSeekLayout,
   });
   const onPendingSeekExpired = useCallback(() => {
     if (!isPlayingRef.current) {
@@ -208,15 +217,19 @@ export function useTtsPlayback(input: UseTtsPlaybackInput) {
     abortPlaybackRequest();
   }, [abortPlaybackRequest, playbackRunIdRef, stopPlaybackRecovery]);
 
-  const resetPlaybackSession = useCallback(() => {
+  const resetPlaybackSession = useCallback((options?: { clearSeekLayout?: boolean }) => {
     stopPlaybackRecovery();
     stopPlaybackForegroundSync();
     playbackActiveRef.current = false;
     playbackSessionRef.current = null;
     playbackRequestHeadersRef.current = null;
+    if (options?.clearSeekLayout) {
+      latestSeekLayoutRef.current = null;
+      setPlaybackSeekLayout(null);
+    }
     resetPlaybackProjection();
     setPlaybackPhase('idle');
-  }, [resetPlaybackProjection, stopPlaybackForegroundSync, stopPlaybackRecovery]);
+  }, [resetPlaybackProjection, setPlaybackSeekLayout, stopPlaybackForegroundSync, stopPlaybackRecovery]);
 
   const abortAudio = useCallback(() => {
     setWorkerPlaybackActive(false);
@@ -278,7 +291,7 @@ export function useTtsPlayback(input: UseTtsPlaybackInput) {
       return;
     }
 
-    resetPlaybackSession();
+    resetPlaybackSession({ clearSeekLayout: true });
     setPlaybackPhase('planning');
     clearAudioSource();
 
@@ -325,6 +338,8 @@ export function useTtsPlayback(input: UseTtsPlaybackInput) {
         timelineUrl: session.timelineUrl,
         seekLayoutUrl: session.seekLayoutUrl,
       };
+      latestSeekLayoutRef.current = null;
+      setPlaybackSeekLayout(null);
       playbackRequestHeadersRef.current = headers;
       setPlaybackPhase('ready');
 
@@ -337,12 +352,15 @@ export function useTtsPlayback(input: UseTtsPlaybackInput) {
       startPlaybackForegroundSync(runId);
 
       const initialSeekLayout = await waitForPlaybackStartBuffer({
-        loadLayout: () => getTtsPlaybackSeekLayout(session.seekLayoutUrl).catch(() => null),
+        sessionId: session.sessionId,
+        // Foreground SSE owns seek-layout refreshes. Startup waits on the latest
+        // snapshot it has delivered instead of creating a second HTTP poll loop.
+        loadLayout: () => Promise.resolve(latestSeekLayoutRef.current),
         isCurrent: () => runId === playbackRunIdRef.current,
         playbackRate: audioSpeed,
       });
       if (runId !== playbackRunIdRef.current || !initialSeekLayout) return;
-      setPlaybackSeekLayout(initialSeekLayout);
+      setActivePlaybackSeekLayout(initialSeekLayout);
       await refreshPlaybackTimeline(session.timelineUrl);
       if (runId !== playbackRunIdRef.current) return;
 
@@ -464,6 +482,7 @@ export function useTtsPlayback(input: UseTtsPlaybackInput) {
     resetPlaybackSession,
     setIsPlaying,
     setPlaybackPhase,
+    setActivePlaybackSeekLayout,
     setPlaybackSeekLayout,
     setSelectedOrdinal,
     setWorkerPlaybackActive,
