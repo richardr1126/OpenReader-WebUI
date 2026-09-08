@@ -78,7 +78,7 @@ describe('playback grid mapping', () => {
     expect(normalized.segments.map((segment) => segment.audioState)).toEqual(['pending', 'ready']);
     expect(normalized.segments.map((segment) => segment.durationSource)).toEqual(['estimated', 'exact']);
     expect(normalized.segments.map((segment) => segment.alignmentSource)).toEqual([null, null]);
-    expect(shouldRefreshPlaybackSegmentTiming(normalized.segments[0])).toBe(false);
+    expect(shouldRefreshPlaybackSegmentTiming(normalized.segments[0])).toBe(true);
     expect(shouldRefreshPlaybackSegmentTiming(normalized.segments[1])).toBe(false);
     expect(shouldRefreshPlaybackSegmentTiming(grid.segments[1])).toBe(false);
   });

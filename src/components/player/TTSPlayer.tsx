@@ -26,6 +26,7 @@ export default function TTSPlayer({ currentPage, numPages, isPlaybackReady = tru
   const {
     isPlaying,
     playbackPhase,
+    audioSpeed,
     togglePlay,
     skipForward,
     skipBackward,
@@ -54,9 +55,9 @@ export default function TTSPlayer({ currentPage, numPages, isPlaybackReady = tru
       segments: playbackSeekLayout.segments,
       startOrdinal: segment.ordinal,
       offsetWithinStartSegmentMs: Math.max(0, playbackTimeSec * 1000 - segment.startMs),
-      playbackRate: 1,
+      playbackRate: audioSpeed,
     });
-  }, [playbackSeekLayout, playbackTimeSec]);
+  }, [audioSpeed, playbackSeekLayout, playbackTimeSec]);
   const scrubberTrackBackground = useMemo(() => {
     if (!playbackSeekLayout || playbackSeekLayout.durationMs <= 0 || playbackSeekLayout.segments.length === 0) {
       return 'color-mix(in srgb, var(--foreground) 14%, transparent)';

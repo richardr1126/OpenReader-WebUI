@@ -116,8 +116,7 @@ export function normalizePlaybackGrid(value: unknown): TtsPlaybackGrid {
 }
 
 export function shouldRefreshPlaybackSegmentTiming(segment: TtsPlaybackGridSegment): boolean {
-  void segment;
-  return false;
+  return !segment.generated;
 }
 
 export function findPlaybackGridSegmentAtMs(

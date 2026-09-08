@@ -14,6 +14,7 @@ type PlaybackBufferSegment = {
 };
 
 type PlaybackStartLayout = {
+  sessionId?: string;
   status: string | null;
   generationStartOrdinal: number;
   segments: PlaybackBufferSegment[];
@@ -90,6 +91,7 @@ export function isPlaybackStartBufferReady(input: {
 }
 
 export async function waitForPlaybackStartBuffer<T extends PlaybackStartLayout>(input: {
+  sessionId: string;
   loadLayout: () => Promise<T | null>;
   isCurrent: () => boolean;
   playbackRate: number;
@@ -100,11 +102,12 @@ export async function waitForPlaybackStartBuffer<T extends PlaybackStartLayout>(
   for (;;) {
     if (!input.isCurrent()) return null;
     const layout = await input.loadLayout();
-    if (layout?.status === 'failed') {
+    const belongsToSession = layout?.sessionId === input.sessionId;
+    if (belongsToSession && layout.status === 'failed') {
       throw new Error('TTS playback generation failed before audio became ready');
     }
     if (
-      layout
+      belongsToSession
       && (layout.status === 'running' || layout.status === 'succeeded')
       && isPlaybackStartBufferReady({
         segments: layout.segments,
