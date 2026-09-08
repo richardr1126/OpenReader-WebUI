@@ -104,7 +104,7 @@ export type TtsPlaybackGridSegment = {
   estimated: boolean;
   locator: TTSSegmentLocator | null;
   alignment: TTSSentenceAlignment | null;
-  alignmentSource: 'proportional' | 'exact' | null;
+  alignmentSource: 'exact' | null;
   updatedAt?: number | null;
 };
 
@@ -120,7 +120,7 @@ export function buildPlaybackGrid(input: {
   startOrdinal: number;
   completedSegments?: Map<number, {
     alignment: TTSSentenceAlignment | null;
-    alignmentSource: 'proportional' | 'exact' | null;
+    alignmentSource: 'exact' | null;
     updatedAt?: number | null;
   }>;
 }) {

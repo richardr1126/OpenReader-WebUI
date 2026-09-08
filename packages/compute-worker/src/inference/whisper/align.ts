@@ -21,13 +21,9 @@ import {
 } from './timestamps';
 import {
   ensureWhisperModel,
-  WHISPER_CONFIG_PATH,
-  WHISPER_GENERATION_CONFIG_PATH,
-  WHISPER_TOKENIZER_CONFIG_PATH,
-  WHISPER_TOKENIZER_PATH,
-  WHISPER_ENCODER_MODEL_PATH,
-  WHISPER_DECODER_MERGED_MODEL_PATH,
-  WHISPER_DECODER_WITH_PAST_MODEL_PATH,
+  getWhisperModelPaths,
+  resolveWhisperModelVariant,
+  type WhisperModelVariant,
 } from './model';
 import {
   applyTokenSuppression,
@@ -64,6 +60,7 @@ interface WhisperAlignmentOptions {
 }
 
 interface WhisperRuntime {
+  variant: WhisperModelVariant;
   encoder: ort.InferenceSession;
   decoderMerged: ort.InferenceSession;
   decoderWithPast: ort.InferenceSession;
@@ -81,18 +78,23 @@ interface WhisperRuntime {
   alignmentHeads: Array<[number, number]>;
   prefillFetches: string[];
   stepFetches: string[];
+  isMultilingual: boolean;
+  decoderLayers: number;
+  decoderAttentionHeads: number;
+  decoderHeadDim: number;
+  encoderSequenceLength: number;
 }
 
 type WhisperAlignmentState = {
   alignmentCache: Map<string, TTSSentenceAlignment[]>;
   alignmentInFlight: Map<string, Promise<TTSSentenceAlignment[]>>;
-  runtimePromise: Promise<WhisperRuntime> | null;
+  runtimePromises: Map<WhisperModelVariant, Promise<WhisperRuntime>>;
   alignmentLaneTail: Promise<void>;
   officialMelFilters: Float32Array[] | null;
-  emptyPastFeedsTemplate: Record<string, ort.Tensor> | null;
+  emptyPastFeedsTemplates: Map<WhisperModelVariant, Record<string, ort.Tensor>>;
 };
 
-const WHISPER_ALIGNMENT_STATE_KEY = '__openreaderWhisperAlignmentStateV1';
+const WHISPER_ALIGNMENT_STATE_KEY = '__openreaderWhisperAlignmentStateV2';
 const g = globalThis as typeof globalThis & Record<string, unknown>;
 const state = (() => {
   const existing = g[WHISPER_ALIGNMENT_STATE_KEY] as WhisperAlignmentState | undefined;
@@ -103,10 +105,10 @@ const state = (() => {
   const created: WhisperAlignmentState = {
     alignmentCache: new Map<string, TTSSentenceAlignment[]>(),
     alignmentInFlight: new Map<string, Promise<TTSSentenceAlignment[]>>(),
-    runtimePromise: null,
+    runtimePromises: new Map(),
     alignmentLaneTail: Promise.resolve(),
     officialMelFilters: null,
-    emptyPastFeedsTemplate: null,
+    emptyPastFeedsTemplates: new Map(),
   };
   g[WHISPER_ALIGNMENT_STATE_KEY] = created;
   return created;
@@ -127,9 +129,6 @@ const CHUNK_LENGTH_SECONDS = 30;
 const N_SAMPLES = CHUNK_LENGTH_SECONDS * SAMPLE_RATE;
 const N_FRAMES = N_SAMPLES / HOP_LENGTH;
 const N_MELS = 80;
-const WHISPER_NUM_HEADS = 8;
-const WHISPER_HEAD_DIM = 64;
-const WHISPER_NUM_LAYERS = 6;
 const MEL_FILTER_BINS = (N_FFT / 2) + 1;
 
 const hannWindow = buildHannWindow(N_FFT);
@@ -433,44 +432,67 @@ function makeInFlightCoalesceKey(audioBuffer: TTSAudioBuffer, text: string, lang
     .digest('hex');
 }
 
-function buildEmptyPastFeeds() {
-  if (state.emptyPastFeedsTemplate) return state.emptyPastFeedsTemplate;
+function buildEmptyPastFeeds(runtime: WhisperRuntime) {
+  const cached = state.emptyPastFeedsTemplates.get(runtime.variant);
+  if (cached) return cached;
 
   const feeds: Record<string, ort.Tensor> = {};
   const emptyDecoderPast = new Float32Array(0);
-  const emptyEncoderPast = new Float32Array(1 * WHISPER_NUM_HEADS * 1500 * WHISPER_HEAD_DIM);
+  const emptyEncoderPast = new Float32Array(
+    runtime.decoderAttentionHeads * runtime.encoderSequenceLength * runtime.decoderHeadDim,
+  );
 
-  for (let i = 0; i < WHISPER_NUM_LAYERS; i += 1) {
-    feeds[`past_key_values.${i}.decoder.key`] = new ort.Tensor('float32', emptyDecoderPast, [1, WHISPER_NUM_HEADS, 0, WHISPER_HEAD_DIM]);
-    feeds[`past_key_values.${i}.decoder.value`] = new ort.Tensor('float32', emptyDecoderPast, [1, WHISPER_NUM_HEADS, 0, WHISPER_HEAD_DIM]);
+  for (let i = 0; i < runtime.decoderLayers; i += 1) {
+    feeds[`past_key_values.${i}.decoder.key`] = new ort.Tensor(
+      'float32', emptyDecoderPast, [1, runtime.decoderAttentionHeads, 0, runtime.decoderHeadDim],
+    );
+    feeds[`past_key_values.${i}.decoder.value`] = new ort.Tensor(
+      'float32', emptyDecoderPast, [1, runtime.decoderAttentionHeads, 0, runtime.decoderHeadDim],
+    );
 
     // First pass still expects encoder KV inputs in the merged decoder graph.
-    feeds[`past_key_values.${i}.encoder.key`] = new ort.Tensor('float32', emptyEncoderPast, [1, WHISPER_NUM_HEADS, 1500, WHISPER_HEAD_DIM]);
-    feeds[`past_key_values.${i}.encoder.value`] = new ort.Tensor('float32', emptyEncoderPast, [1, WHISPER_NUM_HEADS, 1500, WHISPER_HEAD_DIM]);
+    feeds[`past_key_values.${i}.encoder.key`] = new ort.Tensor(
+      'float32', emptyEncoderPast,
+      [1, runtime.decoderAttentionHeads, runtime.encoderSequenceLength, runtime.decoderHeadDim],
+    );
+    feeds[`past_key_values.${i}.encoder.value`] = new ort.Tensor(
+      'float32', emptyEncoderPast,
+      [1, runtime.decoderAttentionHeads, runtime.encoderSequenceLength, runtime.decoderHeadDim],
+    );
   }
 
-  state.emptyPastFeedsTemplate = feeds;
-  return state.emptyPastFeedsTemplate;
+  state.emptyPastFeedsTemplates.set(runtime.variant, feeds);
+  return feeds;
 }
 
-async function getRuntime(onModelDownloadProgress?: ModelDownloadProgressHandler): Promise<WhisperRuntime> {
-  if (state.runtimePromise) return state.runtimePromise;
+async function getRuntime(
+  language?: string,
+  onModelDownloadProgress?: ModelDownloadProgressHandler,
+): Promise<WhisperRuntime> {
+  const variant = resolveWhisperModelVariant(language);
+  const existing = state.runtimePromises.get(variant);
+  if (existing) return existing;
 
-  state.runtimePromise = (async () => {
-    await ensureWhisperModel({ onProgress: onModelDownloadProgress });
+  const runtimePromise = (async () => {
+    await ensureWhisperModel({ variant, onProgress: onModelDownloadProgress });
     await loadOfficialMelFilters();
+    const paths = getWhisperModelPaths(variant);
 
     const [configRaw, generationRaw, tokenizerJsonRaw, tokenizerConfigRaw] = await Promise.all([
-      readFile(WHISPER_CONFIG_PATH, 'utf8'),
-      readFile(WHISPER_GENERATION_CONFIG_PATH, 'utf8'),
-      readFile(WHISPER_TOKENIZER_PATH, 'utf8'),
-      readFile(WHISPER_TOKENIZER_CONFIG_PATH, 'utf8'),
+      readFile(paths.configPath, 'utf8'),
+      readFile(paths.generationConfigPath, 'utf8'),
+      readFile(paths.tokenizerPath, 'utf8'),
+      readFile(paths.tokenizerConfigPath, 'utf8'),
     ]);
 
     const config = JSON.parse(configRaw) as {
       decoder_start_token_id?: number;
       eos_token_id?: number;
       forced_decoder_ids?: Array<[number, number | null]>;
+      decoder_layers?: number;
+      decoder_attention_heads?: number;
+      d_model?: number;
+      max_source_positions?: number;
     };
 
     const generationConfig = JSON.parse(generationRaw) as {
@@ -480,9 +502,20 @@ async function getRuntime(onModelDownloadProgress?: ModelDownloadProgressHandler
       begin_suppress_tokens?: number[];
       max_length?: number;
       alignment_heads?: Array<[number, number]>;
+      is_multilingual?: boolean;
     };
 
     const tokenizer = new Tokenizer(JSON.parse(tokenizerJsonRaw), JSON.parse(tokenizerConfigRaw));
+    const decoderLayers = Number(config.decoder_layers);
+    const decoderAttentionHeads = Number(config.decoder_attention_heads);
+    const dModel = Number(config.d_model);
+    const encoderSequenceLength = Number(config.max_source_positions ?? 1500);
+    if (!Number.isInteger(decoderLayers) || decoderLayers <= 0
+      || !Number.isInteger(decoderAttentionHeads) || decoderAttentionHeads <= 0
+      || !Number.isInteger(dModel) || dModel <= 0 || dModel % decoderAttentionHeads !== 0
+      || !Number.isInteger(encoderSequenceLength) || encoderSequenceLength <= 0) {
+      throw new Error(`Whisper ${variant} configuration has invalid decoder dimensions`);
+    }
 
     const promptStartToken = Number(config.decoder_start_token_id ?? 50258);
     const eosTokenId = Number(config.eos_token_id ?? 50257);
@@ -515,9 +548,9 @@ async function getRuntime(onModelDownloadProgress?: ModelDownloadProgressHandler
       executionMode: 'sequential',
     };
 
-    const encoder = await ort.InferenceSession.create(WHISPER_ENCODER_MODEL_PATH, stableSessionOptions);
-    const decoderMerged = await ort.InferenceSession.create(WHISPER_DECODER_MERGED_MODEL_PATH, stableSessionOptions);
-    const decoderWithPast = await ort.InferenceSession.create(WHISPER_DECODER_WITH_PAST_MODEL_PATH, stableSessionOptions);
+    const encoder = await ort.InferenceSession.create(paths.encoderModelPath, stableSessionOptions);
+    const decoderMerged = await ort.InferenceSession.create(paths.decoderMergedModelPath, stableSessionOptions);
+    const decoderWithPast = await ort.InferenceSession.create(paths.decoderWithPastModelPath, stableSessionOptions);
 
     const alignmentLayers = [...new Set(alignmentHeads.map(([layer]) => layer))];
     const prefillFetches: string[] = ['logits'];
@@ -525,7 +558,7 @@ async function getRuntime(onModelDownloadProgress?: ModelDownloadProgressHandler
     const mergedOutputNames = new Set(decoderMerged.outputNames);
     const withPastOutputNames = new Set(decoderWithPast.outputNames);
 
-    for (let i = 0; i < WHISPER_NUM_LAYERS; i += 1) {
+    for (let i = 0; i < decoderLayers; i += 1) {
       const decoderKey = `present.${i}.decoder.key`;
       const decoderValue = `present.${i}.decoder.value`;
       if (mergedOutputNames.has(decoderKey)) prefillFetches.push(decoderKey);
@@ -546,6 +579,7 @@ async function getRuntime(onModelDownloadProgress?: ModelDownloadProgressHandler
     }
 
     return {
+      variant,
       encoder,
       decoderMerged,
       decoderWithPast,
@@ -563,13 +597,19 @@ async function getRuntime(onModelDownloadProgress?: ModelDownloadProgressHandler
       alignmentHeads,
       prefillFetches,
       stepFetches,
+      isMultilingual: generationConfig.is_multilingual !== false,
+      decoderLayers,
+      decoderAttentionHeads,
+      decoderHeadDim: dModel / decoderAttentionHeads,
+      encoderSequenceLength,
     };
   })().catch((error) => {
-    state.runtimePromise = null;
+    state.runtimePromises.delete(variant);
     throw error;
   });
 
-  return state.runtimePromise;
+  state.runtimePromises.set(variant, runtimePromise);
+  return runtimePromise;
 }
 
 function resolveLanguageToken(runtime: WhisperRuntime, lang?: string): number {
@@ -588,7 +628,7 @@ async function runWhisperOnnx(
   timeoutMs: number,
 ): Promise<WhisperWord[]> {
   assertWithinDeadline(deadlineMs, timeoutMs);
-  const runtime = await getRuntime(opts.onModelDownloadProgress);
+  const runtime = await getRuntime(opts.lang, opts.onModelDownloadProgress);
   const decodeStepLimit = computeAdaptiveDecodeStepLimit(runtime.maxDecodeSteps, opts.textHint);
   const mel = computeLogMelSpectrogram(audioSamples);
   const encoderPast: Record<string, ort.Tensor> = {};
@@ -603,15 +643,16 @@ async function runWhisperOnnx(
     }, ['last_hidden_state']);
     encoderHidden = encoderOutputs.last_hidden_state;
 
-    const languageToken = resolveLanguageToken(runtime, opts.lang);
-    const promptTokens = [
-      runtime.promptStartToken,
-      languageToken,
-      runtime.transcribeToken,
-    ];
+    const promptTokens = runtime.isMultilingual
+      ? [
+          runtime.promptStartToken,
+          resolveLanguageToken(runtime, opts.lang),
+          runtime.transcribeToken,
+        ]
+      : [runtime.promptStartToken];
 
     const generated: number[] = [...promptTokens];
-    const emptyPastFeeds = buildEmptyPastFeeds();
+    const emptyPastFeeds = buildEmptyPastFeeds(runtime);
     type LayerChunk = {
       data: Float32Array;
       heads: number;
@@ -677,7 +718,7 @@ async function runWhisperOnnx(
     }
     captureCrossAttentions(outputs, true);
 
-    for (let i = 0; i < WHISPER_NUM_LAYERS; i += 1) {
+    for (let i = 0; i < runtime.decoderLayers; i += 1) {
       encoderPast[`past_key_values.${i}.encoder.key`] = outputs[`present.${i}.encoder.key`];
       encoderPast[`past_key_values.${i}.encoder.value`] = outputs[`present.${i}.encoder.value`];
       decoderPast[`past_key_values.${i}.decoder.key`] = outputs[`present.${i}.decoder.key`];
@@ -727,7 +768,7 @@ async function runWhisperOnnx(
       }
       captureCrossAttentions(nextOutputs, false);
 
-      for (let i = 0; i < WHISPER_NUM_LAYERS; i += 1) {
+      for (let i = 0; i < runtime.decoderLayers; i += 1) {
         decoderPast[`past_key_values.${i}.decoder.key`] = nextOutputs[`present.${i}.decoder.key`];
         decoderPast[`past_key_values.${i}.decoder.value`] = nextOutputs[`present.${i}.decoder.value`];
       }
@@ -755,7 +796,7 @@ async function runWhisperOnnx(
       })
       .filter((pair): pair is [number, number] => pair !== null);
 
-    for (let layer = 0; layer < WHISPER_NUM_LAYERS; layer += 1) {
+    for (let layer = 0; layer < runtime.decoderLayers; layer += 1) {
       const chunks = crossAttentionChunks.get(layer);
       if (!chunks || !chunks.length) continue;
 
@@ -786,7 +827,7 @@ async function runWhisperOnnx(
 
     const tokenStartTimestamps = extractTokenStartTimestamps({
       crossAttentions,
-      decoderLayers: WHISPER_NUM_LAYERS,
+      decoderLayers: runtime.decoderLayers,
       alignmentHeads: remappedAlignmentHeads,
       numFrames,
       numInputIds: promptTokens.length,
@@ -835,19 +876,21 @@ export async function alignAudioWithText(
   opts: WhisperAlignmentOptions = {},
 ): Promise<TTSSentenceAlignment[]> {
   if (!text.trim()) return [];
+  const modelVariant = resolveWhisperModelVariant(opts.lang);
+  const scopedCacheKey = cacheKey ? `${modelVariant}:${cacheKey}` : null;
 
-  if (cacheKey && alignmentCache.has(cacheKey)) {
-    const cached = alignmentCache.get(cacheKey)!;
-    alignmentCache.delete(cacheKey);
-    alignmentCache.set(cacheKey, cached);
+  if (scopedCacheKey && alignmentCache.has(scopedCacheKey)) {
+    const cached = alignmentCache.get(scopedCacheKey)!;
+    alignmentCache.delete(scopedCacheKey);
+    alignmentCache.set(scopedCacheKey, cached);
     return cached;
   }
 
-  if (cacheKey) {
-    const inFlight = alignmentInFlight.get(cacheKey);
+  if (scopedCacheKey) {
+    const inFlight = alignmentInFlight.get(scopedCacheKey);
     if (inFlight) return inFlight;
   }
-  const inFlightKey = cacheKey ?? makeInFlightCoalesceKey(audioBuffer, text, opts.lang);
+  const inFlightKey = scopedCacheKey ?? makeInFlightCoalesceKey(audioBuffer, text, opts.lang);
   const shared = alignmentInFlight.get(inFlightKey);
   if (shared) return shared;
 
@@ -883,11 +926,11 @@ export async function alignAudioWithText(
       const alignment = mapWordsToSentenceOffsets(text, words);
       const result: TTSSentenceAlignment[] = [alignment];
 
-      if (cacheKey) {
-        if (alignmentCache.has(cacheKey)) {
-          alignmentCache.delete(cacheKey);
+      if (scopedCacheKey) {
+        if (alignmentCache.has(scopedCacheKey)) {
+          alignmentCache.delete(scopedCacheKey);
         }
-        alignmentCache.set(cacheKey, result);
+        alignmentCache.set(scopedCacheKey, result);
         while (alignmentCache.size > ALIGNMENT_CACHE_MAX_ENTRIES) {
           const oldest = alignmentCache.keys().next().value;
           if (!oldest) break;

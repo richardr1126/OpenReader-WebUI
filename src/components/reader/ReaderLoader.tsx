@@ -13,14 +13,14 @@ export function ReaderLoader({ progress }: { progress?: ReaderBootstrapProgress 
   const modelPercent = modelTotalBytes > 0 ? Math.round((modelDownloadedBytes / modelTotalBytes) * 100) : null;
   const displayedPercent = progress?.phase === 'downloading-model' ? modelPercent : percent;
   const title = progress?.phase === 'downloading-model'
-    ? 'Downloading document model'
+    ? 'Preparing document model'
     : progress?.phase === 'merging'
     ? 'Finishing document structure'
     : progress
       ? 'Understanding document structure'
       : 'Opening document';
   const detail = progress?.phase === 'downloading-model'
-    ? 'This one-time download prepares PDF reading order on this device'
+    ? 'Preparing PDF reading order in the cloud'
     : progress
     ? 'Finding the reading order across each page'
     : 'Preparing your reader and saved position';
@@ -59,7 +59,7 @@ export function ReaderLoader({ progress }: { progress?: ReaderBootstrapProgress 
           {progress ? (
             <div className={styles.progressLabels}>
               <span>{progress.phase === 'downloading-model'
-                ? 'Downloading model'
+                ? 'Preparing model'
                 : totalPages > 0 ? `Page ${pagesParsed} of ${totalPages}` : 'Preparing the first page'}</span>
               <span>{progress.phase === 'merging'
                 ? 'Finishing structure'

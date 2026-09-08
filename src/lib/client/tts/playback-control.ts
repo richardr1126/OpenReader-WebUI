@@ -1,6 +1,11 @@
 import type { TtsPlaybackPhase } from '@/types/tts';
+import {
+  isPlaybackBufferReady,
+  measurePlaybackBuffer,
+  PLAYBACK_START_BUFFER_WALL_MS,
+} from '@openreader/tts/playback-buffer';
 
-export const PLAYBACK_START_BUFFER_WALL_MS = 10_000;
+export { PLAYBACK_START_BUFFER_WALL_MS } from '@openreader/tts/playback-buffer';
 
 type PlaybackBufferSegment = {
   ordinal: number;
@@ -57,26 +62,14 @@ export function measurePlaybackStartBuffer(
   segments: PlaybackBufferSegment[],
   startOrdinal: number,
 ): PlaybackStartBuffer {
-  const start = Math.max(0, Math.floor(Number(startOrdinal) || 0));
-  const ordered = [...segments].sort((a, b) => a.ordinal - b.ordinal);
-  const startIndex = ordered.findIndex((segment) => segment.ordinal === start);
-  if (startIndex < 0) {
-    return { durationMs: 0, segmentCount: 0, reachedDocumentEnd: false };
-  }
-
-  let durationMs = 0;
-  let segmentCount = 0;
-  for (let index = startIndex; index < ordered.length; index += 1) {
-    const segment = ordered[index];
-    if (!segment.generated) break;
-    durationMs += Math.max(1, Math.floor(Number(segment.durationMs) || 0));
-    segmentCount += 1;
-  }
-
+  const result = measurePlaybackBuffer({
+    segments: [...segments].sort((a, b) => a.ordinal - b.ordinal),
+    startOrdinal,
+  });
   return {
-    durationMs,
-    segmentCount,
-    reachedDocumentEnd: startIndex + segmentCount >= ordered.length,
+    durationMs: result.durationMs,
+    segmentCount: result.segmentCount,
+    reachedDocumentEnd: result.reachedDocumentEnd,
   };
 }
 
@@ -87,25 +80,13 @@ export function isPlaybackStartBufferReady(input: {
   minimumWallMs?: number;
   offsetWithinStartSegmentMs?: number;
 }): boolean {
-  const buffer = measurePlaybackStartBuffer(input.segments, input.startOrdinal);
-  if (buffer.segmentCount === 0) return false;
-  if (buffer.reachedDocumentEnd) return true;
-
-  const playbackRate = Number.isFinite(input.playbackRate) && input.playbackRate > 0
-    ? input.playbackRate
-    : 1;
-  const minimumWallMs = Math.max(0, Math.floor(
-    input.minimumWallMs ?? PLAYBACK_START_BUFFER_WALL_MS,
-  ));
-  const playableDurationMs = Math.max(
-    0,
-    buffer.durationMs - Math.max(0, Math.floor(input.offsetWithinStartSegmentMs ?? 0)),
-  );
-  // Duration, not segment count, is the meaningful underrun protection. One
-  // long generated paragraph can provide more runway than several headings;
-  // requiring a second segment in that case only adds a full provider round
-  // trip before playback can begin.
-  return playableDurationMs >= minimumWallMs * playbackRate;
+  return isPlaybackBufferReady({
+    segments: input.segments,
+    startOrdinal: input.startOrdinal,
+    playbackRate: input.playbackRate,
+    minimumWallMs: input.minimumWallMs ?? PLAYBACK_START_BUFFER_WALL_MS,
+    offsetWithinStartSegmentMs: input.offsetWithinStartSegmentMs,
+  });
 }
 
 export async function waitForPlaybackStartBuffer<T extends PlaybackStartLayout>(input: {

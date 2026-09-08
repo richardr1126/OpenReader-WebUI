@@ -14,7 +14,7 @@ export type TtsPlaybackGridSegment = {
   estimated: boolean;
   locator: TTSSegmentLocator | null;
   alignment: TTSSentenceAlignment | null;
-  alignmentSource: 'proportional' | 'exact' | null;
+  alignmentSource: 'exact' | null;
 };
 
 export type TtsPlaybackGrid = {
@@ -94,9 +94,9 @@ export function normalizePlaybackGrid(value: unknown): TtsPlaybackGrid {
           ? normalizeLocator(row.locator as TTSSegmentLocator)
           : null,
         alignment: row.alignment && typeof row.alignment === 'object' ? row.alignment as TTSSentenceAlignment : null,
-        alignmentSource: row.alignmentSource === 'proportional' || row.alignmentSource === 'exact'
-          ? row.alignmentSource
-          : null,
+    alignmentSource: row.alignmentSource === 'exact'
+      ? row.alignmentSource
+      : null,
       };
     })
     .filter((item): item is TtsPlaybackGridSegment => Boolean(item))
@@ -116,7 +116,8 @@ export function normalizePlaybackGrid(value: unknown): TtsPlaybackGrid {
 }
 
 export function shouldRefreshPlaybackSegmentTiming(segment: TtsPlaybackGridSegment): boolean {
-  return segment.generated === false || segment.alignmentSource === 'proportional';
+  void segment;
+  return false;
 }
 
 export function findPlaybackGridSegmentAtMs(

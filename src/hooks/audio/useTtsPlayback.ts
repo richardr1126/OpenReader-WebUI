@@ -9,7 +9,6 @@ import {
 } from '@/types/tts';
 import {
   createTtsPlaybackSession,
-  getTtsPlaybackSeekLayout,
   type TtsPlaybackPlanPayload,
   type TtsPlaybackSeekLayout,
   type TtsPlaybackSessionPayload,
@@ -337,7 +336,9 @@ export function useTtsPlayback(input: UseTtsPlaybackInput) {
       startPlaybackForegroundSync(runId);
 
       const initialSeekLayout = await waitForPlaybackStartBuffer({
-        loadLayout: () => getTtsPlaybackSeekLayout(session.seekLayoutUrl).catch(() => null),
+        // Foreground SSE owns seek-layout refreshes. Startup waits on the latest
+        // snapshot it has delivered instead of creating a second HTTP poll loop.
+        loadLayout: () => Promise.resolve(latestSeekLayoutRef.current),
         isCurrent: () => runId === playbackRunIdRef.current,
         playbackRate: audioSpeed,
       });

@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useTTS } from '@/contexts/TTSContext';
+import { measurePlaybackBuffer } from '@openreader/tts/playback-buffer';
 import {
   PlayIcon,
   PauseIcon,
@@ -43,6 +44,19 @@ export default function TTSPlayer({ currentPage, numPages, isPlaybackReady = tru
   const shownSec = previewSec ?? playbackTimeSec;
   const canSeek = playbackDurationSec > 0 && Boolean(playbackSeekLayout);
   const playbackControl = resolvePlaybackControlPresentation(isPlaying, playbackPhase);
+  const aheadBuffer = useMemo(() => {
+    if (!playbackSeekLayout || playbackSeekLayout.segments.length === 0) return null;
+    const segment = playbackSeekLayout.segments.find(
+      (entry) => playbackTimeSec * 1000 >= entry.startMs && playbackTimeSec * 1000 < entry.endMs,
+    );
+    if (!segment) return null;
+    return measurePlaybackBuffer({
+      segments: playbackSeekLayout.segments,
+      startOrdinal: segment.ordinal,
+      offsetWithinStartSegmentMs: Math.max(0, playbackTimeSec * 1000 - segment.startMs),
+      playbackRate: 1,
+    });
+  }, [playbackSeekLayout, playbackTimeSec]);
   const scrubberTrackBackground = useMemo(() => {
     if (!playbackSeekLayout || playbackSeekLayout.durationMs <= 0 || playbackSeekLayout.segments.length === 0) {
       return 'color-mix(in srgb, var(--foreground) 14%, transparent)';
@@ -189,6 +203,17 @@ export default function TTSPlayer({ currentPage, numPages, isPlaybackReady = tru
                 ?? `${formatPlaybackTime(shownSec)} / ${formatPlaybackTime(playbackDurationSec)}`
               : 'No readable text'}
           </div>
+          {aheadBuffer && (isPlaying || playbackPhase === 'buffering') && (
+            <div
+              className="text-[10px] text-soft tabular-nums whitespace-nowrap"
+              aria-live="polite"
+              aria-label={`${Math.floor(aheadBuffer.wallMs / 1000)} seconds ready ahead`}
+            >
+              {playbackPhase === 'buffering'
+                ? `Loading ahead · ${Math.floor(aheadBuffer.wallMs / 1000)}s ready`
+                : `${Math.floor(aheadBuffer.wallMs / 1000)}s ahead`}
+            </div>
+          )}
         </div>
       </div>
     </div>

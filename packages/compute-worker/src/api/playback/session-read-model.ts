@@ -1,4 +1,3 @@
-import { buildProportionalAlignment } from '@openreader/tts/segments';
 import type { ArtifactStorage } from '../../infrastructure/storage';
 import { toErrorMessage } from '../../infrastructure/errors';
 import type {
@@ -20,7 +19,7 @@ export type PlaybackSegmentManifestRow = {
   audioKey: string;
   durationMs: number;
   alignmentJson: string | null;
-  alignmentSource: 'proportional' | 'exact' | null;
+  alignmentSource: 'exact' | null;
   updatedAt: number | null;
 };
 
@@ -55,16 +54,8 @@ function isStableCompletedSidecar(
   return sidecar?.status === 'completed' && Boolean(sidecar.alignment);
 }
 
-function readSessionLanguage(settingsJson: unknown): string | undefined {
-  if (!settingsJson || typeof settingsJson !== 'object') return undefined;
-  const language = Reflect.get(settingsJson, 'language');
-  return typeof language === 'string' && language.trim() ? language : undefined;
-}
-
 function serializeTimelineAlignment(input: {
   sidecar: TtsPlaybackSegmentMetadata;
-  text: string | undefined;
-  language: string | undefined;
 }): Pick<PlaybackSegmentManifestRow, 'alignmentJson' | 'alignmentSource'> {
   if (input.sidecar.alignment) {
     return {
@@ -72,19 +63,7 @@ function serializeTimelineAlignment(input: {
       alignmentSource: 'exact',
     };
   }
-  const durationMs = Number(input.sidecar.durationMs);
-  if (!input.text || !Number.isFinite(durationMs) || durationMs <= 0) {
-    return { alignmentJson: null, alignmentSource: null };
-  }
-  const alignment = buildProportionalAlignment({
-    sentence: input.text,
-    sentenceIndex: input.sidecar.ordinal,
-    durationMs,
-    language: input.language,
-  });
-  return alignment.words.length > 0
-    ? { alignmentJson: JSON.stringify(alignment), alignmentSource: 'proportional' }
-    : { alignmentJson: null, alignmentSource: null };
+  return { alignmentJson: null, alignmentSource: null };
 }
 
 function scopeCacheKey(session: PlaybackSessionRow, cacheEpoch: number): string {
@@ -185,7 +164,7 @@ export function createPlaybackSessionReadModel(input: {
       // List only this user/document/version/settings prefix. A deep cursor
       // must not turn thousands of ungenerated ordinals into serial S3 batches.
       // Existing exact timing remains cached across chapter changes; unfinished
-      // sidecars are re-read so proportional timing upgrades to exact timing.
+      // sidecars are re-read so exact timing can appear as soon as it exists.
       const ordinals = (await playbackStorage?.artifacts.listSegmentOrdinals(session).catch((error) => {
         logger?.warn({
           sessionId: session.sessionId,
@@ -253,8 +232,6 @@ export function createPlaybackSessionReadModel(input: {
       if (!session.planObjectKey) return [];
       const planSegments = await readPlanSegments(session.planObjectKey);
       if (!planSegments?.length) return [];
-      const planTextByOrdinal = new Map(planSegments.map((segment) => [segment.ordinal, segment.text]));
-      const language = readSessionLanguage(session.settingsJson);
       if (!options) {
         const sidecars = await collectScopeSidecars(session, planSegments.length);
         return [...sidecars.values()]
@@ -266,11 +243,7 @@ export function createPlaybackSessionReadModel(input: {
             segmentKey: sidecar.segmentKey,
             audioKey: sidecar.audioKey,
             durationMs: Math.max(1, Number(sidecar.durationMs ?? 1000)),
-            ...serializeTimelineAlignment({
-              sidecar,
-              text: planTextByOrdinal.get(sidecar.ordinal),
-              language,
-            }),
+            ...serializeTimelineAlignment({ sidecar }),
             updatedAt: sidecar.updatedAt ?? null,
           }))
           .sort((left, right) => left.ordinal - right.ordinal);
@@ -310,12 +283,8 @@ export function createPlaybackSessionReadModel(input: {
           ordinal: sidecar.ordinal,
           segmentKey: sidecar.segmentKey,
           audioKey: sidecar.audioKey,
-          durationMs: Math.max(1, Number(sidecar.durationMs ?? 1000)),
-          ...serializeTimelineAlignment({
-            sidecar,
-            text: planTextByOrdinal.get(sidecar.ordinal),
-            language,
-          }),
+            durationMs: Math.max(1, Number(sidecar.durationMs ?? 1000)),
+            ...serializeTimelineAlignment({ sidecar }),
           updatedAt: sidecar.updatedAt ?? null,
         }))
         .sort((left, right) => left.ordinal - right.ordinal);

@@ -21,7 +21,11 @@
  * grind." The knob is kept so the trade-off can be revisited in one place.
  */
 export const TTS_PLAYBACK_BACKWARD_PAD = 0;
-export const DEFAULT_TTS_PLAYBACK_AHEAD_WINDOW = 12;
+// Dialogue-heavy books need more ordinal runway because a single spoken unit
+// can be only a few words. The client presents the resulting runway in seconds;
+// this ordinal ceiling is intentionally generous while keeping generation
+// bounded and cancellable.
+export const DEFAULT_TTS_PLAYBACK_AHEAD_WINDOW = 48;
 
 export function generationFloorForCursor(cursorOrdinal: number): number {
   const cursor = Math.max(0, Math.floor(Number(cursorOrdinal) || 0));

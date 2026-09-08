@@ -281,6 +281,8 @@ For each planned segment:
 7. Enqueue that segment into one ordered alignment lane. The lane starts exact
    Whisper timing for the first playable segment while synthesis continues for
    the remaining ahead window; it never runs more than one alignment at once.
+   English language tags use the smaller timestamped Whisper tiny English model;
+   other and unknown languages use the multilingual timestamped base model.
 8. Replace the provisional sidecar timing with exact alignment and emit another
    progress snapshot. A paused, superseded, or cache-cleared generation run
    stops both further synthesis and timing backfills at the same ownership
@@ -320,11 +322,10 @@ Readiness is derived from sidecars:
 - The default `/segments` listing returns the complete discovered cached set;
   explicit-window requests still read only their requested ordinal window.
 
-When audio is ready before exact alignment, the timeline explicitly labels its
-word schedule as `proportional`. The client may use that schedule immediately,
-but continues refreshing the active segment until the worker returns `exact`
-timing. This preserves fast startup without allowing an entire EPUB ahead window
-to remain stuck on estimated word pacing.
+When audio is ready before exact alignment, the timeline omits word timing for
+that segment. The client starts audio without inventing a word schedule and
+shows word highlighting only after SSE announces progress and the refreshed
+timeline contains exact timing.
 
 ### Cursor Updates
 
@@ -1642,7 +1643,7 @@ that the local same-host acceptance runs did not exercise:
 
 - The live generation window was only eight segments and waited until half of
   that window remained before asking for a continuation. The active window is
-  now twelve segments and refills while roughly three quarters remain, giving
+  now forty-eight segments and refills while roughly three quarters remain, giving
   the provider, NATS, object storage, and browser heartbeat more recovery time
   without returning to per-segment enqueueing.
 - A bounded playback job kept its operation nonterminal while its ordered
@@ -1659,11 +1660,9 @@ that the local same-host acceptance runs did not exercise:
   checkpoints, and download-only snapshots update only the word-timing toast.
   Timeline and seek-layout reads remain driven by segment/audio or exact-timing
   changes.
-- The playback toast now calls this the `word-timing model`. Audio continues to
-  use proportional timing while the cold model downloads; visible highlighting
-  during that download is therefore not evidence that exact Whisper alignment
-  has already completed. Whisper artifact acquisition remains single-flight per
-  worker process.
+- The playback toast now calls this the `word-timing model`. Audio continues
+  without word highlighting while the cold model downloads. Whisper artifact
+  acquisition remains single-flight per model and worker process.
 - Cursor and play/pause sidecars now belong to a stable session incarnation,
   rather than the session's rolling expiry. The previous expiry equality check
   invalidated each cursor as soon as its heartbeat extended the TTL, so refill
@@ -1711,7 +1710,7 @@ and accumulated data, independently of inference CPU load:
 - Whole-document timeline/duration reads list existing sidecars for the exact
   user/document/version/settings scope, rather than probing every ordinal from
   zero to a deep cursor. Concurrent reads share an in-flight collection. Exact
-  sidecars stay cached across chapters; proportional sidecars are re-read until
+  sidecars stay cached across chapters; audio-only sidecars are re-read until
   exact timing is available. This preserves the complete generated-cache view.
 - Playback job startup uses the same scoped catalogue to discover completed
   segments. It no longer probes every ungenerated segment in the entire book

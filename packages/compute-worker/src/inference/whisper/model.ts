@@ -10,52 +10,32 @@ import {
 } from '../model-download';
 
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
-const MODEL_DIR = path.join(DOCSTORE_DIR, 'model', 'whisper-base_timestamped');
 const STATIC_LICENSE_PATH = path.join(MODULE_DIR, 'assets', 'LICENSE.txt');
-const MANIFEST_PATH = path.join(MODULE_DIR, 'assets', 'manifest.json');
+const BASE_MANIFEST_PATH = path.join(MODULE_DIR, 'assets', 'manifest.json');
+const TINY_EN_MANIFEST_PATH = path.join(MODULE_DIR, 'assets', 'tiny-en-manifest.json');
 
-export const WHISPER_CONFIG_PATH = path.join(MODEL_DIR, 'config.json');
-export const WHISPER_GENERATION_CONFIG_PATH = path.join(MODEL_DIR, 'generation_config.json');
-export const WHISPER_TOKENIZER_PATH = path.join(MODEL_DIR, 'tokenizer.json');
-export const WHISPER_TOKENIZER_CONFIG_PATH = path.join(MODEL_DIR, 'tokenizer_config.json');
-export const WHISPER_ENCODER_MODEL_PATH = path.join(MODEL_DIR, 'onnx', 'encoder_model_q4.onnx');
-export const WHISPER_DECODER_MERGED_MODEL_PATH = path.join(MODEL_DIR, 'onnx', 'decoder_model_merged_q4.onnx');
-export const WHISPER_DECODER_WITH_PAST_MODEL_PATH = path.join(MODEL_DIR, 'onnx', 'decoder_with_past_model_q4.onnx');
+export type WhisperModelVariant = 'base-multilingual' | 'tiny-english';
 
-const BASE_MODEL_URL = 'https://huggingface.co/onnx-community/whisper-base_timestamped/resolve/main';
-const WHISPER_MODEL_BASE_URL_ENV = 'WHISPER_MODEL_BASE_URL';
-
-const MODEL_RELATIVE_PATHS: string[] = [
-  'config.json',
-  'generation_config.json',
-  'tokenizer.json',
-  'tokenizer_config.json',
-  'merges.txt',
-  'vocab.json',
-  'normalizer.json',
-  'added_tokens.json',
-  'preprocessor_config.json',
-  'special_tokens_map.json',
-  'onnx/encoder_model_q4.onnx',
-  'onnx/decoder_model_merged_q4.onnx',
-  'onnx/decoder_with_past_model_q4.onnx',
-];
-
-const DEFAULT_URLS: Record<string, string> = {
-  'config.json': `${BASE_MODEL_URL}/config.json`,
-  'generation_config.json': `${BASE_MODEL_URL}/generation_config.json`,
-  'tokenizer.json': `${BASE_MODEL_URL}/tokenizer.json`,
-  'tokenizer_config.json': `${BASE_MODEL_URL}/tokenizer_config.json`,
-  'merges.txt': `${BASE_MODEL_URL}/merges.txt`,
-  'vocab.json': `${BASE_MODEL_URL}/vocab.json`,
-  'normalizer.json': `${BASE_MODEL_URL}/normalizer.json`,
-  'added_tokens.json': `${BASE_MODEL_URL}/added_tokens.json`,
-  'preprocessor_config.json': `${BASE_MODEL_URL}/preprocessor_config.json`,
-  'special_tokens_map.json': `${BASE_MODEL_URL}/special_tokens_map.json`,
-  'onnx/encoder_model_q4.onnx': `${BASE_MODEL_URL}/onnx/encoder_model_q4.onnx`,
-  'onnx/decoder_model_merged_q4.onnx': `${BASE_MODEL_URL}/onnx/decoder_model_merged_q4.onnx`,
-  'onnx/decoder_with_past_model_q4.onnx': `${BASE_MODEL_URL}/onnx/decoder_with_past_model_q4.onnx`,
+type WhisperModelSpec = {
+  directoryName: string;
+  manifestPath: string;
+  baseUrl: string;
 };
+
+const MODEL_SPECS: Record<WhisperModelVariant, WhisperModelSpec> = {
+  'base-multilingual': {
+    directoryName: 'whisper-base_timestamped',
+    manifestPath: BASE_MANIFEST_PATH,
+    baseUrl: 'https://huggingface.co/onnx-community/whisper-base_timestamped/resolve/main',
+  },
+  'tiny-english': {
+    directoryName: 'whisper-tiny.en_timestamped',
+    manifestPath: TINY_EN_MANIFEST_PATH,
+    baseUrl: 'https://huggingface.co/onnx-community/whisper-tiny.en_timestamped/resolve/aeaa13760958b03fac5062f457d317d3319c3168',
+  },
+};
+
+const WHISPER_MODEL_BASE_URL_ENV = 'WHISPER_MODEL_BASE_URL';
 
 type ManifestEntry = { path: string; sha256?: string; size?: number };
 
@@ -75,15 +55,11 @@ export interface WhisperStaticArtifactSpec {
 
 export type WhisperFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
-function loadManifestFiles(): ManifestEntry[] {
-  const manifestText = readFileSync(MANIFEST_PATH, 'utf8');
+function loadManifestFiles(manifestPath: string): ManifestEntry[] {
+  const manifestText = readFileSync(manifestPath, 'utf8');
   const parsed = JSON.parse(manifestText) as { files?: ManifestEntry[] };
   return Array.isArray(parsed.files) ? parsed.files : [];
 }
-
-const MANIFEST_FILES = loadManifestFiles();
-const MODEL_FILES = MANIFEST_FILES.filter((entry) => entry.path !== 'LICENSE.txt');
-const LICENSE_FILE = MANIFEST_FILES.find((entry) => entry.path === 'LICENSE.txt');
 
 function normalizeExpected(entry: { sha256?: string; size?: number }): { sha256: string | null; size: number } {
   return {
@@ -100,16 +76,11 @@ function joinModelUrl(baseUrl: string, relativePath: string): string {
   return `${baseUrl.replace(/\/+$/, '')}/${relativePath}`;
 }
 
-function resolveUrl(relativePath: string): string {
-  const overrideBase = process.env[WHISPER_MODEL_BASE_URL_ENV]?.trim();
-  if (overrideBase) {
-    return joinModelUrl(overrideBase, relativePath);
-  }
-  const fallback = DEFAULT_URLS[relativePath];
-  if (!fallback) {
-    throw new Error(`No default URL configured for Whisper model artifact: ${relativePath}`);
-  }
-  return fallback;
+function resolveUrl(variant: WhisperModelVariant, relativePath: string): string {
+  const overrideBase = variant === 'base-multilingual'
+    ? process.env[WHISPER_MODEL_BASE_URL_ENV]?.trim()
+    : null;
+  return joinModelUrl(overrideBase || MODEL_SPECS[variant].baseUrl, relativePath);
 }
 
 function sha256OfBytes(bytes: Uint8Array): string {
@@ -209,56 +180,95 @@ export async function ensureWhisperArtifacts(options: {
   }
 }
 
-async function ensureModelInternal(onProgress?: ModelDownloadProgressHandler): Promise<string> {
-  if (process.env[WHISPER_MODEL_BASE_URL_ENV]?.trim()) {
-    for (const relativePath of MODEL_RELATIVE_PATHS) {
-      if (!(relativePath in DEFAULT_URLS)) {
-        throw new Error(`Missing default URL path mapping for Whisper artifact: ${relativePath}`);
-      }
-    }
-  }
+export function resolveWhisperModelVariant(language?: string): WhisperModelVariant {
+  const baseLanguage = language?.trim().toLowerCase().split(/[-_]/, 1)[0] ?? '';
+  return baseLanguage === 'en' ? 'tiny-english' : 'base-multilingual';
+}
 
-  const artifacts: WhisperArtifactSpec[] = MODEL_FILES.map((entry) => ({
+export type WhisperModelPaths = {
+  modelDir: string;
+  configPath: string;
+  generationConfigPath: string;
+  tokenizerPath: string;
+  tokenizerConfigPath: string;
+  encoderModelPath: string;
+  decoderMergedModelPath: string;
+  decoderWithPastModelPath: string;
+};
+
+export function getWhisperModelPaths(variant: WhisperModelVariant): WhisperModelPaths {
+  const modelDir = path.join(DOCSTORE_DIR, 'model', MODEL_SPECS[variant].directoryName);
+  return {
+    modelDir,
+    configPath: path.join(modelDir, 'config.json'),
+    generationConfigPath: path.join(modelDir, 'generation_config.json'),
+    tokenizerPath: path.join(modelDir, 'tokenizer.json'),
+    tokenizerConfigPath: path.join(modelDir, 'tokenizer_config.json'),
+    encoderModelPath: path.join(modelDir, 'onnx', 'encoder_model_q4.onnx'),
+    decoderMergedModelPath: path.join(modelDir, 'onnx', 'decoder_model_merged_q4.onnx'),
+    decoderWithPastModelPath: path.join(modelDir, 'onnx', 'decoder_with_past_model_q4.onnx'),
+  };
+}
+
+async function ensureModelInternal(
+  variant: WhisperModelVariant,
+  onProgress?: ModelDownloadProgressHandler,
+): Promise<string> {
+  const spec = MODEL_SPECS[variant];
+  const paths = getWhisperModelPaths(variant);
+  const manifestFiles = loadManifestFiles(spec.manifestPath);
+  const modelFiles = manifestFiles.filter((entry) => entry.path !== 'LICENSE.txt');
+  const licenseFile = manifestFiles.find((entry) => entry.path === 'LICENSE.txt');
+
+  const artifacts: WhisperArtifactSpec[] = modelFiles.map((entry) => ({
     path: entry.path,
     sha256: entry.sha256,
     size: entry.size,
-    url: resolveUrl(entry.path),
+    url: resolveUrl(variant, entry.path),
   }));
 
-  const staticArtifacts: WhisperStaticArtifactSpec[] = LICENSE_FILE
+  const staticArtifacts: WhisperStaticArtifactSpec[] = licenseFile
     ? [{
-        path: LICENSE_FILE.path,
-        sha256: LICENSE_FILE.sha256,
-        size: LICENSE_FILE.size,
+        path: licenseFile.path,
+        sha256: licenseFile.sha256,
+        size: licenseFile.size,
         sourcePath: STATIC_LICENSE_PATH,
       }]
     : [];
 
   await ensureWhisperArtifacts({
-    modelDir: MODEL_DIR,
+    modelDir: paths.modelDir,
     artifacts,
     staticArtifacts,
     onProgress,
   });
 
-  return WHISPER_ENCODER_MODEL_PATH;
+  return paths.encoderModelPath;
 }
 
-let ensureWhisperModelInflight: Promise<string> | null = null;
-const progressListeners = new Set<ModelDownloadProgressHandler>();
+const ensureWhisperModelInflight = new Map<WhisperModelVariant, Promise<string>>();
+const progressListeners = new Map<WhisperModelVariant, Set<ModelDownloadProgressHandler>>();
 
-export async function ensureWhisperModel(options: { onProgress?: ModelDownloadProgressHandler } = {}): Promise<string> {
-  if (options.onProgress) progressListeners.add(options.onProgress);
-  if (!ensureWhisperModelInflight) {
-    ensureWhisperModelInflight = ensureModelInternal(async (progress) => {
-      await Promise.all([...progressListeners].map((listener) => listener(progress)));
+export async function ensureWhisperModel(options: {
+  variant?: WhisperModelVariant;
+  onProgress?: ModelDownloadProgressHandler;
+} = {}): Promise<string> {
+  const variant = options.variant ?? 'base-multilingual';
+  const listeners = progressListeners.get(variant) ?? new Set<ModelDownloadProgressHandler>();
+  progressListeners.set(variant, listeners);
+  if (options.onProgress) listeners.add(options.onProgress);
+  if (!ensureWhisperModelInflight.has(variant)) {
+    const pending = ensureModelInternal(variant, async (progress) => {
+      await Promise.all([...listeners].map((listener) => listener(progress)));
     }).finally(() => {
-      ensureWhisperModelInflight = null;
+      ensureWhisperModelInflight.delete(variant);
+      if (listeners.size === 0) progressListeners.delete(variant);
     });
+    ensureWhisperModelInflight.set(variant, pending);
   }
   try {
-    return await ensureWhisperModelInflight;
+    return await ensureWhisperModelInflight.get(variant)!;
   } finally {
-    if (options.onProgress) progressListeners.delete(options.onProgress);
+    if (options.onProgress) listeners.delete(options.onProgress);
   }
 }

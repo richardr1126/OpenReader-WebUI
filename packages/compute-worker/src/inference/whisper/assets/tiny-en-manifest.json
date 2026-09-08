@@ -1,0 +1,20 @@
+{
+  "name": "whisper-tiny.en_timestamped-q4",
+  "version": "onnx-community/whisper-tiny.en_timestamped@aeaa13760958b03fac5062f457d317d3319c3168",
+  "files": [
+    { "path": "config.json", "sha256": "251ea843b5901a99efa58c0b99b8052c6019aa3e7d2baf46693a1128ff606233", "size": 2197 },
+    { "path": "generation_config.json", "sha256": "7b2e8451ed5f118e75fdd991409d72119d21d2fef1eba9723f68fb9c57fe5dc9", "size": 1646 },
+    { "path": "tokenizer.json", "sha256": "5eb60cec1e77aeeb6869a2bb5a8e01a84c3fe5d072d75369343021fe6f5310d0", "size": 2405679 },
+    { "path": "tokenizer_config.json", "sha256": "93879c3dccdd4b976f709acd85b44778873f30c275e67026f30ca1e4c975230c", "size": 282662 },
+    { "path": "merges.txt", "sha256": "1ce1664773c50f3e0cc8842619a93edc4624525b728b188a9e0be33b7726adc5", "size": 456318 },
+    { "path": "vocab.json", "sha256": "f6bd25a65e4e63ca31360e9fb11c7e4f9a391a78385d640acd814092dd6eee4f", "size": 999186 },
+    { "path": "normalizer.json", "sha256": "bf1c507dc8724ca9cf9903640dacfb69dae2f00edee4f21ceba106a7392f26dd", "size": 52666 },
+    { "path": "added_tokens.json", "sha256": "560be47bea388757f8d4cc185c5d82067426cbb6361e38016dd90ddc01ab203a", "size": 34604 },
+    { "path": "preprocessor_config.json", "sha256": "a6a76d28c93edb273669eb9e0b0636a2bddbb1272c3261e47b7ca6dfdbac1b8d", "size": 339 },
+    { "path": "special_tokens_map.json", "sha256": "98bdf3ec5b32e31575b02f64b0a32bde7c0449075d34484a7df9bdd3cdeb9fb9", "size": 2173 },
+    { "path": "onnx/encoder_model_q4.onnx", "sha256": "fae0e8f5bec746964775faf00ea2ddf49a52f408550384a49f3394b31633c15f", "size": 9019892 },
+    { "path": "onnx/decoder_model_merged_q4.onnx", "sha256": "19885c31b799d9a4387be37bc85bbf856b2f1b93f525b9b0a2d66aaad8d8a37f", "size": 86803045 },
+    { "path": "onnx/decoder_with_past_model_q4.onnx", "sha256": "a9876aef9500c6731312f348c630a7503a0ac0e3efedadeade9cf4abf35acf4a", "size": 85800961 },
+    { "path": "LICENSE.txt", "sha256": "b5d65a59060e68c4ff940e1eddfa6f94b2d68fdf58ed7f4dd57721c997e35e9d", "size": 1063 }
+  ]
+}
