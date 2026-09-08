@@ -173,7 +173,7 @@ export default function TTSPlayer({ currentPage, numPages, isPlaybackReady = tru
             aria-label={playbackControl.ariaLabel}
             aria-busy={playbackControl.isPending}
             disabled={!isPlaying && (!isPlaybackReady || !hasReadableContent)}
-            className="relative h-11 w-11 rounded-full bg-accent text-background shadow-[0_3px_12px_color-mix(in_srgb,var(--accent)_35%,transparent)] hover:bg-secondary-accent hover:text-background sm:h-8 sm:w-8 sm:rounded-md sm:bg-transparent sm:text-soft sm:shadow-none sm:hover:bg-accent-wash sm:hover:text-accent"
+            className="relative h-11 w-11 rounded-full bg-transparent text-soft hover:bg-accent-wash hover:text-accent sm:h-8 sm:w-8 sm:rounded-md"
           >
             {!hasReadableContent
               ? <PlayIcon className="w-5 h-5" />
@@ -213,7 +213,7 @@ export default function TTSPlayer({ currentPage, numPages, isPlaybackReady = tru
           </div>
           {aheadBuffer && (isPlaying || playbackPhase === 'buffering') && (
             <div
-              className="col-start-3 row-start-1 justify-self-end whitespace-nowrap rounded-full bg-accent-wash px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-accent sm:rounded-none sm:bg-transparent sm:px-0 sm:py-0 sm:font-normal sm:text-soft"
+              className="col-start-3 row-start-1 justify-self-end whitespace-nowrap rounded-full bg-accent-wash px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-accent"
               aria-live="polite"
               aria-label={`${Math.floor(aheadBuffer.wallMs / 1000)} seconds ready ahead`}
             >
