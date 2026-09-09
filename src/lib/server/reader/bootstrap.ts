@@ -46,12 +46,12 @@ import {
 import {
   isCurrentPdfParseOperationAuthoritative,
 } from '@/lib/server/pdf-parse/snapshot';
-import {
-  checkJobRate,
-  getPdfLayoutRateConfig,
-  recordJobEvent,
-} from '@/lib/server/rate-limit/job-rate-limiter';
 import { getResolvedRuntimeConfig } from '@/lib/server/runtime-config';
+import {
+  ComputeAdmissionLimitedError,
+  createAdmittedComputeOperation,
+} from '@/lib/server/compute-limits/run-admitted';
+import { getClientIp } from '@/lib/server/rate-limit/request-ip';
 import { getS3Config, getS3InternalClient } from '@/lib/server/storage/s3';
 import {
   buildTtsPlaybackPlanningInput,
@@ -133,6 +133,7 @@ function toProgress(row: {
 
 
 async function ensurePdfReady(
+  request: NextRequest,
   documentId: string,
   scope: ResolvedSegmentDocumentScope,
   options: ReaderBootstrapResolveOptions,
@@ -162,9 +163,21 @@ async function ensurePdfReady(
   let resolved = await resolveCurrentPdfParse(input);
   if (!resolved.artifact && !resolved.operation) {
     const runtimeConfig = await getResolvedRuntimeConfig();
-    const rateConfig = getPdfLayoutRateConfig(runtimeConfig);
-    const decision = await checkJobRate(scope.userId, 'pdf_layout', rateConfig);
-    if (!decision.allowed) {
+    try {
+      const operation = await createAdmittedComputeOperation({
+        policy: runtimeConfig.computeLimitPolicies,
+        action: 'pdf_layout',
+        requestKey: `${documentId}:${scope.documentVersion}:current`,
+        subject: {
+          userId: scope.userId,
+          isAnonymous: scope.isAnonymousUser,
+          ip: getClientIp(request),
+        },
+        create: () => createOrReuseCurrentPdfParseOperation(input),
+      });
+      resolved = { artifact: null, operation };
+    } catch (error) {
+      if (!(error instanceof ComputeAdmissionLimitedError)) throw error;
       return {
         result: {
           status: 'error',
@@ -173,9 +186,6 @@ async function ensurePdfReady(
         },
       };
     }
-    const operation = await createOrReuseCurrentPdfParseOperation(input);
-    await recordJobEvent(scope.userId, 'pdf_layout', operation.opId, rateConfig);
-    resolved = { artifact: null, operation };
   }
   const currentOperation = resolved.operation;
   if (currentOperation && isCurrentPdfParseOperationAuthoritative(resolved)) {
@@ -230,6 +240,7 @@ function preferenceContext(
 }
 
 async function resolvePlan(
+  request: NextRequest,
   documentId: string,
   scope: ResolvedSegmentDocumentScope,
   settings: ReturnType<typeof mergeDocumentSettings>,
@@ -293,14 +304,36 @@ async function resolvePlan(
       : {}),
   };
   const planningInput = await buildTtsPlaybackPlanningInput(parsed, scope);
-  const operation = await new ComputeWorkerClient().createTtsPlaybackPlanOperation(
-    toTtsPlaybackPlanRequest({
-      parsed,
-      scope,
-      ...planningInput,
-      planning: planningInput.planning,
-    }),
-  );
+  let operation;
+  try {
+    operation = await createAdmittedComputeOperation({
+      policy: runtimeConfig.computeLimitPolicies,
+      action: 'tts_playback_plan',
+      requestKey: `${documentId}:${scope.documentVersion}:${planningInput.settingsHash}`,
+      subject: {
+        userId: scope.userId,
+        isAnonymous: scope.isAnonymousUser,
+        ip: getClientIp(request),
+      },
+      create: () => new ComputeWorkerClient().createTtsPlaybackPlanOperation(
+        toTtsPlaybackPlanRequest({
+          parsed,
+          scope,
+          ...planningInput,
+          planning: planningInput.planning,
+        }),
+      ),
+    });
+  } catch (error) {
+    if (!(error instanceof ComputeAdmissionLimitedError)) throw error;
+    return {
+      result: {
+        status: 'error',
+        message: error.message,
+        retryable: true,
+      },
+    };
+  }
   if (operation.status === 'queued' || operation.status === 'running') {
     return { result: { status: 'pending' }, operationId: operation.opId };
   }
@@ -363,7 +396,7 @@ export async function resolveReaderBootstrapState(
   }
   let parsedPdfDocument: ParsedPdfDocument | null = null;
   if (scope.readerType === 'pdf') {
-    const pdfState = await ensurePdfReady(documentId, scope, options);
+    const pdfState = await ensurePdfReady(request, documentId, scope, options);
     if ('result' in pdfState) return pdfState;
     parsedPdfDocument = pdfState.parsedDocument;
   }
@@ -407,7 +440,7 @@ export async function resolveReaderBootstrapState(
     storedRecord(settingsRows[0]?.dataJson),
   );
   const progress = toProgress(progressRows[0]);
-  const planResult = await resolvePlan(documentId, scope, settings, preferenceRows[0]?.dataJson);
+  const planResult = await resolvePlan(request, documentId, scope, settings, preferenceRows[0]?.dataJson);
   if ('result' in planResult) return planResult;
 
   const document: BaseDocument = {

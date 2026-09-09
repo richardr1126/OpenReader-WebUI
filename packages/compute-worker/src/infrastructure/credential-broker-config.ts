@@ -51,6 +51,20 @@ export function getTtsCredentialBrokerConfig(): TtsCredentialBrokerConfig {
   };
 }
 
+export function getComputeLimitBrokerConfig(): TtsCredentialBrokerConfig {
+  const config = getTtsCredentialBrokerConfig();
+  const url = new URL(config.url);
+  url.pathname = '/api/internal/compute/limits/consume';
+  return { ...config, url };
+}
+
+export function getComputeLimitCompletionBrokerConfig(): TtsCredentialBrokerConfig {
+  const config = getTtsCredentialBrokerConfig();
+  const url = new URL(config.url);
+  url.pathname = '/api/internal/compute/limits/complete';
+  return { ...config, url };
+}
+
 export function requireTtsSegmentTextHashSecret(): string {
   const playbackSecret = process.env.TTS_PLAYBACK_TOKEN_SECRET?.trim();
   if (!playbackSecret) throw new Error('TTS_PLAYBACK_TOKEN_SECRET is required for playback segment metadata');

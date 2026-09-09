@@ -3,6 +3,12 @@ import { db } from '@openreader/database';
 import { adminProviders, adminSettings } from '@openreader/database/schema';
 import { serverLogger } from '@/lib/server/logger';
 import { logDegraded } from '@/lib/server/errors/logging';
+import {
+  cloneComputeLimitPolicyDocument,
+  DEFAULT_COMPUTE_LIMIT_POLICIES,
+  parseComputeLimitPolicyDocument,
+  type ComputeLimitPolicyDocument,
+} from '@openreader/runtime-config/compute-limits';
 
 /**
  * Runtime config: site-wide settings that are persisted in admin_settings.
@@ -72,6 +78,15 @@ function enumValue<T extends string>(allowed: readonly T[], defaultValue: T): Ru
   };
 }
 
+function computeLimitPoliciesValue(): RuntimeConfigKeyDef<ComputeLimitPolicyDocument> {
+  return {
+    default: cloneComputeLimitPolicyDocument(DEFAULT_COMPUTE_LIMIT_POLICIES),
+    validate(value) {
+      return parseComputeLimitPolicyDocument(value);
+    },
+  };
+}
+
 export const RUNTIME_CONFIG_SCHEMA = {
   defaultTtsProvider: stringValue('custom-openai'),
   changelogFeedUrl: stringValue('https://docs.openreader.richardr.dev/changelog/manifest.json'),
@@ -82,25 +97,11 @@ export const RUNTIME_CONFIG_SCHEMA = {
   enableAudiobookExport: booleanFlag(true),
   enableDocxConversion: booleanFlag(true),
   showAllProviderModels: runtimeBoolean(true),
-  disableTtsRateLimit: booleanFlag(true),
-  ttsDailyLimitAnonymous: positiveIntValue(50_000),
-  ttsDailyLimitAuthenticated: positiveIntValue(500_000),
-  ttsIpDailyLimitAnonymous: positiveIntValue(100_000),
-  ttsIpDailyLimitAuthenticated: positiveIntValue(1_000_000),
   ttsCacheMaxSizeBytes: positiveIntValue(256 * 1024 * 1024),
   ttsCacheTtlMs: positiveIntValue(1000 * 60 * 30),
   ttsUpstreamMaxRetries: positiveIntValue(2),
   ttsUpstreamTimeoutMs: positiveIntValue(285_000),
-  // Per-user throttle for expensive PDF-layout parsing. Disabled by default
-  // (admins enable it in Settings → Admin), mirroring disableTtsRateLimit.
-  // When enabled, the sub-limits below apply (admin-tunable, no env seed):
-  // a short "burst" window plus a wider "sustained" window that also bounds
-  // concurrency (the worker caps each job's duration).
-  disableComputeRateLimit: booleanFlag(true),
-  computeParseBurstMax: positiveIntValue(8),
-  computeParseBurstWindowSec: positiveIntValue(60),
-  computeParseSustainedMax: positiveIntValue(24),
-  computeParseSustainedWindowSec: positiveIntValue(600),
+  computeLimitPolicies: computeLimitPoliciesValue(),
   // Maximum size (MB) accepted for a single document upload.
   maxUploadMb: positiveIntValue(200),
   // How far ahead the worker generates a background ("disconnected") TTS playback

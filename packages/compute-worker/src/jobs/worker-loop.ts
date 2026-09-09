@@ -24,10 +24,25 @@ import type { JobHandlers } from './handlers';
 import { buildQueueWaitTiming, decideRetryAction } from './worker-loop-policy';
 import { toErrorMessage } from '../infrastructure/errors';
 import { TtsCredentialBrokerClientError } from './tts-credential-broker-error';
+import {
+  cloneComputeLimitPolicyDocument,
+  type ComputeLimitPolicyDocument,
+  type WorkerOperationAction,
+} from '@openreader/runtime-config/compute-limits';
+import { ComputeExecutionScheduler } from './execution-scheduler';
 
 const LOOP_ERROR_BACKOFF_MS = 500;
 const RUNNING_HEARTBEAT_MS = 5000;
 const PULL_EXPIRES_MS = 5_000;
+
+class ComputeQueueExpiredError extends Error {
+  readonly code = 'COMPUTE_QUEUE_AGE_EXCEEDED';
+
+  constructor() {
+    super('Compute work expired before execution capacity became available');
+    this.name = 'ComputeQueueExpiredError';
+  }
+}
 
 export interface QueuedJob<TPayload> {
   jobId: string;
@@ -59,31 +74,6 @@ export interface WorkerLogger {
   info(data: unknown, message?: string): void;
   warn(data: unknown, message?: string): void;
   error(data: unknown, message?: string): void;
-}
-
-class ConcurrencyGate {
-  private inFlight = 0;
-  private readonly queue: Array<() => void> = [];
-
-  constructor(private readonly limit: number) {}
-
-  async acquire(): Promise<void> {
-    if (this.inFlight < this.limit) {
-      this.inFlight += 1;
-      return;
-    }
-    await new Promise<void>((resolve) => {
-      this.queue.push(() => {
-        this.inFlight += 1;
-        resolve();
-      });
-    });
-  }
-
-  release(): void {
-    this.inFlight = Math.max(0, this.inFlight - 1);
-    this.queue.shift()?.();
-  }
 }
 
 function sleep(ms: number): Promise<void> {
@@ -121,6 +111,7 @@ export function createWorkerLoopController(input: {
   handlers: JobHandlers;
   logger: WorkerLogger;
   jobConcurrency: number;
+  getComputePolicy?: () => ComputeLimitPolicyDocument;
   pdfAttempts: number;
   pdfCodec: JsonCodec<QueuedJob<PdfLayoutJobRequest>>;
   ttsPlaybackCodec?: JsonCodec<QueuedJob<TtsPlaybackJobRequest>>;
@@ -133,12 +124,24 @@ export function createWorkerLoopController(input: {
   isStopping: () => boolean;
   markActivity: (reason: string) => void;
   onInFlightJobsChanged: (delta: number) => void;
+  onOperationTerminal?: (input: {
+    operationId: string;
+    state: 'succeeded' | 'failed' | 'cancelled';
+  }) => Promise<void>;
 }) {
-  const playbackGate = new ConcurrencyGate(Math.max(1, Math.floor(input.jobConcurrency)));
-  const planGate = new ConcurrencyGate(Math.max(1, Math.floor(input.jobConcurrency)));
-  const layoutGate = new ConcurrencyGate(Math.max(1, Math.floor(input.jobConcurrency)));
+  const fallbackPolicy = cloneComputeLimitPolicyDocument();
+  fallbackPolicy.worker.maxExecutingPerWorker = Math.max(1, Math.floor(input.jobConcurrency));
+  for (const resource of Object.keys(fallbackPolicy.worker.resources)) {
+    fallbackPolicy.worker.resources[resource as keyof typeof fallbackPolicy.worker.resources]
+      = Math.max(1, Math.floor(input.jobConcurrency));
+  }
+  for (const policy of Object.values(fallbackPolicy.actions)) {
+    if (policy.execution) policy.execution.maxConcurrentPerWorker = Math.max(1, Math.floor(input.jobConcurrency));
+  }
+  const scheduler = new ComputeExecutionScheduler(input.getComputePolicy ?? (() => fallbackPolicy));
   let loops: Promise<void>[] = [];
   let stopRequested = false;
+  let growLoops: (() => void) | null = null;
 
   type Context<TPayload> = {
     decoded: QueuedJob<TPayload>;
@@ -157,7 +160,7 @@ export function createWorkerLoopController(input: {
   type WorkDefinition<TPayload, TResult> = {
     codec: JsonCodec<QueuedJob<TPayload>>;
     run: JobRunner<TPayload, TResult>;
-    gate: ConcurrencyGate;
+    action: WorkerOperationAction;
   };
 
   const markRunning = async <TPayload>(context: Context<TPayload>, updatedAt: number): Promise<void> => {
@@ -187,12 +190,15 @@ export function createWorkerLoopController(input: {
     try {
       const decoded = work.codec.decode(work.msg.data);
       const startedAt = Date.now();
+      const maxQueueAgeMs = (input.getComputePolicy?.() ?? fallbackPolicy)
+        .actions[work.action].execution!.maxQueueAgeSeconds * 1000;
       context = {
         decoded,
         workerLabel: work.workerLabel,
         startedAt,
         queueWaitTiming: buildQueueWaitTiming(decoded.queuedAt, startedAt),
       };
+      if (startedAt - decoded.queuedAt > maxQueueAgeMs) throw new ComputeQueueExpiredError();
       await markRunning(context, startedAt);
       input.logger.info({
         worker: work.workerLabel,
@@ -237,6 +243,11 @@ export function createWorkerLoopController(input: {
         updatedAt: now,
         ...(timing ? { timing } : {}),
       });
+      await input.onOperationTerminal?.({ operationId: decoded.opId, state: 'succeeded' })
+        .catch((error) => input.logger.warn({
+          opId: decoded.opId,
+          error: toErrorMessage(error),
+        }, 'compute admission completion callback failed'));
       work.msg.ack();
       const durationMs = safeDurationMs(startedAt, now);
       if (durationMs >= WORKER_OPERATION_KIND_POLICY[decoded.kind].slowJobLogThresholdMs) {
@@ -257,19 +268,24 @@ export function createWorkerLoopController(input: {
       const errorLog = toErrorLog(error);
       const deliveryCount = work.msg.info.deliveryCount;
       const kind = context?.decoded.kind ?? 'pdf_layout';
-      const action = decideRetryAction({
-        kind,
-        deliveryCount,
-        pdfAttempts: input.pdfAttempts,
-        retryable: error instanceof TtsCredentialBrokerClientError ? error.retryable : undefined,
-      });
+      const action = error instanceof ComputeQueueExpiredError
+        ? 'term'
+        : decideRetryAction({
+          kind,
+          deliveryCount,
+          pdfAttempts: input.pdfAttempts,
+          retryable: error instanceof TtsCredentialBrokerClientError ? error.retryable : undefined,
+        });
       const timing = context ? buildQueueWaitTiming(context.decoded.queuedAt, Date.now()) : undefined;
       if (context) {
         const update = action === 'nak_retry'
           ? markRunning(context, Date.now())
           : input.orchestrator.markFailed({
             opId: context.decoded.opId,
-            error: { message: errorMessage },
+            error: {
+              message: errorMessage,
+              ...(error instanceof ComputeQueueExpiredError ? { code: error.code } : {}),
+            },
             updatedAt: Date.now(),
             ...(timing ? { timing } : {}),
           });
@@ -279,6 +295,15 @@ export function createWorkerLoopController(input: {
           jobId: context?.decoded.jobId,
           error: toErrorMessage(stateError),
         }, 'failed to persist operation state'));
+        if (action !== 'nak_retry') {
+          await input.onOperationTerminal?.({
+            operationId: context.decoded.opId,
+            state: 'failed',
+          }).catch((callbackError) => input.logger.warn({
+            opId: context?.decoded.opId,
+            error: toErrorMessage(callbackError),
+          }, 'compute admission completion callback failed'));
+        }
       }
       if (action === 'nak_retry') work.msg.nak();
       else work.msg.term(errorMessage);
@@ -307,6 +332,7 @@ export function createWorkerLoopController(input: {
     const detached = () => input.isStopping() || stopRequested || !input.isOwnerActive(work.owner);
     while (!detached()) {
       let msg: JsMsg | null = null;
+      let acquired = false;
       try {
         try {
           msg = await work.consumer.next({ expires: PULL_EXPIRES_MS });
@@ -319,12 +345,30 @@ export function createWorkerLoopController(input: {
         if (!msg) continue;
         input.markActivity(`job_received:${work.workerLabel}`);
         input.onInFlightJobsChanged(1);
-        await work.gate.acquire();
-        if (detached()) return;
+        const queueHeartbeat = setInterval(() => {
+          try {
+            msg?.working();
+          } catch {
+            // A detached or redelivered message is handled by the normal loop path.
+          }
+        }, RUNNING_HEARTBEAT_MS);
+        try {
+          acquired = await scheduler.acquire(work.action);
+        } finally {
+          clearInterval(queueHeartbeat);
+        }
+        if (!acquired) {
+          msg.nak();
+          continue;
+        }
+        if (detached()) {
+          msg.nak();
+          return;
+        }
         await processMessage({ ...work, msg });
       } finally {
         if (msg) {
-          work.gate.release();
+          if (acquired) scheduler.release(work.action);
           input.onInFlightJobsChanged(-1);
           input.markActivity(`job_completed:${work.workerLabel}`);
         }
@@ -333,6 +377,10 @@ export function createWorkerLoopController(input: {
   };
 
   return {
+    policyChanged(): void {
+      scheduler.policyChanged();
+      growLoops?.();
+    },
     start(owner: object, consumers: {
       pdfLayout: Consumer;
       ttsPlayback?: Consumer;
@@ -347,14 +395,14 @@ export function createWorkerLoopController(input: {
       const pdfWork: WorkDefinition<PdfLayoutJobRequest, PdfLayoutJobResult> = {
         codec: input.pdfCodec,
         run: input.handlers.runPdfLayout,
-        gate: layoutGate,
+        action: 'pdf_layout',
       };
       const ttsPlaybackWork: WorkDefinition<TtsPlaybackJobRequest, TtsPlaybackJobResult> | null =
         input.ttsPlaybackCodec && consumers.ttsPlayback
           ? {
             codec: input.ttsPlaybackCodec,
             run: input.handlers.runTtsPlayback,
-            gate: playbackGate,
+            action: 'tts_playback',
           }
           : null;
       const ttsPlaybackPlanWork: WorkDefinition<TtsPlaybackPlanJobRequest, TtsPlaybackPlanJobResult> | null =
@@ -362,7 +410,7 @@ export function createWorkerLoopController(input: {
           ? {
             codec: input.ttsPlaybackPlanCodec,
             run: input.handlers.runTtsPlaybackPlan,
-            gate: planGate,
+            action: 'tts_playback_plan',
           }
           : null;
       const ttsPlaybackExportWork: WorkDefinition<TtsPlaybackExportArtifactRequest, TtsPlaybackExportArtifactResult> | null =
@@ -370,7 +418,7 @@ export function createWorkerLoopController(input: {
           ? {
             codec: input.ttsPlaybackExportCodec,
             run: input.handlers.runTtsPlaybackExportArtifact,
-            gate: playbackGate,
+            action: 'tts_playback_export',
           }
           : null;
       const documentPreviewWork: WorkDefinition<DocumentPreviewJobRequest, DocumentPreviewJobResult> | null =
@@ -378,7 +426,7 @@ export function createWorkerLoopController(input: {
           ? {
             codec: input.documentPreviewCodec,
             run: input.handlers.runDocumentPreview,
-            gate: layoutGate,
+            action: 'document_preview',
           }
           : null;
       const documentConversionWork: WorkDefinition<DocumentConversionJobRequest, DocumentConversionJobResult> | null =
@@ -386,7 +434,7 @@ export function createWorkerLoopController(input: {
           ? {
             codec: input.documentConversionCodec,
             run: input.handlers.runDocumentConversion,
-            gate: layoutGate,
+            action: 'document_conversion',
           }
           : null;
       const accountExportWork: WorkDefinition<AccountExportJobRequest, AccountExportJobResult> | null =
@@ -394,10 +442,11 @@ export function createWorkerLoopController(input: {
           ? {
             codec: input.accountExportCodec,
             run: input.handlers.runAccountExport,
-            gate: layoutGate,
+            action: 'account_export',
           }
           : null;
-      for (let i = 0; i < input.jobConcurrency; i += 1) {
+      let loopSlots = 0;
+      const addLoopSlot = (i: number): void => {
         loops.push(runLoop({ owner, consumer: consumers.pdfLayout, ...pdfWork, workerLabel: `layout-${i + 1}` }));
         if (ttsPlaybackWork && consumers.ttsPlayback) {
           loops.push(runLoop({ owner, consumer: consumers.ttsPlayback, ...ttsPlaybackWork, workerLabel: `tts-playback-${i + 1}` }));
@@ -417,10 +466,23 @@ export function createWorkerLoopController(input: {
         if (accountExportWork && consumers.accountExport) {
           loops.push(runLoop({ owner, consumer: consumers.accountExport, ...accountExportWork, workerLabel: `account-export-${i + 1}` }));
         }
-      }
+      };
+      growLoops = () => {
+        const desired = Math.max(
+          1,
+          Math.floor((input.getComputePolicy?.() ?? fallbackPolicy).worker.maxExecutingPerWorker),
+        );
+        while (loopSlots < desired) {
+          addLoopSlot(loopSlots);
+          loopSlots += 1;
+        }
+      };
+      growLoops();
     },
     async stop(): Promise<void> {
       stopRequested = true;
+      growLoops = null;
+      scheduler.cancelWaiters();
       await Promise.allSettled(loops);
       loops = [];
     },

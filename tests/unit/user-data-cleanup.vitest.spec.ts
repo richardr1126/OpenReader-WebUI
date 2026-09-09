@@ -80,8 +80,8 @@ describe('user data cleanup', () => {
     // Shared document storage is reclaimed by the reap-orphaned-blobs task, not here.
     expect(mocks.deleteDocumentPreviewRows).not.toHaveBeenCalled();
     expect(mocks.cleanupUserStorage).toHaveBeenCalledWith({ storageUserId: 'user-1', namespace: null, documentIds: [] });
-    // Only the three non-cascading DB row deletes (tts usage, job events, verification).
-    expect(mocks.deleteWhere).toHaveBeenCalledTimes(3);
+    // Compute-limit rows now cascade with the user; only verification is explicit.
+    expect(mocks.deleteWhere).toHaveBeenCalledTimes(1);
   });
 
   test('blocks database cleanup when storage cleanup fails', async () => {

@@ -10,6 +10,7 @@ import { toErrorMessage } from '../../infrastructure/errors';
 import { resolveAndPersistTtsPlaybackPlan } from './plan';
 import { generateExplicitTtsPlaybackSegments } from './segment-generation';
 import { ttsPlaybackRequestSchema } from './schemas';
+import { consumeTtsSynthesisUsage } from '../compute-limit-broker';
 
 const CURSOR_STALE_MS = 15_000;
 
@@ -163,6 +164,7 @@ export function createTtsPlaybackHandler(input: JobHandlerContext) {
       };
 
       let stoppedEarly = false;
+      let usageLimited = false;
       const satisfaction: {
         value: { fromOrdinal: number; throughOrdinal: number } | null;
       } = { value: null };
@@ -181,6 +183,7 @@ export function createTtsPlaybackHandler(input: JobHandlerContext) {
           completedCount: completedOrdinals.size,
           plannedCount: plannedSegments.length,
           phase: 'generating',
+          ...(usageLimited ? { stopReason: 'usage_limit' as const } : {}),
         });
       };
       await emitProgress();
@@ -267,6 +270,14 @@ export function createTtsPlaybackHandler(input: JobHandlerContext) {
             erroredOrdinals.add(planOrdinal);
             await emitProgress();
           },
+          onUsageDenied: async () => {
+            usageLimited = true;
+            stoppedEarly = true;
+            await emitProgress();
+          },
+          consumeUsage: consumeTtsSynthesisUsage,
+          acquireProviderCapacity: input.acquireProviderCapacity,
+          coolDownProviderCapacity: input.coolDownProviderCapacity,
           onModelDownloadProgress: createModelDownloadProgressReporter({
             publish: async ({ downloadedBytes, totalBytes }) => hooks?.onProgress?.({
               completedThroughOrdinal: lastCompletedThrough,
@@ -312,11 +323,19 @@ export function createTtsPlaybackHandler(input: JobHandlerContext) {
           generationSatisfiedThroughOrdinal: satisfiedWindow.throughOrdinal,
         });
       }
-      if (!stoppedEarly) {
+      if (usageLimited) {
+        await playbackStorage.sessions.patchSessionIfGenerationRun(parsed.sessionId, generationRunId, {
+          status: 'succeeded',
+          planObjectKey,
+          lastError: 'COMPUTE_USAGE_LIMIT_REACHED',
+          stopReason: 'usage_limit',
+        });
+      } else if (!stoppedEarly) {
         await playbackStorage.sessions.patchSessionIfGenerationRun(parsed.sessionId, generationRunId, {
           status: 'succeeded',
           planObjectKey,
           lastError: null,
+          stopReason: null,
         });
       }
       return { sessionId: parsed.sessionId, planObjectKey, timing: { queueWaitMs, computeMs: Date.now() - startedAt } };

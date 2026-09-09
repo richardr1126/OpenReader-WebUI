@@ -263,6 +263,7 @@ export type TtsPlaybackEventSnapshot = {
   completedCount: number | null;
   plannedCount: number | null;
   phase: 'downloading_model' | 'generating' | null;
+  stopReason: 'usage_limit' | null;
   downloadedBytes: number | null;
   totalBytes: number | null;
 };
@@ -293,6 +294,7 @@ export const subscribeTtsPlaybackEvents = (
             completedCount?: number;
             plannedCount?: number;
             phase?: 'downloading_model' | 'generating';
+            stopReason?: 'usage_limit';
             downloadedBytes?: number;
             totalBytes?: number;
           } | null;
@@ -315,6 +317,7 @@ export const subscribeTtsPlaybackEvents = (
         phase: progress?.phase === 'downloading_model' || progress?.phase === 'generating'
           ? progress.phase
           : null,
+        stopReason: progress?.stopReason === 'usage_limit' ? 'usage_limit' : null,
         downloadedBytes: progress && Number.isFinite(Number(progress.downloadedBytes))
           ? Number(progress.downloadedBytes)
           : null,
@@ -355,6 +358,7 @@ export const subscribeTtsExportGenerationEvents = (
             completedCount?: number;
             plannedCount?: number;
             phase?: 'downloading_model' | 'generating';
+            stopReason?: 'usage_limit';
             downloadedBytes?: number;
             totalBytes?: number;
           } | null;
@@ -377,6 +381,7 @@ export const subscribeTtsExportGenerationEvents = (
         phase: progress?.phase === 'downloading_model' || progress?.phase === 'generating'
           ? progress.phase
           : null,
+        stopReason: progress?.stopReason === 'usage_limit' ? 'usage_limit' : null,
         downloadedBytes: progress && Number.isFinite(Number(progress.downloadedBytes))
           ? Number(progress.downloadedBytes)
           : null,

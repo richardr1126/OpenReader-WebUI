@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { pgTable, text, integer, real, date, bigint, boolean, primaryKey, index, jsonb, foreignKey, check } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, real, bigint, boolean, primaryKey, index, uniqueIndex, jsonb, foreignKey, check } from 'drizzle-orm/pg-core';
 import { user } from './schema_auth_postgres';
 
 const PG_NOW_MS = sql`(extract(epoch from now()) * 1000)::bigint`;
@@ -45,32 +45,57 @@ export const documents = pgTable('documents', {
 // They are created/migrated via `@better-auth/cli migrate` and should NOT be
 // defined here. Only application-specific tables belong in this file.
 
-export const userTtsChars = pgTable("user_tts_chars", {
-  // Also stores device:* and ip:* backstop buckets, so this cannot reference user.id.
-  userId: text('user_id').notNull(),
-  date: date('date').notNull(),
-  charCount: bigint('char_count', { mode: 'number' }).default(0),
-  createdAt: bigint('created_at', { mode: 'number' }).default(PG_NOW_MS),
-  updatedAt: bigint('updated_at', { mode: 'number' }).default(PG_NOW_MS),
+export const computeLimitAdmissions = pgTable('compute_limit_admissions', {
+  id: text('id').primaryKey(),
+  requestKey: text('request_key').notNull(),
+  userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
+  isAnonymous: boolean('is_anonymous').notNull(),
+  action: text('action').notNull(),
+  state: text('state').notNull(),
+  operationId: text('operation_id'),
+  deviceScopeKey: text('device_scope_key'),
+  ipScopeKey: text('ip_scope_key'),
+  policyVersion: bigint('policy_version', { mode: 'number' }).notNull(),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+  activatedAt: bigint('activated_at', { mode: 'number' }),
+  finishedAt: bigint('finished_at', { mode: 'number' }),
+  leaseExpiresAt: bigint('lease_expires_at', { mode: 'number' }).notNull(),
 }, (table) => [
-  primaryKey({ columns: [table.userId, table.date] }),
-  index('idx_user_tts_chars_date').on(table.date),
+  uniqueIndex('compute_limit_admissions_request_unique').on(table.userId, table.action, table.requestKey),
+  index('compute_limit_admissions_user_active').on(table.userId, table.action, table.state, table.leaseExpiresAt),
+  index('compute_limit_admissions_action_active').on(table.action, table.state, table.leaseExpiresAt),
+  index('compute_limit_admissions_operation').on(table.operationId),
+  check('compute_limit_admissions_state_valid', sql`${table.state} in ('reserved', 'active', 'finished', 'cancelled')`),
 ]);
 
-// Generic per-user job-creation ledger for rate/concurrency limiting of
-// expensive compute operations (e.g. PDF layout parsing). One row per created
-// worker op. A trailing-window COUNT over (user_id, action) enforces both a
-// short-window burst cap and a wider sustained/concurrency cap; because the
-// worker bounds each op by a hard cap, "ops created in the last hard-cap
-// window" is an upper bound on in-flight ops. Old rows are pruned opportunistically.
-export const userJobEvents = pgTable('user_job_events', {
+export const computeLimitBuckets = pgTable('compute_limit_buckets', {
+  scopeType: text('scope_type').notNull(),
+  scopeKey: text('scope_key').notNull(),
+  action: text('action').notNull(),
+  metric: text('metric').notNull(),
+  windowStart: bigint('window_start', { mode: 'number' }).notNull(),
+  windowEnd: bigint('window_end', { mode: 'number' }).notNull(),
+  used: bigint('used', { mode: 'number' }).notNull().default(0),
+  updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.scopeType, table.scopeKey, table.action, table.metric, table.windowStart] }),
+  index('compute_limit_buckets_expiry').on(table.windowEnd, table.metric),
+  check('compute_limit_buckets_used_nonnegative', sql`${table.used} >= 0`),
+]);
+
+export const computeLimitEvents = pgTable('compute_limit_events', {
+  eventKey: text('event_key').primaryKey(),
+  admissionId: text('admission_id').references(() => computeLimitAdmissions.id, { onDelete: 'set null' }),
   userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
   action: text('action').notNull(),
-  opId: text('op_id').notNull(),
-  createdAt: bigint('created_at', { mode: 'number' }).notNull().default(PG_NOW_MS),
+  metric: text('metric').notNull(),
+  units: bigint('units', { mode: 'number' }).notNull(),
+  policyVersion: bigint('policy_version', { mode: 'number' }).notNull(),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
 }, (table) => [
-  primaryKey({ columns: [table.userId, table.action, table.opId] }),
-  index('idx_user_job_events_user_action_created').on(table.userId, table.action, table.createdAt),
+  index('compute_limit_events_user_action_created').on(table.userId, table.action, table.createdAt),
+  index('compute_limit_events_created').on(table.createdAt),
+  check('compute_limit_events_units_positive', sql`${table.units} > 0`),
 ]);
 
 export const userPreferences = pgTable('user_preferences', {

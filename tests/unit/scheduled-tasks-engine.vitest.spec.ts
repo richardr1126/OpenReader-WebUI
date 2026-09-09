@@ -228,12 +228,12 @@ describe('scheduled task engine', () => {
   });
 
   test('updates a registered task even when its row has not been seeded', async () => {
-    await updateTask('prune-job-events', { enabled: false, intervalMs: 12_345 });
+    await updateTask('prune-compute-limits', { enabled: false, intervalMs: 12_345 });
 
     const [row] = await holder.db
       .select()
       .from(tasks)
-      .where(eq(tasks.key, 'prune-job-events'));
+      .where(eq(tasks.key, 'prune-compute-limits'));
     expect(row).toEqual(expect.objectContaining({
       enabled: false,
       intervalMs: 12_345,

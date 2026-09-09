@@ -46,7 +46,7 @@ const sidebars: SidebarsConfig = {
           id: 'configure/server-library-import',
           label: '📥 Server Library Import',
         },
-        'configure/tts-rate-limiting',
+        'configure/compute-rate-limiting',
         'configure/database',
         'configure/object-blob-storage',
         'configure/migrations',

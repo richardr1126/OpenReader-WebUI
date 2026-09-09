@@ -44,7 +44,7 @@ Admin assignment is reconciled on every session resolution, so removing an email
 
 - For auth environment variables: [Environment Variables](../reference/environment-variables#auth-and-identity)
 - For admin role and shared TTS provider config: [Admin Panel](./admin-panel)
-- For TTS character limits and quota behavior: [TTS Rate Limiting](./tts-rate-limiting)
+- For TTS character limits and quota behavior: [Compute Rate Limiting](./compute-rate-limiting)
 - For provider-specific guidance: [TTS Providers](./tts-providers)
 - For storage/S3/SeaweedFS behavior: [Object / Blob Storage](./object-blob-storage)
 - For database mode: [Database](./database)

@@ -61,7 +61,6 @@ Common optional variables:
 - `LOG_FORMAT=json` and `COMPUTE_LOG_LEVEL=info`
 - `COMPUTE_CREDENTIAL_BROKER_TIMEOUT_MS=5000`
 - `COMPUTE_PREWARM_MODELS=false` by default. Set it to `true` to pre-download ONNX models during worker startup.
-- `COMPUTE_JOB_CONCURRENCY=1`
 - `COMPUTE_WHISPER_TIMEOUT_MS=30000`
 - `COMPUTE_PDF_TIMEOUT_MS=300000`
 - `COMPUTE_TTS_PLAYBACK_SEGMENT_TIMEOUT_MS=30000` (defaults to the Whisper timeout)

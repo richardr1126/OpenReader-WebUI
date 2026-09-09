@@ -10,7 +10,6 @@ import {
 import { getRuntimeConfig } from '@/lib/server/admin/settings';
 import { createRequestLogger } from '@/lib/server/logger';
 import { errorResponse } from '@/lib/server/errors/next-response';
-import { checkTtsPlaybackQuota } from '@/lib/server/tts/playback-quota';
 import {
   buildTtsPlaybackPlanningInput,
   parseTtsPlaybackRequestBody,
@@ -19,6 +18,13 @@ import {
 import { TTS_PLAYBACK_SESSION_TTL_MS } from '@/lib/server/tts/playback-sessions';
 import { resolveSegmentDocumentScope } from '@/lib/server/tts/segments-auth';
 import { TTS_PLAYBACK_AHEAD_WINDOW } from '@/types/tts';
+import {
+  ComputeAdmissionLimitedError,
+  createAdmittedComputeOperation,
+} from '@/lib/server/compute-limits/run-admitted';
+import { getClientIp } from '@/lib/server/rate-limit/request-ip';
+import { getOrCreateDeviceId, setDeviceIdCookie } from '@/lib/server/rate-limit/device-id';
+import { buildTtsPlaybackAdmissionRequestKey } from '@/lib/server/compute-limits/admission';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -66,6 +72,13 @@ export async function POST(request: NextRequest) {
     const scope = await resolveSegmentDocumentScope(request, parsed.documentId);
     if (scope instanceof Response) return scope;
     const runtimeConfig = await getRuntimeConfig();
+    const device = scope.isAnonymousUser ? getOrCreateDeviceId(request) : null;
+    const limitSubject = {
+      userId: scope.userId,
+      isAnonymous: scope.isAnonymousUser,
+      deviceId: device?.deviceId ?? null,
+      ip: getClientIp(request),
+    };
     const { settingsHash, settingsJson, planning } = await buildTtsPlaybackPlanningInput(parsed, scope);
     const sessionId = buildTtsPlaybackCanonicalSessionId({
       storageUserId: scope.storageUserId,
@@ -102,33 +115,29 @@ export async function POST(request: NextRequest) {
     const shouldCreateGeneration = start
       && (!generation.session || generationStatus === 'failed');
     if (shouldCreateGeneration) {
-      const quotaResponse = await checkTtsPlaybackQuota({
-        request,
-        scope,
-        documentId: parsed.documentId,
-        settingsHash,
-        planObjectKey,
-        runtimeConfig,
-      });
-      if (quotaResponse) return quotaResponse;
-
       const now = Date.now();
       const expiresAt = now + TTS_PLAYBACK_SESSION_TTL_MS;
-      await client.createTtsPlaybackOperation({
-        sessionId,
-        userId: scope.userId,
-        storageUserId: scope.storageUserId,
-        documentId: parsed.documentId,
-        documentVersion: scope.documentVersion,
-        readerType: scope.readerType,
-        settingsHash,
-        settingsJson,
-        planObjectKey,
-        expiresAt,
-        aheadWindow: TTS_PLAYBACK_AHEAD_WINDOW,
-        backgroundExtent: 'document',
-        generationExtent: 'document',
-        planning,
+      await createAdmittedComputeOperation({
+        policy: runtimeConfig.computeLimitPolicies,
+        action: 'tts_playback',
+        requestKey: buildTtsPlaybackAdmissionRequestKey(sessionId, now),
+        subject: limitSubject,
+        create: () => client.createTtsPlaybackOperation({
+          sessionId,
+          userId: scope.userId,
+          storageUserId: scope.storageUserId,
+          documentId: parsed.documentId,
+          documentVersion: scope.documentVersion,
+          readerType: scope.readerType,
+          settingsHash,
+          settingsJson,
+          planObjectKey,
+          expiresAt,
+          aheadWindow: TTS_PLAYBACK_AHEAD_WINDOW,
+          backgroundExtent: 'document',
+          generationExtent: 'document',
+          planning,
+        }),
       });
       generation = await client.resolveTtsPlaybackSession({
         storageUserId: scope.storageUserId,
@@ -157,19 +166,25 @@ export async function POST(request: NextRequest) {
       && !artifact.artifact
       && (!artifact.operation || artifact.operation.status === 'failed' || artifact.operation.status === 'succeeded')
     ) {
-      await client.createTtsPlaybackExportArtifactOperation({
-        artifactId,
-        sessionId,
-        userId: scope.userId,
-        storageUserId: scope.storageUserId,
-        documentId: parsed.documentId,
-        documentVersion: scope.documentVersion,
-        readerType: scope.readerType,
-        settingsHash,
-        settingsJson,
-        planObjectKey,
-        format,
-        speed,
+      await createAdmittedComputeOperation({
+        policy: runtimeConfig.computeLimitPolicies,
+        action: 'tts_playback_export',
+        requestKey: artifactId,
+        subject: limitSubject,
+        create: () => client.createTtsPlaybackExportArtifactOperation({
+          artifactId,
+          sessionId,
+          userId: scope.userId,
+          storageUserId: scope.storageUserId,
+          documentId: parsed.documentId,
+          documentVersion: scope.documentVersion,
+          readerType: scope.readerType,
+          settingsHash,
+          settingsJson,
+          planObjectKey,
+          format,
+          speed,
+        }),
       });
       artifact = await client.resolveTtsPlaybackExportArtifact({
         artifactId,
@@ -186,14 +201,26 @@ export async function POST(request: NextRequest) {
       ? `/api/tts/export/download?artifactId=${encodeURIComponent(artifactId)}&documentId=${encodeURIComponent(parsed.documentId)}`
       : null;
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       sessionId,
       artifactId,
       generation,
       artifact,
       downloadUrl,
     });
+    if (device?.didCreate) setDeviceIdCookie(response, device.deviceId);
+    return response;
   } catch (error) {
+    if (error instanceof ComputeAdmissionLimitedError) {
+      return NextResponse.json({
+        error: error.message,
+        code: error.code,
+        retryAfterMs: error.retryAfterMs,
+      }, {
+        status: 429,
+        headers: { 'Retry-After': String(Math.max(1, Math.ceil(error.retryAfterMs / 1000))) },
+      });
+    }
     return errorResponse(error, {
       logger,
       event: 'tts.export.resolve_failed',

@@ -14,6 +14,7 @@ import type { TTSRequestHeaders } from '@/types/client';
 import { TTS_PLAYBACK_CURSOR_HEARTBEAT_MS } from '@/types/tts';
 import type { PlaybackSessionState } from '@/hooks/audio/usePlaybackProjection';
 import { createCoalescedPlaybackRefresh, createPlaybackOperationSubscription } from '@/lib/client/tts/playback-refresh';
+import { useAuthRateLimit } from '@/contexts/AuthRateLimitContext';
 
 type UsePlaybackForegroundSyncInput = {
   playbackCursorOrdinalRef: MutableRefObject<number | null>;
@@ -32,6 +33,7 @@ type PlaybackOperationSubscription = {
 const MODEL_DOWNLOAD_TOAST_ID = 'tts-model-download';
 
 export function usePlaybackForegroundSync(input: UsePlaybackForegroundSyncInput) {
+  const { refresh: refreshComputeUsage } = useAuthRateLimit();
   const {
     playbackCursorOrdinalRef,
     playbackRequestHeadersRef,
@@ -147,6 +149,9 @@ export function usePlaybackForegroundSync(input: UsePlaybackForegroundSyncInput)
       subscribe: (operationId, onSnapshot) => subscribeTtsPlaybackEvents(activeSession.sessionId, { onSnapshot }, operationId),
       onSnapshot: (snapshot) => {
         if (runId !== playbackRunIdRef.current) return;
+        if (snapshot.stopReason === 'usage_limit') {
+          void refreshComputeUsage();
+        }
         if (snapshot.status === 'failed') {
           toast.dismiss(MODEL_DOWNLOAD_TOAST_ID);
           return;
@@ -178,6 +183,7 @@ export function usePlaybackForegroundSync(input: UsePlaybackForegroundSyncInput)
   }, [
     playbackRunIdRef,
     playbackSessionRef,
+    refreshComputeUsage,
     refreshPlaybackTimeline,
     setPlaybackSeekLayout,
     stopPlaybackForegroundSync,

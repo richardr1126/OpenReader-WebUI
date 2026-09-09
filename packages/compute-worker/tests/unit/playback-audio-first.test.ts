@@ -321,4 +321,112 @@ describe('playback audio-first segment generation', () => {
     expect(sidecars).toHaveLength(1);
     expect(sidecars[0]).toMatchObject({ status: 'generating', error: null });
   });
+
+  test('stops cleanly before provider work when the next uncached segment is denied', async () => {
+    const putSegmentMetadata = vi.fn(async () => 'sidecar-0');
+    const consumeUsage = vi.fn(async () => ({ allowed: false }));
+    const onUsageDenied = vi.fn(async () => undefined);
+    const onSynthesisSettled = vi.fn(async () => undefined);
+    const playbackStorage = {
+      artifacts: {
+        readSegmentMetadata: vi.fn(async () => null),
+        putSegmentMetadata,
+        getScopeEpoch: vi.fn(async () => 0),
+      },
+    } as unknown as TtsPlaybackStorage;
+
+    const { generateExplicitTtsPlaybackSegments } = await import('../../src/jobs/playback/segment-generation');
+    await generateExplicitTtsPlaybackSegments({
+      request: {
+        sessionId: 'session-limited',
+        userId: 'user-1',
+        storageUserId: 'user-1',
+        documentId: 'document-1',
+        documentVersion: 1,
+        readerType: 'html',
+        settingsHash: 'settings-1',
+        settingsJson: {
+          providerRef: 'local-kokoro',
+          providerType: 'custom-openai',
+          ttsModel: 'kokoro',
+          voice: 'af_heart',
+          nativeSpeed: 1,
+          ttsInstructions: '',
+          language: 'en',
+        },
+        planning: {},
+        planObjectKey: 'plan-key',
+      },
+      sessionInstanceId: 'instance-limited',
+      s3Prefix: 'openreader',
+      segments: [{
+        ordinal: 0,
+        segmentKey: 'segment-0',
+        text: 'This segment starts after the threshold.',
+        locator: { readerType: 'html', location: '1' },
+      }],
+      putAudioObject: vi.fn(async () => undefined),
+      audioObjectExists: vi.fn(async () => false),
+      playbackStorage,
+      synthesisTimeoutMs: 30_000,
+      consumeUsage,
+      onUsageDenied,
+      onSynthesisSettled,
+    });
+
+    expect(consumeUsage).toHaveBeenCalledTimes(1);
+    expect(onUsageDenied).toHaveBeenCalledTimes(1);
+    expect(onSynthesisSettled).toHaveBeenCalledTimes(1);
+    expect(putSegmentMetadata).not.toHaveBeenCalled();
+    expect(mocks.generateTTSBuffer).not.toHaveBeenCalled();
+  });
+
+  test('does not charge a segment whose audio is already cached', async () => {
+    const consumeUsage = vi.fn(async () => ({ allowed: true }));
+    const onSegmentCompleted = vi.fn(async () => undefined);
+    const playbackStorage = {
+      artifacts: {
+        readSegmentMetadata: vi.fn(async () => null),
+        putSegmentMetadata: vi.fn(async () => 'sidecar-0'),
+        getScopeEpoch: vi.fn(async () => 0),
+      },
+    } as unknown as TtsPlaybackStorage;
+
+    const { generateExplicitTtsPlaybackSegments } = await import('../../src/jobs/playback/segment-generation');
+    await generateExplicitTtsPlaybackSegments({
+      request: {
+        sessionId: 'session-cached',
+        userId: 'user-1',
+        storageUserId: 'user-1',
+        documentId: 'document-1',
+        documentVersion: 1,
+        readerType: 'html',
+        settingsHash: 'settings-1',
+        settingsJson: {
+          providerRef: 'local-kokoro', providerType: 'custom-openai', ttsModel: 'kokoro',
+          voice: 'af_heart', nativeSpeed: 1, ttsInstructions: '', language: 'en',
+        },
+        planning: {},
+        planObjectKey: 'plan-key',
+      },
+      sessionInstanceId: 'instance-cached',
+      s3Prefix: 'openreader',
+      segments: [{
+        ordinal: 0,
+        segmentKey: 'segment-0',
+        text: 'Already generated.',
+        locator: { readerType: 'html', location: '1' },
+      }],
+      putAudioObject: vi.fn(async () => undefined),
+      audioObjectExists: vi.fn(async () => true),
+      playbackStorage,
+      synthesisTimeoutMs: 30_000,
+      consumeUsage,
+      onSegmentCompleted,
+    });
+
+    expect(consumeUsage).not.toHaveBeenCalled();
+    expect(mocks.generateTTSBuffer).not.toHaveBeenCalled();
+    expect(onSegmentCompleted).toHaveBeenCalledTimes(1);
+  });
 });

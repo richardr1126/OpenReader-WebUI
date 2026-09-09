@@ -59,7 +59,6 @@ All OpenReader configuration variables are server-only; none are exposed through
 | `COMPUTE_LOG_LEVEL` | Compute | `info` | Compute worker log level |
 | `COMPUTE_WORKER_HOST` | Compute worker HTTP | `127.0.0.1` embedded; `0.0.0.0` standalone | Override worker bind host |
 | `PORT` | Standalone worker / container | `8081` in worker; `3003` in app image | Usually injected by the hosting platform |
-| `COMPUTE_JOB_CONCURRENCY` | Compute | `1` | Shared compute concurrency cap |
 | `COMPUTE_WHISPER_TIMEOUT_MS` | Compute | `30000` | Whisper alignment timeout budget |
 | `COMPUTE_PDF_TIMEOUT_MS` | Compute | `300000` | PDF parse timeout budget |
 | `COMPUTE_TTS_PLAYBACK_SEGMENT_TIMEOUT_MS` | Compute | Whisper timeout | Per-segment TTS generation timeout budget |
@@ -360,12 +359,6 @@ Compute worker HTTP port.
 - Hosting platforms commonly inject this value
 - The published app container separately sets `PORT=3003` for the Next standalone server
 
-### COMPUTE_JOB_CONCURRENCY
-
-Max concurrent compute jobs per worker.
-
-- Default: `1`
-
 ### COMPUTE_WHISPER_TIMEOUT_MS
 
 Whisper alignment timeout budget.
@@ -562,21 +555,11 @@ Example:
     "enableAudiobookExport": true,
     "enableDocxConversion": true,
     "showAllProviderModels": true,
-    "disableTtsRateLimit": true,
-    "ttsDailyLimitAnonymous": 50000,
-    "ttsDailyLimitAuthenticated": 500000,
-    "ttsIpDailyLimitAnonymous": 100000,
-    "ttsIpDailyLimitAuthenticated": 1000000,
     "ttsCacheMaxSizeBytes": 268435456,
     "ttsCacheTtlMs": 1800000,
     "ttsUpstreamMaxRetries": 2,
     "ttsUpstreamTimeoutMs": 285000,
     "ttsPlaybackBackgroundExtent": "section",
-    "disableComputeRateLimit": true,
-    "computeParseBurstMax": 8,
-    "computeParseBurstWindowSec": 60,
-    "computeParseSustainedMax": 24,
-    "computeParseSustainedWindowSec": 600,
     "maxUploadMb": 200,
     "changelogFeedUrl": "https://docs.openreader.richardr.dev/changelog/manifest.json"
   },
@@ -592,6 +575,8 @@ Example:
   ]
 }
 ```
+
+This minimal seed uses the built-in compute policy. To seed every compute limit explicitly, use the complete maintained `examples/openreader-seed.json` file with `RUNTIME_SEED_JSON_PATH`; `computeLimitPolicies` is strict-validated as one complete document.
 
 Provider fallback behavior:
 

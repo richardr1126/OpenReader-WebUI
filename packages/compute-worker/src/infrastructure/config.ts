@@ -146,8 +146,10 @@ export async function withIdleTimeoutAndHardCap<T>(input: IdleTimeoutAndHardCapI
   }
 }
 
-export function getComputeJobConcurrency(): number {
-  return readPositiveIntEnv('COMPUTE_JOB_CONCURRENCY', 1);
+let computeJobConcurrency = 1;
+
+export function configureComputeJobConcurrency(value: number): void {
+  computeJobConcurrency = Number.isFinite(value) && value >= 1 ? Math.floor(value) : 1;
 }
 
 export function getAvailableCpuCores(): number {
@@ -160,7 +162,7 @@ export function getAvailableCpuCores(): number {
 }
 
 export function getOnnxThreadsPerJob(): number {
-  const concurrency = getComputeJobConcurrency();
+  const concurrency = computeJobConcurrency;
   const usableCores = Math.max(1, getAvailableCpuCores() - 1);
   return Math.max(1, Math.floor(usableCores / concurrency));
 }

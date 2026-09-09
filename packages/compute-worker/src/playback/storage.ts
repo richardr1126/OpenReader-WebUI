@@ -38,6 +38,7 @@ export interface TtsPlaybackSessionState {
   planObjectKey: string | null;
   expiresAt: number;
   lastError: string | null;
+  stopReason?: 'usage_limit' | null;
   updatedAt: number;
 }
 

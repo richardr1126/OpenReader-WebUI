@@ -26,8 +26,8 @@ export function RateLimitBanner({ className = '' }: RateLimitBannerProps) {
             Daily TTS limit reached.
           </span>
           <span className="text-accent  ml-1.5">
-            {`Used ${formatCharCount(status.currentCount)} / ${formatCharCount(status.limit)} characters.`}
-            {' Resets in '}{timeUntilReset}.
+            {`Used ${formatCharCount(status.currentCount)} / ${formatCharCount(status.limit ?? 0)} characters.`}
+            {' Cached audio remains available; new generation resumes in '}{timeUntilReset}.
           </span>
         </div>
 

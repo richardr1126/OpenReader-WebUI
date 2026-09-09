@@ -21,7 +21,7 @@ describe('query keys', () => {
     expect(queryKeys.sharedProviders('user')).toEqual(['tts-shared-providers', 'user']);
     expect(queryKeys.ttsVoices('user', 'shared', 'model')).toEqual(['tts-voices', 'user', 'shared', 'model']);
     expect(queryKeys.claimCounts('user')).toEqual(['claim-counts', 'user']);
-    expect(queryKeys.rateLimit('user')).toEqual(['rate-limit', 'user']);
+    expect(queryKeys.computeLimits('user')).toEqual(['compute-limits', 'user']);
     expect(queryKeys.admin('user', 'settings')).toEqual(['admin', 'user', 'settings']);
   });
 

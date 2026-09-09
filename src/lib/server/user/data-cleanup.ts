@@ -10,7 +10,7 @@
  */
 
 import { db } from '@openreader/database';
-import { documents, userJobEvents, userTtsChars } from '@openreader/database/schema';
+import { documents } from '@openreader/database/schema';
 import * as authSchemaSqlite from '@openreader/database/schema-auth-sqlite';
 import * as authSchemaPostgres from '@openreader/database/schema-auth-postgres';
 import { eq } from 'drizzle-orm';
@@ -101,8 +101,6 @@ export async function deleteUserStorageData(
     // Explicit for compatibility with pre-cascade installations and to remove
     // auth verification tokens, which cannot carry a user FK.
     for (const { table, userColumn, step } of [
-      { table: userTtsChars, userColumn: userTtsChars.userId, step: 'delete_user_tts_usage_rows' },
-      { table: userJobEvents, userColumn: userJobEvents.userId, step: 'delete_user_job_event_rows' },
       { table: authSchema.verification, userColumn: authSchema.verification.value, step: 'delete_user_verification_rows' },
     ]) {
       await database.delete(table).where(eq(userColumn, userId)).catch((error: unknown) => {

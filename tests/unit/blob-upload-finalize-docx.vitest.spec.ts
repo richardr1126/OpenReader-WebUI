@@ -16,6 +16,7 @@ const hoisted = vi.hoisted(() => ({
   copyTempDocumentBlobToDocument: vi.fn(),
   copyObjectKeyToDocument: vi.fn(),
   tempDocumentUploadKey: vi.fn(),
+  createAdmittedComputeOperation: vi.fn(),
 }));
 
 vi.mock('@/lib/server/auth/auth', () => ({
@@ -59,6 +60,14 @@ vi.mock('@/lib/server/documents/blobstore', () => ({
 
 vi.mock('@/lib/server/storage/s3', () => ({
   isS3Configured: vi.fn(() => true),
+}));
+
+vi.mock('@/lib/server/runtime-config', () => ({
+  getResolvedRuntimeConfig: vi.fn(async () => ({ computeLimitPolicies: {} })),
+}));
+
+vi.mock('@/lib/server/compute-limits/run-admitted', () => ({
+  createAdmittedComputeOperation: hoisted.createAdmittedComputeOperation,
 }));
 
 vi.mock('@/lib/server/logger', () => ({
@@ -105,6 +114,10 @@ describe('POST /api/documents/blob/upload/finalize DOCX flow', () => {
     hoisted.copyTempDocumentBlobToDocument.mockReset();
     hoisted.copyObjectKeyToDocument.mockReset();
     hoisted.tempDocumentUploadKey.mockReset();
+    hoisted.createAdmittedComputeOperation.mockReset();
+    hoisted.createAdmittedComputeOperation.mockImplementation(
+      async (input: { create: () => Promise<unknown> }) => input.create(),
+    );
 
     hoisted.requireAuthContext.mockResolvedValue({ userId: 'user-1' });
     hoisted.isComputeWorkerAvailable.mockReturnValue(true);

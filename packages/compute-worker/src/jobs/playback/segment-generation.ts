@@ -130,7 +130,21 @@ export async function generateExplicitTtsPlaybackSegments(input: {
   onSynthesisSettled?: () => Promise<void>;
   onSegmentCompleted?: (planOrdinal: number) => Promise<void>;
   onSegmentErrored?: (planOrdinal: number) => Promise<void>;
+  onUsageDenied?: () => Promise<void>;
   onModelDownloadProgress?: ModelDownloadProgressHandler;
+  consumeUsage?: (input: {
+    action: 'tts_synthesis';
+    sessionId: string;
+    userId: string;
+    eventKey: string;
+    characters: number;
+  }, signal?: AbortSignal) => Promise<{ allowed: boolean }>;
+  acquireProviderCapacity?: (input: {
+    providerRef: string;
+    characters: number;
+    signal?: AbortSignal;
+  }) => Promise<() => void>;
+  coolDownProviderCapacity?: (providerRef: string, retryAfterSeconds: number) => Promise<void>;
 }): Promise<void> {
   if (input.segments.length === 0 || input.signal?.aborted) return;
 
@@ -416,6 +430,22 @@ export async function generateExplicitTtsPlaybackSegments(input: {
     }
 
     if (!await shouldContinueWrites(planOrdinal)) break;
+    const usage = await (input.consumeUsage ?? (async () => ({ allowed: true })))({
+      action: 'tts_synthesis',
+      sessionId: input.request.sessionId,
+      userId: input.request.userId,
+      eventKey: [
+        'tts_synthesis:v1',
+        input.request.storageUserId,
+        String(minCacheEpoch),
+        segment.audioContentHash,
+      ].join(':'),
+      characters: segment.text.length,
+    }, input.signal);
+    if (!usage.allowed) {
+      await input.onUsageDenied?.();
+      break;
+    }
     await persistSegmentMetadata(segment, 'generating', { audioKey, leaseOwnerId, updatedAt: Date.now() })
       .catch(() => undefined);
     existing = await freshSidecar(segment);
@@ -439,23 +469,35 @@ export async function generateExplicitTtsPlaybackSegments(input: {
     let completedAlignment: PendingAlignment | null = null;
     for (let attempt = 1; attempt <= SEGMENT_MAX_ATTEMPTS; attempt += 1) {
       try {
-        const audioBuffer = await withAbortableTimeout(
-          (signal) => generateTTSBuffer({
-            text: segment.text,
-            voice: effectiveSettings.voice,
-            speed: effectiveSettings.nativeSpeed,
-            format: 'mp3',
-            model: effectiveSettings.ttsModel,
-            instructions: effectiveSettings.ttsInstructions,
-            language: effectiveSettings.language,
-            provider: requestCreds.providerType,
-            apiKey: requestCreds.apiKey,
-            baseUrl: requestCreds.baseUrl ?? undefined,
-          }, signal, { ttsUpstreamTimeoutMs: input.synthesisTimeoutMs }),
-          input.synthesisTimeoutMs,
-          'tts playback segment synthesis',
-          input.signal,
-        );
+        const releaseProvider = input.acquireProviderCapacity
+          ? await input.acquireProviderCapacity({
+            providerRef: effectiveProviderRef,
+            characters: segment.text.length,
+            signal: input.signal,
+          })
+          : () => undefined;
+        let audioBuffer: Buffer;
+        try {
+          audioBuffer = await withAbortableTimeout(
+            (signal) => generateTTSBuffer({
+              text: segment.text,
+              voice: effectiveSettings.voice,
+              speed: effectiveSettings.nativeSpeed,
+              format: 'mp3',
+              model: effectiveSettings.ttsModel,
+              instructions: effectiveSettings.ttsInstructions,
+              language: effectiveSettings.language,
+              provider: requestCreds.providerType,
+              apiKey: requestCreds.apiKey,
+              baseUrl: requestCreds.baseUrl ?? undefined,
+            }, signal, { ttsUpstreamTimeoutMs: input.synthesisTimeoutMs }),
+            input.synthesisTimeoutMs,
+            'tts playback segment synthesis',
+            input.signal,
+          );
+        } finally {
+          releaseProvider();
+        }
         if (!await shouldContinueWrites(planOrdinal)) return;
         await input.putAudioObject(audioKey, audioBuffer);
         if (!await shouldContinueWrites(planOrdinal)) {
@@ -483,6 +525,12 @@ export async function generateExplicitTtsPlaybackSegments(input: {
         lastError = error;
         const classified = classifySegmentError(error);
         lastErrorInfo = classified.info;
+        if (classified.info.code === 'UPSTREAM_RATE_LIMIT') {
+          await input.coolDownProviderCapacity?.(
+            effectiveProviderRef,
+            classified.info.retryAfterSeconds ?? 60,
+          ).catch(() => undefined);
+        }
         if (!classified.retryable) break;
       }
     }

@@ -1,6 +1,10 @@
 'use client';
 
 import { createContext, useContext, useMemo, type ReactNode } from 'react';
+import {
+  cloneComputeLimitPolicyDocument,
+  type ComputeLimitPolicyDocument,
+} from '@openreader/runtime-config/compute-limits';
 
 /**
  * Site-wide runtime config resolved at SSR time and injected via
@@ -20,15 +24,11 @@ export interface RuntimeConfig {
   enableAudiobookExport: boolean;
   enableDocxConversion: boolean;
   showAllProviderModels: boolean;
-  disableTtsRateLimit: boolean;
-  ttsDailyLimitAnonymous: number;
-  ttsDailyLimitAuthenticated: number;
-  ttsIpDailyLimitAnonymous: number;
-  ttsIpDailyLimitAuthenticated: number;
   ttsCacheMaxSizeBytes: number;
   ttsCacheTtlMs: number;
   ttsUpstreamMaxRetries: number;
   ttsUpstreamTimeoutMs: number;
+  computeLimitPolicies: ComputeLimitPolicyDocument;
   computeAvailable: boolean;
 }
 
@@ -41,15 +41,11 @@ const RUNTIME_DEFAULTS: RuntimeConfig = {
   enableAudiobookExport: true,
   enableDocxConversion: true,
   showAllProviderModels: true,
-  disableTtsRateLimit: true,
-  ttsDailyLimitAnonymous: 50_000,
-  ttsDailyLimitAuthenticated: 500_000,
-  ttsIpDailyLimitAnonymous: 100_000,
-  ttsIpDailyLimitAuthenticated: 1_000_000,
   ttsCacheMaxSizeBytes: 256 * 1024 * 1024,
   ttsCacheTtlMs: 1000 * 60 * 30,
   ttsUpstreamMaxRetries: 2,
   ttsUpstreamTimeoutMs: 285_000,
+  computeLimitPolicies: cloneComputeLimitPolicyDocument(),
   computeAvailable: true,
 };
 

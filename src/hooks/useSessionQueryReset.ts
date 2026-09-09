@@ -23,7 +23,7 @@ const USER_SCOPED_DOMAINS = new Set([
   'tts-manifest',
   'parsed-document',
   'claim-counts',
-  'rate-limit',
+  'compute-limits',
   'admin',
 ]);
 
