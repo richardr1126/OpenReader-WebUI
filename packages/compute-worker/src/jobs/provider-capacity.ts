@@ -80,6 +80,7 @@ export class ProviderCapacityCoordinator {
   constructor(
     private readonly getPolicy: () => ComputeLimitPolicyDocument,
     private readonly getKv?: () => Promise<KvStoreLike>,
+    private readonly logger?: { error(data: unknown, message?: string): void },
   ) {}
 
   private limits(providerRef: string): ProviderLimitPolicy {
@@ -91,7 +92,7 @@ export class ProviderCapacityCoordinator {
     providerRef: string;
     characters: number;
     signal?: AbortSignal;
-  }): Promise<() => void> {
+  }): Promise<() => Promise<void>> {
     const key = providerCapacityKey(input.providerRef);
     const holderId = randomUUID();
     const startedAt = Date.now();
@@ -99,7 +100,7 @@ export class ProviderCapacityCoordinator {
       if (input.signal?.aborted) throw input.signal.reason;
       const now = Date.now();
       const limits = this.limits(input.providerRef);
-      if (limits.mode === 'off') return () => undefined;
+      if (limits.mode === 'off') return async () => undefined;
       const kv = await this.getKv!();
       const entry = await kv.get(key);
       const current = compactState(
@@ -117,10 +118,19 @@ export class ProviderCapacityCoordinator {
           if (entry?.operation === 'PUT') await kv.update(key, distributedCodec.encode(next), entry.revision);
           else await kv.create(key, distributedCodec.encode(next));
           let released = false;
-          return () => {
+          let releasePromise: Promise<void> | null = null;
+          return async () => {
             if (released) return;
-            released = true;
-            void this.releaseDistributed(key, holderId).catch(() => undefined);
+            if (releasePromise) return releasePromise;
+            releasePromise = this.releaseDistributed(key, holderId);
+            try {
+              await releasePromise;
+              released = true;
+            } catch (error) {
+              this.logger?.error({ error: String(error), providerKey: key }, 'provider capacity release failed');
+              releasePromise = null;
+              throw error;
+            }
           };
         } catch (error) {
           if (!isKvCasConflictError(error)) throw error;
@@ -149,8 +159,10 @@ export class ProviderCapacityCoordinator {
         return;
       } catch (error) {
         if (!isKvCasConflictError(error)) throw error;
+        await sleep(Math.min(10 * (attempt + 1), 50));
       }
     }
+    throw new Error('Provider capacity release exhausted CAS retries');
   }
 
   async coolDown(providerRef: string, retryAfterSeconds: number): Promise<void> {
@@ -178,7 +190,7 @@ export class ProviderCapacityCoordinator {
     providerRef: string;
     characters: number;
     signal?: AbortSignal;
-  }): Promise<() => void> {
+  }): Promise<() => Promise<void>> {
     if (this.getKv) return this.acquireDistributed(input);
     const state = this.states.get(input.providerRef) ?? { active: 0, requests: [], characters: [] };
     this.states.set(input.providerRef, state);
@@ -187,7 +199,7 @@ export class ProviderCapacityCoordinator {
       if (input.signal?.aborted) throw input.signal.reason;
       const now = Date.now();
       const limits = this.limits(input.providerRef);
-      if (limits.mode === 'off') return () => undefined;
+      if (limits.mode === 'off') return async () => undefined;
       const cutoff = now - 60_000;
       state.requests = state.requests.filter((at) => at > cutoff);
       state.characters = state.characters.filter((entry) => entry.at > cutoff);
@@ -200,7 +212,7 @@ export class ProviderCapacityCoordinator {
         state.requests.push(now);
         state.characters.push({ at: now, units: input.characters });
         let released = false;
-        return () => {
+        return async () => {
           if (released) return;
           released = true;
           state.active = Math.max(0, state.active - 1);

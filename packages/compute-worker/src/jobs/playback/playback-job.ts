@@ -323,7 +323,7 @@ export function createTtsPlaybackHandler(input: JobHandlerContext) {
           generationSatisfiedThroughOrdinal: satisfiedWindow.throughOrdinal,
         });
       }
-      if (usageLimited) {
+      if (usageLimited && generationRunIsCurrent) {
         await playbackStorage.sessions.patchSessionIfGenerationRun(parsed.sessionId, generationRunId, {
           status: 'succeeded',
           planObjectKey,

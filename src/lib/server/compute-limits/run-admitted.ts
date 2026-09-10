@@ -23,6 +23,24 @@ export class ComputeAdmissionLimitedError extends Error {
   }
 }
 
+async function linkOperationWithRetry(input: {
+  admissionId: string;
+  operationId: string;
+  leaseSeconds: number;
+}): Promise<void> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await activateComputeAdmission(input);
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 25 * (attempt + 1)));
+    }
+  }
+  throw lastError;
+}
+
 export async function createAdmittedComputeOperation<T extends ComputeOperation>(input: {
   policy: ComputeLimitPolicyDocument;
   action: WorkerOperationAction;
@@ -38,10 +56,11 @@ export async function createAdmittedComputeOperation<T extends ComputeOperation>
     60,
     ...input.policy.actions[input.action].admission.active.map((limit) => limit.leaseSeconds),
   );
-  await activateComputeAdmission({ admissionId: decision.admissionId, leaseSeconds });
+  let operation: T | null = null;
   try {
-    const operation = await input.create();
-    await activateComputeAdmission({
+    await activateComputeAdmission({ admissionId: decision.admissionId, leaseSeconds });
+    operation = await input.create();
+    await linkOperationWithRetry({
       admissionId: decision.admissionId,
       operationId: operation.opId,
       leaseSeconds,
@@ -53,8 +72,10 @@ export async function createAdmittedComputeOperation<T extends ComputeOperation>
     }
     return operation;
   } catch (error) {
-    await finishComputeAdmission({ admissionId: decision.admissionId, state: 'cancelled' })
-      .catch(() => undefined);
+    if (!operation) {
+      await finishComputeAdmission({ admissionId: decision.admissionId, state: 'cancelled' })
+        .catch(() => undefined);
+    }
     throw error;
   }
 }

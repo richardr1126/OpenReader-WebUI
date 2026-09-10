@@ -28,6 +28,8 @@ export const WORKER_RESOURCES = [
 
 export type WorkerResource = typeof WORKER_RESOURCES[number];
 
+const MAX_NODE_TIMER_SECONDS = 2_147_483;
+
 export interface ComputeAdmissionWindowPolicy {
   scope: ComputeLimitScope;
   windowSeconds: number;
@@ -336,6 +338,7 @@ export function parseComputeLimitPolicyDocument(value: unknown): ComputeLimitPol
     || !hasExactKeys(value.worker, ['maxExecutingPerWorker', 'resources', 'policyRefreshSeconds'])
     || !isPositiveInt(value.worker.maxExecutingPerWorker)
     || !isPositiveInt(value.worker.policyRefreshSeconds)
+    || value.worker.policyRefreshSeconds > MAX_NODE_TIMER_SECONDS
     || !isRecord(value.worker.resources)
     || !hasExactKeys(value.worker.resources, WORKER_RESOURCES)
     || !isRecord(value.providers)

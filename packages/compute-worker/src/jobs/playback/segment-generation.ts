@@ -143,7 +143,7 @@ export async function generateExplicitTtsPlaybackSegments(input: {
     providerRef: string;
     characters: number;
     signal?: AbortSignal;
-  }) => Promise<() => void>;
+  }) => Promise<() => Promise<void>>;
   coolDownProviderCapacity?: (providerRef: string, retryAfterSeconds: number) => Promise<void>;
 }): Promise<void> {
   if (input.segments.length === 0 || input.signal?.aborted) return;
@@ -475,7 +475,7 @@ export async function generateExplicitTtsPlaybackSegments(input: {
             characters: segment.text.length,
             signal: input.signal,
           })
-          : () => undefined;
+          : async () => undefined;
         let audioBuffer: Buffer;
         try {
           audioBuffer = await withAbortableTimeout(
@@ -496,7 +496,7 @@ export async function generateExplicitTtsPlaybackSegments(input: {
             input.signal,
           );
         } finally {
-          releaseProvider();
+          await releaseProvider().catch(() => undefined);
         }
         if (!await shouldContinueWrites(planOrdinal)) return;
         await input.putAudioObject(audioKey, audioBuffer);

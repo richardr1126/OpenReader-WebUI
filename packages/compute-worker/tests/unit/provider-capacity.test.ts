@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 import { cloneComputeLimitPolicyDocument } from '@openreader/runtime-config/compute-limits';
 import { ProviderCapacityCoordinator } from '../../src/jobs/provider-capacity';
 import type { KvEntryLike, KvStoreLike } from '../../src/infrastructure/nats-adapters';
@@ -42,10 +42,10 @@ describe('provider capacity coordinator', () => {
 
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(secondAcquired).toBe(false);
-    releaseFirst();
+    await releaseFirst();
     const releaseSecond = await second;
     expect(secondAcquired).toBe(true);
-    releaseSecond();
+    await releaseSecond();
   });
 
   test('uses a named provider override', async () => {
@@ -60,7 +60,7 @@ describe('provider capacity coordinator', () => {
     };
     const coordinator = new ProviderCapacityCoordinator(() => policy);
     const release = await coordinator.acquire({ providerRef: 'premium', characters: 10 });
-    release();
+    await release();
     const controller = new AbortController();
     const waiting = coordinator.acquire({
       providerRef: 'premium',
@@ -89,9 +89,9 @@ describe('provider capacity coordinator', () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     controller.abort(new Error('blocked across workers'));
     await expect(blocked).rejects.toThrow('blocked across workers');
-    releaseFirst();
+    await releaseFirst();
     const releaseSecond = await secondWorker.acquire({ providerRef: 'shared', characters: 100 });
-    releaseSecond();
+    await releaseSecond();
   });
 
   test('records observed distributed demand without blocking it', async () => {
@@ -104,8 +104,8 @@ describe('provider capacity coordinator', () => {
     const coordinator = new ProviderCapacityCoordinator(() => policy, async () => kv);
     const releaseFirst = await coordinator.acquire({ providerRef: 'shared', characters: 100 });
     const releaseSecond = await coordinator.acquire({ providerRef: 'shared', characters: 100 });
-    releaseFirst();
-    releaseSecond();
+    await releaseFirst();
+    await releaseSecond();
 
     policy.providers.defaults.mode = 'enforce';
     const controller = new AbortController();
@@ -114,5 +114,36 @@ describe('provider capacity coordinator', () => {
     });
     controller.abort(new Error('observed demand retained'));
     await expect(blocked).rejects.toThrow('observed demand retained');
+  });
+
+  test('surfaces and logs a distributed release that exhausts CAS retries', async () => {
+    const policy = cloneComputeLimitPolicyDocument();
+    policy.providers.defaults = {
+      mode: 'enforce', maxConcurrent: 1, requestsPerMinute: 100,
+      charactersPerMinute: 100_000, maxWaitSeconds: 1,
+    };
+    const base = new MemoryKv();
+    let failedUpdates = 0;
+    const kv: KvStoreLike = {
+      get: (key) => base.get(key),
+      put: (key, data) => base.put(key, data),
+      create: (key, data) => base.create(key, data),
+      update: async (key, data, version) => {
+        failedUpdates += 1;
+        if (failedUpdates <= 8) throw new Error('wrong last sequence');
+        return base.update(key, data, version);
+      },
+      keys: () => base.keys(),
+    };
+    const logger = { error: vi.fn() };
+    const coordinator = new ProviderCapacityCoordinator(() => policy, async () => kv, logger);
+    const release = await coordinator.acquire({ providerRef: 'shared', characters: 100 });
+
+    await expect(release()).rejects.toThrow('exhausted CAS retries');
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.objectContaining({ providerKey: expect.any(String) }),
+      'provider capacity release failed',
+    );
+    await expect(release()).resolves.toBeUndefined();
   });
 });

@@ -1,4 +1,5 @@
 import { createHmac } from 'node:crypto';
+import { isIP } from 'node:net';
 import { TtsCredentialBrokerClientError } from '../jobs/tts-credential-broker-error';
 
 const DEFAULT_TIMEOUT_MS = 5_000;
@@ -19,8 +20,8 @@ function permitsPlainHttp(url: URL): boolean {
   return hostname === 'localhost'
     || hostname === '[::1]'
     || hostname === 'host.docker.internal'
-    || /^127(?:\.\d{1,3}){3}$/.test(hostname)
-    || !hostname.includes('.');
+    || hostname === 'openreader'
+    || (hostname.startsWith('127.') && isIP(hostname) === 4);
 }
 
 export function getTtsCredentialBrokerConfig(): TtsCredentialBrokerConfig {

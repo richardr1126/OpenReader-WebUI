@@ -121,6 +121,16 @@ describe('shared runtime configuration boundary', () => {
     expect(bootstrap).toContain('env.S3_BROWSER_TRANSPORT = resolved.mode');
   });
 
+  test('keeps compute-limit policy details out of the browser runtime config', () => {
+    const layout = source('src/app/layout.tsx');
+    const serverRuntime = source('src/lib/server/runtime-config.ts');
+    const clientRuntime = source('src/contexts/RuntimeConfigContext.tsx');
+
+    expect(layout).toContain('publicRuntimeConfig(runtimeConfig)');
+    expect(serverRuntime).toContain("Omit<ResolvedRuntimeConfig, 'computeLimitPolicies'>");
+    expect(clientRuntime).not.toContain('computeLimitPolicies');
+  });
+
   test('keeps the active environment inventory and deployment examples canonical', () => {
     const reference = source('docs-site/docs/reference/environment-variables.md');
     const rootExample = source('.env.example');

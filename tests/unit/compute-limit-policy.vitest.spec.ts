@@ -60,6 +60,16 @@ describe('compute limit policy', () => {
     }];
     expect(parseComputeLimitPolicyDocument(unwired)).toBeUndefined();
   });
+
+  it('rejects policy refresh timers above the Node.js safe delay', () => {
+    const maximum = cloneComputeLimitPolicyDocument();
+    maximum.worker.policyRefreshSeconds = 2_147_483;
+    expect(parseComputeLimitPolicyDocument(maximum)).toBeDefined();
+
+    const overflowing = cloneComputeLimitPolicyDocument();
+    overflowing.worker.policyRefreshSeconds = 2_147_484;
+    expect(parseComputeLimitPolicyDocument(overflowing)).toBeUndefined();
+  });
 });
 
 describe('compute limit broker contracts', () => {

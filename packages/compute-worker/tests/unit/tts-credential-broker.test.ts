@@ -3,7 +3,11 @@ import {
   resolveTtsCredentialsFromBroker,
   TtsCredentialBrokerClientError,
 } from '../../src/jobs/tts-credential-broker';
-import { requireTtsSegmentTextHashSecret } from '../../src/infrastructure/credential-broker-config';
+import {
+  getTtsCredentialBrokerConfig as readTtsCredentialBrokerConfig,
+  requireTtsSegmentTextHashSecret,
+} from '../../src/infrastructure/credential-broker-config';
+import { fetchComputeLimitPolicy } from '../../src/jobs/compute-limit-policy-broker';
 
 const BROKER_URL = 'https://openreader.example/api/internal/compute/tts-credentials';
 const BROKER_TOKEN = 'worker-to-app-broker-token';
@@ -122,6 +126,18 @@ describe('TTS credential broker client', () => {
     await expect(request).rejects.toThrow('job cancelled');
   });
 
+  test('passes an already-aborted signal to the policy request', async () => {
+    const reason = new Error('already cancelled');
+    const fetchMock = vi.fn((_url: URL, init: RequestInit) => {
+      expect(init.signal?.aborted).toBe(true);
+      return Promise.reject(init.signal?.reason);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(fetchComputeLimitPolicy(AbortSignal.abort(reason))).rejects.toBe(reason);
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
   test('applies the configured request timeout without leaking fetch details', async () => {
     vi.useFakeTimers();
     vi.stubGlobal('fetch', vi.fn((_url: URL, init: RequestInit) => new Promise((_resolve, reject) => {
@@ -164,7 +180,24 @@ describe('TTS credential broker client', () => {
       code: 'BROKER_CONFIG_INVALID',
       retryable: false,
     });
+
+    process.env.COMPUTE_CREDENTIAL_BROKER_URL = 'http://worker/api/internal/compute/tts-credentials';
+    expect(() => readTtsCredentialBrokerConfig()).toThrow(TtsCredentialBrokerClientError);
+
+    process.env.COMPUTE_CREDENTIAL_BROKER_URL =
+      'http://127.999.999.999:3003/api/internal/compute/tts-credentials';
+    expect(() => readTtsCredentialBrokerConfig()).toThrow(TtsCredentialBrokerClientError);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  test('permits only explicit local HTTP broker hosts', () => {
+    process.env.COMPUTE_CREDENTIAL_BROKER_URL =
+      'http://openreader:3003/api/internal/compute/tts-credentials';
+    expect(readTtsCredentialBrokerConfig().url.hostname).toBe('openreader');
+
+    process.env.COMPUTE_CREDENTIAL_BROKER_URL =
+      'http://127.0.0.1:3003/api/internal/compute/tts-credentials';
+    expect(readTtsCredentialBrokerConfig().url.hostname).toBe('127.0.0.1');
   });
 
   test('derives a stable domain-separated text fingerprint key from the playback secret', () => {

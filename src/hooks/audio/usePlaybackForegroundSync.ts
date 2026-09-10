@@ -48,6 +48,7 @@ export function usePlaybackForegroundSync(input: UsePlaybackForegroundSyncInput)
   const playbackRefreshRef = useRef<ReturnType<typeof createCoalescedPlaybackRefresh> | null>(null);
   const playbackCursorWriteRef = useRef(false);
   const pendingCursorOrdinalRef = useRef<number | null>(null);
+  const usageLimitRefreshRunRef = useRef<number | null>(null);
 
   const setWorkerPlaybackActive = useCallback((playbackActive: boolean, requireAcknowledgement = false) => {
     const session = playbackSessionRef.current;
@@ -130,6 +131,7 @@ export function usePlaybackForegroundSync(input: UsePlaybackForegroundSyncInput)
     if (!activeSession) return;
 
     stopPlaybackForegroundSync();
+    usageLimitRefreshRunRef.current = null;
     const refresh = createCoalescedPlaybackRefresh(async (signal) => {
       if (runId !== playbackRunIdRef.current || playbackSessionRef.current !== activeSession) return;
       const readSignal = AbortSignal.any([signal, AbortSignal.timeout(30_000)]);
@@ -149,7 +151,8 @@ export function usePlaybackForegroundSync(input: UsePlaybackForegroundSyncInput)
       subscribe: (operationId, onSnapshot) => subscribeTtsPlaybackEvents(activeSession.sessionId, { onSnapshot }, operationId),
       onSnapshot: (snapshot) => {
         if (runId !== playbackRunIdRef.current) return;
-        if (snapshot.stopReason === 'usage_limit') {
+        if (snapshot.stopReason === 'usage_limit' && usageLimitRefreshRunRef.current !== runId) {
+          usageLimitRefreshRunRef.current = runId;
           void refreshComputeUsage();
         }
         if (snapshot.status === 'failed') {

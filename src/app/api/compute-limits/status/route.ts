@@ -11,6 +11,8 @@ import { errorResponse } from '@/lib/server/errors/next-response';
 
 export const dynamic = 'force-dynamic';
 
+const NO_STORE_HEADERS = { 'Cache-Control': 'no-store, private' };
+
 export async function GET(req: NextRequest) {
   try {
     const runtimeConfig = await getResolvedRuntimeConfig();
@@ -31,7 +33,7 @@ export async function GET(req: NextRequest) {
         resetTimeMs: nextUtcMidnightTimestampMs(),
         userType: 'unauthenticated',
         mode,
-      });
+      }, { headers: NO_STORE_HEADERS });
     }
 
     const isAnonymous = Boolean((session.user as { isAnonymous?: boolean }).isAnonymous);
@@ -59,7 +61,7 @@ export async function GET(req: NextRequest) {
       resetTimeMs: binding?.resetAt ?? nextUtcMidnightTimestampMs(),
       userType: isAnonymous ? 'anonymous' : 'authenticated',
       mode,
-    });
+    }, { headers: NO_STORE_HEADERS });
     if (device?.didCreate) setDeviceIdCookie(response, device.deviceId);
     return response;
   } catch (error) {

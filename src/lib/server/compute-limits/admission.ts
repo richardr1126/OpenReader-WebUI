@@ -19,6 +19,7 @@ import {
 export type ComputeAdmissionState = 'reserved' | 'active' | 'finished' | 'cancelled';
 
 const TTS_PLAYBACK_ADMISSION_WINDOW_MS = 30 * 60 * 1000;
+const INLINE_EXPIRY_RECONCILIATION_LIMIT = 10;
 
 export function buildTtsPlaybackAdmissionRequestKey(sessionId: string, nowMs: number): string {
   return `tts-session:${sessionId}:${Math.floor(nowMs / TTS_PLAYBACK_ADMISSION_WINDOW_MS)}`;
@@ -98,6 +99,8 @@ async function reconcileExpiredAdmissions(
   conn: DbTransactionConnection,
   action: ComputeAction,
   nowMs: number,
+  userId?: string,
+  limit = 100,
 ): Promise<void> {
   const expired = await conn.select({
     id: computeLimitAdmissions.id,
@@ -108,7 +111,8 @@ async function reconcileExpiredAdmissions(
     eq(computeLimitAdmissions.action, action),
     inArray(computeLimitAdmissions.state, ['reserved', 'active']),
     lte(computeLimitAdmissions.leaseExpiresAt, nowMs),
-  )).limit(100);
+    userId ? eq(computeLimitAdmissions.userId, userId) : undefined,
+  )).limit(limit);
 
   for (const row of expired as Array<{
     id: string;
@@ -194,7 +198,45 @@ export async function reserveComputeAdmission(input: {
   let wouldDeny = false;
   try {
     await runInDbTransaction(async (conn) => {
-      await reconcileExpiredAdmissions(conn, input.action, nowMs);
+      const matchingRows = await conn.select({
+        id: computeLimitAdmissions.id,
+        userId: computeLimitAdmissions.userId,
+        state: computeLimitAdmissions.state,
+        deviceScopeKey: computeLimitAdmissions.deviceScopeKey,
+        ipScopeKey: computeLimitAdmissions.ipScopeKey,
+        leaseExpiresAt: computeLimitAdmissions.leaseExpiresAt,
+      }).from(computeLimitAdmissions).where(and(
+        eq(computeLimitAdmissions.userId, input.subject.userId),
+        eq(computeLimitAdmissions.action, input.action),
+        eq(computeLimitAdmissions.requestKey, input.requestKey),
+      )).limit(1);
+      const matching = matchingRows[0];
+      if (matching && (matching.state === 'reserved' || matching.state === 'active')) {
+        if (Number(matching.leaseExpiresAt) > nowMs) return;
+        const expired = await conn.update(computeLimitAdmissions).set({
+          state: 'cancelled',
+          finishedAt: nowMs,
+        }).where(and(
+          eq(computeLimitAdmissions.id, matching.id),
+          inArray(computeLimitAdmissions.state, ['reserved', 'active']),
+          lte(computeLimitAdmissions.leaseExpiresAt, nowMs),
+        ));
+        if (rowsAffected(expired) > 0) {
+          await decrementAdmissionActiveGauges(conn, {
+            userId: String(matching.userId),
+            deviceScopeKey: matching.deviceScopeKey,
+            ipScopeKey: matching.ipScopeKey,
+            action: input.action,
+            nowMs,
+          });
+        }
+      }
+      await conn.delete(computeLimitAdmissions).where(and(
+        eq(computeLimitAdmissions.userId, input.subject.userId),
+        eq(computeLimitAdmissions.action, input.action),
+        eq(computeLimitAdmissions.requestKey, input.requestKey),
+        inArray(computeLimitAdmissions.state, ['finished', 'cancelled']),
+      ));
       const inserted = await conn.insert(computeLimitAdmissions).values({
         id: admissionId,
         requestKey: input.requestKey,
@@ -284,12 +326,23 @@ export async function reserveComputeAdmission(input: {
           eq(computeLimitBuckets.metric, counter.metric),
           eq(computeLimitBuckets.windowStart, counter.windowStart),
         );
-        const updated = await conn.update(computeLimitBuckets).set({
+        const incrementCounter = () => conn.update(computeLimitBuckets).set({
           used: sql`${computeLimitBuckets.used} + 1`,
           updatedAt: nowMs,
         }).where(actionPolicy.mode === 'enforce'
           ? and(baseWhere, sql`${computeLimitBuckets.used} < ${counter.limit}`)
           : baseWhere);
+        let updated = await incrementCounter();
+        if (rowsAffected(updated) === 0 && counter.metric === 'active' && actionPolicy.mode === 'enforce') {
+          await reconcileExpiredAdmissions(
+            conn,
+            input.action,
+            nowMs,
+            counter.scope === 'user' ? input.subject.userId : undefined,
+            INLINE_EXPIRY_RECONCILIATION_LIMIT,
+          );
+          updated = await incrementCounter();
+        }
         if (rowsAffected(updated) === 0) {
           wouldDeny = true;
           if (actionPolicy.mode === 'enforce') {

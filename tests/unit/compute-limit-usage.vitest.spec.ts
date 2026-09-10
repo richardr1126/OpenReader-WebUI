@@ -159,4 +159,41 @@ describe('compute admission limits', () => {
       policy: admissionPolicy, action: 'pdf_layout', requestKey: 'pdf-3', subject,
     })).resolves.toMatchObject({ allowed: true });
   });
+
+  test('reclaims a terminal stable request key as a newly charged admission', async () => {
+    const admissionPolicy = cloneComputeLimitPolicyDocument();
+    admissionPolicy.actions.document_preview.mode = 'enforce';
+    admissionPolicy.actions.document_preview.admission.windows = [
+      { scope: 'user', windowSeconds: 3_600, limit: 2 },
+    ];
+    admissionPolicy.actions.document_preview.admission.active = [
+      { scope: 'user', limit: 1, leaseSeconds: 60 },
+    ];
+    const subject = { userId: 'user-1', isAnonymous: false };
+    const first = await reserveComputeAdmission({
+      policy: admissionPolicy,
+      action: 'document_preview',
+      requestKey: 'stable-preview-key',
+      subject,
+    });
+    await finishComputeAdmission({ admissionId: first.admissionId!, state: 'finished' });
+
+    const reused = await reserveComputeAdmission({
+      policy: admissionPolicy,
+      action: 'document_preview',
+      requestKey: 'stable-preview-key',
+      subject,
+    });
+    const blocked = await reserveComputeAdmission({
+      policy: admissionPolicy,
+      action: 'document_preview',
+      requestKey: 'another-preview-key',
+      subject,
+    });
+
+    expect(reused).toMatchObject({ allowed: true, idempotent: false, state: 'reserved' });
+    expect(reused.admissionId).not.toBe(first.admissionId);
+    expect(blocked).toMatchObject({ allowed: false, wouldDeny: true });
+    await finishComputeAdmission({ admissionId: reused.admissionId!, state: 'finished' });
+  });
 });

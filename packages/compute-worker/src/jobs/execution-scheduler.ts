@@ -9,51 +9,65 @@ const PRIORITY_WEIGHT = { interactive: 0, foreground: 1, background: 2 } as cons
 type Waiter = {
   action: WorkerOperationAction;
   queuedAt: number;
-  resolve: (acquired: boolean) => void;
+  resolve: (result: ComputeExecutionAcquireResult) => void;
   timeout: ReturnType<typeof setTimeout>;
 };
+
+export type ComputeExecutionLease = {
+  action: WorkerOperationAction;
+  resources: Partial<Record<WorkerResource, number>>;
+  released: boolean;
+};
+
+export type ComputeExecutionAcquireResult =
+  | { status: 'acquired'; lease: ComputeExecutionLease }
+  | { status: 'rejected' | 'expired' | 'cancelled' };
 
 export class ComputeExecutionScheduler {
   private activeTotal = 0;
   private readonly activeByAction = new Map<WorkerOperationAction, number>();
   private readonly activeResources = new Map<WorkerResource, number>();
-  private readonly allocations = new Map<WorkerOperationAction, Array<Partial<Record<WorkerResource, number>>>>();
   private readonly waiters: Waiter[] = [];
 
   constructor(private readonly getPolicy: () => ComputeLimitPolicyDocument) {}
 
-  private canAcquire(action: WorkerOperationAction): boolean {
+  private canAcquire(
+    action: WorkerOperationAction,
+    resources: Partial<Record<WorkerResource, number>>,
+  ): boolean {
     const policy = this.getPolicy();
     const execution = policy.actions[action].execution!;
     if (this.activeTotal >= policy.worker.maxExecutingPerWorker) return false;
     if ((this.activeByAction.get(action) ?? 0) >= execution.maxConcurrentPerWorker) return false;
-    return Object.entries(execution.resources).every(([resource, units]) => (
+    return Object.entries(resources).every(([resource, units]) => (
       (this.activeResources.get(resource as WorkerResource) ?? 0) + Number(units)
         <= policy.worker.resources[resource as WorkerResource]
     ));
   }
 
-  private claim(action: WorkerOperationAction): void {
-    const execution = this.getPolicy().actions[action].execution!;
+  private claim(
+    action: WorkerOperationAction,
+    resources: Partial<Record<WorkerResource, number>>,
+  ): ComputeExecutionLease {
     this.activeTotal += 1;
     this.activeByAction.set(action, (this.activeByAction.get(action) ?? 0) + 1);
-    for (const [resource, units] of Object.entries(execution.resources)) {
+    for (const [resource, units] of Object.entries(resources)) {
       const key = resource as WorkerResource;
       this.activeResources.set(key, (this.activeResources.get(key) ?? 0) + Number(units));
     }
-    const allocations = this.allocations.get(action) ?? [];
-    allocations.push({ ...execution.resources });
-    this.allocations.set(action, allocations);
+    return { action, resources, released: false };
   }
 
-  async acquire(action: WorkerOperationAction): Promise<boolean> {
-    if (this.canAcquire(action)) {
-      this.claim(action);
-      return true;
+  async acquire(action: WorkerOperationAction): Promise<ComputeExecutionAcquireResult> {
+    const resources = { ...this.getPolicy().actions[action].execution!.resources };
+    if (this.canAcquire(action, resources)) {
+      return { status: 'acquired', lease: this.claim(action, resources) };
     }
     const execution = this.getPolicy().actions[action].execution!;
-    if (this.waiters.filter((waiter) => waiter.action === action).length >= execution.maxQueued) return false;
-    return new Promise<boolean>((resolve) => {
+    if (this.waiters.filter((waiter) => waiter.action === action).length >= execution.maxQueued) {
+      return { status: 'rejected' };
+    }
+    return new Promise<ComputeExecutionAcquireResult>((resolve) => {
       const waiter: Waiter = {
         action,
         queuedAt: Date.now(),
@@ -61,7 +75,7 @@ export class ComputeExecutionScheduler {
         timeout: setTimeout(() => {
           const index = this.waiters.indexOf(waiter);
           if (index >= 0) this.waiters.splice(index, 1);
-          resolve(false);
+          resolve({ status: 'expired' });
         }, execution.maxQueueAgeSeconds * 1000),
       };
       this.waiters.push(waiter);
@@ -69,8 +83,10 @@ export class ComputeExecutionScheduler {
     });
   }
 
-  release(action: WorkerOperationAction): void {
-    const resources = this.allocations.get(action)?.shift() ?? {};
+  release(lease: ComputeExecutionLease): void {
+    if (lease.released) return;
+    lease.released = true;
+    const { action, resources } = lease;
     this.activeTotal = Math.max(0, this.activeTotal - 1);
     this.activeByAction.set(action, Math.max(0, (this.activeByAction.get(action) ?? 0) - 1));
     for (const [resource, units] of Object.entries(resources)) {
@@ -88,7 +104,7 @@ export class ComputeExecutionScheduler {
     const waiters = this.waiters.splice(0);
     for (const waiter of waiters) {
       clearTimeout(waiter.timeout);
-      waiter.resolve(false);
+      waiter.resolve({ status: 'cancelled' });
     }
   }
 
@@ -102,14 +118,14 @@ export class ComputeExecutionScheduler {
     let index = 0;
     while (index < this.waiters.length) {
       const waiter = this.waiters[index];
-      if (!this.canAcquire(waiter.action)) {
+      const resources = { ...policy.actions[waiter.action].execution!.resources };
+      if (!this.canAcquire(waiter.action, resources)) {
         index += 1;
         continue;
       }
       this.waiters.splice(index, 1);
       clearTimeout(waiter.timeout);
-      this.claim(waiter.action);
-      waiter.resolve(true);
+      waiter.resolve({ status: 'acquired', lease: this.claim(waiter.action, resources) });
     }
   }
 }

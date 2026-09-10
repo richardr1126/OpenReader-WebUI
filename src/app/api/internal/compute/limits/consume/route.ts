@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { and, desc, eq, gt, inArray } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, sql } from 'drizzle-orm';
 import { db } from '@openreader/database';
 import { computeLimitAdmissions } from '@openreader/database/schema';
 import {
@@ -22,6 +22,10 @@ const NO_STORE_HEADERS = {
   Pragma: 'no-cache',
 };
 const MAX_REQUEST_BYTES = 2_048;
+
+function escapeSqlLike(value: string): string {
+  return value.replace(/[\\%_]/g, (character) => `\\${character}`);
+}
 
 function error(status: number, code: string): NextResponse {
   return NextResponse.json({ error: code }, { status, headers: NO_STORE_HEADERS });
@@ -56,6 +60,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     eq(computeLimitAdmissions.action, 'tts_playback'),
     inArray(computeLimitAdmissions.state, ['reserved', 'active']),
     gt(computeLimitAdmissions.leaseExpiresAt, nowMs),
+    sql`${computeLimitAdmissions.requestKey} like ${`${escapeSqlLike(`tts-session:${parsed.sessionId}:`)}%`} escape '\\'`,
   )).orderBy(desc(computeLimitAdmissions.createdAt)).limit(50);
   const admission = admissions.find((row: (typeof admissions)[number]) => (
     isTtsPlaybackAdmissionForSession(row.requestKey, parsed.sessionId)

@@ -13,6 +13,6 @@ export interface JobHandlerContext {
     providerRef: string;
     characters: number;
     signal?: AbortSignal;
-  }) => Promise<() => void>;
+  }) => Promise<() => Promise<void>>;
   coolDownProviderCapacity?: (providerRef: string, retryAfterSeconds: number) => Promise<void>;
 }

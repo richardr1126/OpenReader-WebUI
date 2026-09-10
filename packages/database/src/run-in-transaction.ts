@@ -61,14 +61,15 @@ export async function runInDbTransaction<T>(
   let release: () => void = () => undefined;
   sqliteTransactionTail = new Promise<void>((resolve) => { release = resolve; });
   await previous;
-  const connection = getSqliteTransactionConnection();
-  connection.raw.exec('BEGIN IMMEDIATE');
+  let connection: ReturnType<typeof getSqliteTransactionConnection> | null = null;
   try {
+    connection = getSqliteTransactionConnection();
+    connection.raw.exec('BEGIN IMMEDIATE');
     const result = await fn(connection.db);
     connection.raw.exec('COMMIT');
     return result;
   } catch (error) {
-    connection.raw.exec('ROLLBACK');
+    if (connection?.raw.inTransaction) connection.raw.exec('ROLLBACK');
     throw error;
   } finally {
     release();

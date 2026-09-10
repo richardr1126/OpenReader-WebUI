@@ -163,41 +163,12 @@ unrepresentable.
 ```ts
 type LimitMode = 'off' | 'observe' | 'enforce';
 type LimitScope = 'user' | 'anonymous_device' | 'ip' | 'site';
-type UsageMetric = 'starts' | 'characters' | 'input_bytes' | 'files';
 
 interface ComputeLimitPolicyDocument {
   schemaVersion: 1;
-  actions: Record<ComputeAction, {
-    mode: LimitMode;
-    admission?: {
-      windows: Array<{
-        scope: LimitScope;
-        metric: 'starts';
-        windowSeconds: number;
-        limit: number;
-      }>;
-      active: Array<{
-        scope: 'user' | 'site';
-        limit: number;
-        leaseSeconds: number;
-      }>;
-    };
-    usage?: Array<{
-      scope: LimitScope;
-      audience: 'anonymous' | 'authenticated' | 'all';
-      metric: Exclude<UsageMetric, 'starts'>;
-      window: 'utc_day';
-      limit: number;
-      boundary: 'strict' | 'soft_unit';
-    }>;
-    execution: {
-      priority: 'interactive' | 'foreground' | 'background';
-      maxQueued: number;
-      maxConcurrentPerWorker: number;
-      resources: Partial<Record<WorkerResource, number>>;
-      maxQueueAgeSeconds: number;
-    };
-  }>;
+  actions: Record<WorkerOperationAction, OperationActionPolicy> & {
+    tts_synthesis: TtsSynthesisActionPolicy;
+  };
   worker: {
     maxExecutingPerWorker: number;
     resources: Record<WorkerResource, number>;
@@ -207,6 +178,45 @@ interface ComputeLimitPolicyDocument {
     defaults: ProviderLimitPolicy;
     overrides: Record<string, ProviderLimitPolicy>;
   };
+}
+
+interface AdmissionPolicy {
+  windows: Array<{
+    scope: LimitScope;
+    windowSeconds: number;
+    limit: number;
+  }>;
+  active: Array<{
+    scope: 'user' | 'site';
+    limit: number;
+    leaseSeconds: number;
+  }>;
+}
+
+interface OperationActionPolicy {
+  mode: LimitMode;
+  admission: AdmissionPolicy;
+  usage: [];
+  execution: {
+    priority: 'interactive' | 'foreground' | 'background';
+    maxQueued: number;
+    maxConcurrentPerWorker: number;
+    resources: Partial<Record<WorkerResource, number>>;
+    maxQueueAgeSeconds: number;
+  };
+}
+
+interface TtsSynthesisActionPolicy {
+  mode: LimitMode;
+  admission: { windows: []; active: [] };
+  usage: Array<{
+    scope: LimitScope;
+    audience: 'anonymous' | 'authenticated' | 'all';
+    metric: 'characters';
+    window: 'utc_day';
+    limit: number;
+    boundary: 'soft_unit';
+  }>;
 }
 
 type WorkerResource =

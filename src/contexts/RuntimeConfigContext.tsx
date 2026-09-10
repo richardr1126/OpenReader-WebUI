@@ -1,10 +1,6 @@
 'use client';
 
 import { createContext, useContext, useMemo, type ReactNode } from 'react';
-import {
-  cloneComputeLimitPolicyDocument,
-  type ComputeLimitPolicyDocument,
-} from '@openreader/runtime-config/compute-limits';
 
 /**
  * Site-wide runtime config resolved at SSR time and injected via
@@ -28,7 +24,6 @@ export interface RuntimeConfig {
   ttsCacheTtlMs: number;
   ttsUpstreamMaxRetries: number;
   ttsUpstreamTimeoutMs: number;
-  computeLimitPolicies: ComputeLimitPolicyDocument;
   computeAvailable: boolean;
 }
 
@@ -45,7 +40,6 @@ const RUNTIME_DEFAULTS: RuntimeConfig = {
   ttsCacheTtlMs: 1000 * 60 * 30,
   ttsUpstreamMaxRetries: 2,
   ttsUpstreamTimeoutMs: 285_000,
-  computeLimitPolicies: cloneComputeLimitPolicyDocument(),
   computeAvailable: true,
 };
 

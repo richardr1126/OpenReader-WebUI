@@ -10,15 +10,16 @@
  */
 
 import { db } from '@openreader/database';
-import { documents } from '@openreader/database/schema';
+import { computeLimitBuckets, documents } from '@openreader/database/schema';
 import * as authSchemaSqlite from '@openreader/database/schema-auth-sqlite';
 import * as authSchemaPostgres from '@openreader/database/schema-auth-postgres';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { isS3Configured } from '@/lib/server/storage/s3';
 import { deleteDocumentPreviewRows } from '@/lib/server/documents/previews';
 import { getComputeWorkerClient, isComputeWorkerAvailable } from '@/lib/server/compute-worker/client';
 import { hashForLog, serverLogger } from '@/lib/server/logger';
 import { logDegraded } from '@/lib/server/errors/logging';
+import { deriveComputeScopeKey } from '@/lib/server/compute-limits/policy';
 
 export async function deleteUserStorageData(
   userId: string,
@@ -98,6 +99,20 @@ export async function deleteUserStorageData(
   // Namespaced cleanup is a storage-only pass; database rows are global and are
   // only removed on the canonical (non-namespaced) pass.
   if (namespace === null) {
+    await database.delete(computeLimitBuckets).where(and(
+      eq(computeLimitBuckets.scopeType, 'user'),
+      eq(computeLimitBuckets.scopeKey, deriveComputeScopeKey('user', userId)),
+    )).catch((error: unknown) => {
+      failures.push(error);
+      logDegraded(serverLogger, {
+        event: 'user.data_cleanup.db_rows_delete.failed',
+        msg: 'Failed to delete user compute-limit buckets',
+        step: 'delete_user_compute_limit_buckets',
+        context: { userIdHash: hashForLog(userId) },
+        error,
+      });
+    });
+
     // Explicit for compatibility with pre-cascade installations and to remove
     // auth verification tokens, which cannot carry a user FK.
     for (const { table, userColumn, step } of [

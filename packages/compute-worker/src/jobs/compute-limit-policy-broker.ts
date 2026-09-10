@@ -11,6 +11,7 @@ export async function fetchComputeLimitPolicy(signal?: AbortSignal): Promise<Com
   const controller = new AbortController();
   const onAbort = () => controller.abort(signal?.reason);
   signal?.addEventListener('abort', onAbort, { once: true });
+  if (signal?.aborted) onAbort();
   const timeout = setTimeout(() => controller.abort(new Error('compute policy broker timeout')), config.timeoutMs);
   try {
     const response = await fetch(url, {

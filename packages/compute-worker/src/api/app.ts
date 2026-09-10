@@ -152,7 +152,7 @@ export async function createComputeWorkerApp(options: CreateComputeWorkerAppOpti
   }
   const jobConcurrency = computePolicy.worker.maxExecutingPerWorker;
   configureComputeJobConcurrency(jobConcurrency);
-  let computePolicyRefreshTimer: ReturnType<typeof setInterval> | null = null;
+  let computePolicyRefreshTimer: ReturnType<typeof setTimeout> | null = null;
   const whisperTimeoutMs = timeoutConfig.whisperTimeoutMs;
   const pdfTimeoutMs = timeoutConfig.pdfTimeoutMs;
   const pdfHardCapMs = timeoutConfig.pdfHardCapMs;
@@ -365,6 +365,7 @@ export async function createComputeWorkerApp(options: CreateComputeWorkerAppOpti
   const providerCapacity = new ProviderCapacityCoordinator(
     () => computePolicy,
     async () => (await ensureConnected()).kv,
+    app.log,
   );
   const jobHandlers = createJobHandlers({
     storage,
@@ -455,7 +456,7 @@ export async function createComputeWorkerApp(options: CreateComputeWorkerAppOpti
   const close = async (): Promise<void> => {
     if (stopping) return;
     stopping = true;
-    if (computePolicyRefreshTimer) clearInterval(computePolicyRefreshTimer);
+    if (computePolicyRefreshTimer) clearTimeout(computePolicyRefreshTimer);
     await app.close();
     await sessionManager.close();
   };

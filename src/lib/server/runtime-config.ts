@@ -12,6 +12,14 @@ export type ResolvedRuntimeConfig = RuntimeConfig & {
   computeAvailable: boolean;
 };
 
+export type PublicRuntimeConfig = Omit<ResolvedRuntimeConfig, 'computeLimitPolicies'>;
+
+export function publicRuntimeConfig(config: ResolvedRuntimeConfig): PublicRuntimeConfig {
+  const { computeLimitPolicies, ...publicConfig } = config;
+  void computeLimitPolicies;
+  return publicConfig;
+}
+
 function assertServerRuntime(caller: string): void {
   if (typeof window !== 'undefined') {
     throw new Error(`${caller} must be called on the server`);

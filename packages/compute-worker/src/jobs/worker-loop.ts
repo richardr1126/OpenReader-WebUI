@@ -29,7 +29,10 @@ import {
   type ComputeLimitPolicyDocument,
   type WorkerOperationAction,
 } from '@openreader/runtime-config/compute-limits';
-import { ComputeExecutionScheduler } from './execution-scheduler';
+import {
+  ComputeExecutionScheduler,
+  type ComputeExecutionLease,
+} from './execution-scheduler';
 
 const LOOP_ERROR_BACKOFF_MS = 500;
 const RUNNING_HEARTBEAT_MS = 5000;
@@ -184,6 +187,7 @@ export function createWorkerLoopController(input: {
   const processMessage = async <TPayload, TResult>(work: WorkDefinition<TPayload, TResult> & {
     msg: JsMsg;
     workerLabel: string;
+    queueExpired?: boolean;
   }): Promise<void> => {
     let context: Context<TPayload> | null = null;
     let heartbeat: NodeJS.Timeout | null = null;
@@ -198,7 +202,9 @@ export function createWorkerLoopController(input: {
         startedAt,
         queueWaitTiming: buildQueueWaitTiming(decoded.queuedAt, startedAt),
       };
-      if (startedAt - decoded.queuedAt > maxQueueAgeMs) throw new ComputeQueueExpiredError();
+      if (work.queueExpired || startedAt - decoded.queuedAt > maxQueueAgeMs) {
+        throw new ComputeQueueExpiredError();
+      }
       await markRunning(context, startedAt);
       input.logger.info({
         worker: work.workerLabel,
@@ -332,7 +338,7 @@ export function createWorkerLoopController(input: {
     const detached = () => input.isStopping() || stopRequested || !input.isOwnerActive(work.owner);
     while (!detached()) {
       let msg: JsMsg | null = null;
-      let acquired = false;
+      let executionLease: ComputeExecutionLease | null = null;
       try {
         try {
           msg = await work.consumer.next({ expires: PULL_EXPIRES_MS });
@@ -353,11 +359,16 @@ export function createWorkerLoopController(input: {
           }
         }, RUNNING_HEARTBEAT_MS);
         try {
-          acquired = await scheduler.acquire(work.action);
+          const acquisition = await scheduler.acquire(work.action);
+          if (acquisition.status === 'acquired') executionLease = acquisition.lease;
+          else if (acquisition.status === 'expired') {
+            await processMessage({ ...work, msg, queueExpired: true });
+            continue;
+          }
         } finally {
           clearInterval(queueHeartbeat);
         }
-        if (!acquired) {
+        if (!executionLease) {
           msg.nak();
           continue;
         }
@@ -368,7 +379,7 @@ export function createWorkerLoopController(input: {
         await processMessage({ ...work, msg });
       } finally {
         if (msg) {
-          if (acquired) scheduler.release(work.action);
+          if (executionLease) scheduler.release(executionLease);
           input.onInFlightJobsChanged(-1);
           input.markActivity(`job_completed:${work.workerLabel}`);
         }
