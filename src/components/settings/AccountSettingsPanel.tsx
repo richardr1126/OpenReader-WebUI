@@ -23,7 +23,7 @@ function TtsUsageCard() {
   } = useAuthRateLimit();
   const hasLimit = Boolean(
     status
-    && status.mode !== 'off'
+    && status.enabled
     && status.limit !== null,
   );
   const limit = status?.limit ?? null;
@@ -87,11 +87,9 @@ function TtsUsageCard() {
                 <span>
                   {isAtLimit
                     ? 'New generation pauses at the next uncached segment.'
-                    : status.mode === 'observe' && usedPercent >= 100
-                      ? 'Threshold reached; generation continues in tracking mode.'
-                      : `${formatCharCount(status.remainingChars ?? 0)} characters remaining.`}
+                    : `${formatCharCount(status.remainingChars ?? 0)} characters remaining.`}
                 </span>
-                <span>{status.mode === 'observe' ? 'Tracking only' : `Resets in ${timeUntilReset}`}</span>
+                <span>Resets in {timeUntilReset}</span>
               </div>
             </div>
           ) : (

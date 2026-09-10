@@ -348,6 +348,12 @@ owns document/config inputs that are outside the media controller:
 - EPUB cursor-follow navigation guards.
 - Non-playback interaction busy state for navigation and settings changes.
 
+High-frequency projection is intentionally split out of that app-level context.
+`TTSPlaybackProgressContext` carries the media clock and generated-track layout
+only to the player, while `TTSHighlightContext` carries sentence/word projection
+only to the mounted reader surface. Timer ticks and segment-ready events therefore
+do not rerender reader pages, settings, export controls, or unrelated consumers.
+
 The exposed `isProcessing` value is derived from that interaction state plus the
 authoritative playback phase. The media controller does not maintain a second
 processing boolean, so a stale async callback cannot disagree with the playback
@@ -392,7 +398,10 @@ failure feedback rather than leaving the client indefinitely buffering.
 `usePlaybackForegroundSync` is the only client owner of worker cursor writes. It
 coalesces rapid updates to the newest ordinal, retargets the operation SSE from
 the cursor response, and uses the same writer for the foreground heartbeat and
-explicit seeks.
+explicit seeks. Distinct SSE progress snapshots request one whole-timeline read,
+which supplies both projection timing and seek-layout state. Reads run at a
+bounded four-per-second cadence with one trailing refresh, so cached-segment
+bursts cannot monopolize browser JSON parsing or React delivery.
 
 Full teardown has one entrypoint: `abortAudio` invalidates the active run,
 aborts session creation, stops recovery/foreground work, and resets the session

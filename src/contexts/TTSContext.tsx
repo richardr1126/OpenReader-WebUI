@@ -88,7 +88,7 @@ declare global {
 /**
  * Interface defining all available methods and properties in the TTS context
  */
-interface TTSContextType extends TTSPlaybackState {
+interface TTSContextType extends Omit<TTSPlaybackState, 'currentSentence' | 'currentSegment'> {
   // Voice settings
   voice: string;
   availableVoices: string[];
@@ -98,16 +98,9 @@ interface TTSContextType extends TTSPlaybackState {
   currentSentenceOrdinal: number | null;
   playbackPhase: TtsPlaybackPhase;
   audioSpeed: number;
-  playbackTimeSec: number;
-  playbackDurationSec: number;
-  playbackSeekLayout: TtsPlaybackSeekLayout | null;
   playbackPlanSegmentCount: number | null;
   resolveDocumentAudioExport: (options: { format: 'mp3' | 'm4b'; speed: number }, signal?: AbortSignal) => Promise<TtsDocumentAudioExportResolution>;
   startDocumentAudioExport: (options: { format: 'mp3' | 'm4b'; speed: number }, signal?: AbortSignal) => Promise<TtsDocumentAudioExportResolution>;
-
-  // Alignment metadata for the current sentence
-  currentSentenceAlignment?: TTSSentenceAlignment;
-  currentWordIndex?: number | null;
 
   // Control functions
   togglePlay: () => void;
@@ -143,8 +136,23 @@ interface TTSContextType extends TTSPlaybackState {
   activeReaderType: ReaderType;
 }
 
+type TTSPlaybackProgressContextType = {
+  playbackTimeSec: number;
+  playbackDurationSec: number;
+  playbackSeekLayout: TtsPlaybackSeekLayout | null;
+};
+
+type TTSHighlightContextType = {
+  currentSentence: string;
+  currentSegment?: CanonicalTtsSegment | null;
+  currentSentenceAlignment?: TTSSentenceAlignment;
+  currentWordIndex?: number | null;
+};
+
 // Create the context
 const TTSContext = createContext<TTSContextType | undefined>(undefined);
+const TTSPlaybackProgressContext = createContext<TTSPlaybackProgressContextType | undefined>(undefined);
+const TTSHighlightContext = createContext<TTSHighlightContextType | undefined>(undefined);
 
 /**
  * Main provider component that manages the TTS state and functionality.
@@ -624,20 +632,13 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
   const value = useMemo(() => ({
     isPlaying,
     isProcessing,
-    currentSentence,
-    currentSegment,
     sentences,
     currentSentenceOrdinal: selectedOrdinal,
     playbackPhase,
     audioSpeed,
-    playbackTimeSec,
-    playbackDurationSec: playbackSeekLayout ? playbackSeekLayout.durationMs / 1000 : 0,
-    playbackSeekLayout,
     playbackPlanSegmentCount: playbackPlan ? sentences.length : null,
     resolveDocumentAudioExport,
     startDocumentAudioExport,
-    currentSentenceAlignment,
-    currentWordIndex,
     currDocPage,
     currDocPageNumber,
     currDocPages,
@@ -670,12 +671,8 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
   }), [
     isPlaying,
     isProcessing,
-    currentSentence,
-    currentSegment,
     sentences,
-    playbackSeekLayout,
     playbackPlan,
-    playbackTimeSec,
     resolveDocumentAudioExport,
     startDocumentAudioExport,
     selectedOrdinal,
@@ -708,10 +705,19 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
     skipToLocation,
     registerLocationChangeHandler,
     setIsEPUB,
-    currentSentenceAlignment,
-    currentWordIndex,
     activeReaderType,
   ]);
+  const playbackProgressValue = useMemo(() => ({
+    playbackTimeSec,
+    playbackDurationSec: playbackSeekLayout ? playbackSeekLayout.durationMs / 1000 : 0,
+    playbackSeekLayout,
+  }), [playbackSeekLayout, playbackTimeSec]);
+  const highlightValue = useMemo(() => ({
+    currentSentence,
+    currentSegment,
+    currentSentenceAlignment,
+    currentWordIndex,
+  }), [currentSentence, currentSegment, currentSentenceAlignment, currentWordIndex]);
 
   // Use media session hook
   useMediaSession({
@@ -728,7 +734,11 @@ export function TTSProvider({ children }: { children: ReactNode }): ReactElement
    */
   return (
     <TTSContext.Provider value={value}>
-      {children}
+      <TTSPlaybackProgressContext.Provider value={playbackProgressValue}>
+        <TTSHighlightContext.Provider value={highlightValue}>
+          {children}
+        </TTSHighlightContext.Provider>
+      </TTSPlaybackProgressContext.Provider>
     </TTSContext.Provider>
   );
 }
@@ -744,6 +754,24 @@ export function useTTS() {
   const context = useContext(TTSContext);
   if (context === undefined) {
     throw new Error('useTTS must be used within a TTSProvider');
+  }
+  return context;
+}
+
+/** High-frequency media-clock and generated-track state, consumed only by the player. */
+export function useTTSPlaybackProgress() {
+  const context = useContext(TTSPlaybackProgressContext);
+  if (context === undefined) {
+    throw new Error('useTTSPlaybackProgress must be used within a TTSProvider');
+  }
+  return context;
+}
+
+/** Audio-clock projection consumed only by the mounted document surface. */
+export function useTTSHighlight() {
+  const context = useContext(TTSHighlightContext);
+  if (context === undefined) {
+    throw new Error('useTTSHighlight must be used within a TTSProvider');
   }
   return context;
 }

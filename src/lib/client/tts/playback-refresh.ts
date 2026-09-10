@@ -1,8 +1,34 @@
-/** Coalesce an event burst into one active read and one trailing read, never a queue per event. */
-export function createCoalescedPlaybackRefresh(refresh: (signal: AbortSignal) => Promise<unknown>) {
+/**
+ * Coalesce an event burst into one active read and one trailing read, never a
+ * queue per event. A minimum interval prevents a fast SSE producer from making
+ * whole-timeline JSON parsing a continuous main-thread task.
+ */
+export function createCoalescedPlaybackRefresh(
+  refresh: (signal: AbortSignal) => Promise<unknown>,
+  options?: { minIntervalMs?: number },
+) {
   const controller = new AbortController();
+  const minIntervalMs = Math.max(0, Math.floor(options?.minIntervalMs ?? 0));
   let running = false;
   let pending = false;
+  let lastStartedAt: number | null = null;
+  let waitTimer: ReturnType<typeof setTimeout> | null = null;
+  const waitForCadence = (): Promise<void> | null => {
+    const delayMs = lastStartedAt === null
+      ? 0
+      : Math.max(0, minIntervalMs - (Date.now() - lastStartedAt));
+    if (delayMs === 0 || controller.signal.aborted) return null;
+    return new Promise<void>((resolve) => {
+      const finish = () => {
+        if (waitTimer) clearTimeout(waitTimer);
+        waitTimer = null;
+        controller.signal.removeEventListener('abort', finish);
+        resolve();
+      };
+      waitTimer = setTimeout(finish, delayMs);
+      controller.signal.addEventListener('abort', finish, { once: true });
+    });
+  };
   const request = () => {
     if (controller.signal.aborted) return;
     pending = true;
@@ -12,6 +38,10 @@ export function createCoalescedPlaybackRefresh(refresh: (signal: AbortSignal) =>
       try {
         while (pending && !controller.signal.aborted) {
           pending = false;
+          const cadenceWait = waitForCadence();
+          if (cadenceWait) await cadenceWait;
+          if (controller.signal.aborted) break;
+          lastStartedAt = Date.now();
           await refresh(controller.signal).catch(() => undefined);
         }
       } finally {
@@ -19,7 +49,15 @@ export function createCoalescedPlaybackRefresh(refresh: (signal: AbortSignal) =>
       }
     })();
   };
-  return { request, stop: () => { pending = false; controller.abort(); } };
+  return {
+    request,
+    stop: () => {
+      pending = false;
+      controller.abort();
+      if (waitTimer) clearTimeout(waitTimer);
+      waitTimer = null;
+    },
+  };
 }
 
 /** Share in-flight timeline reads and prevent a late response from reviving an old playback run. */

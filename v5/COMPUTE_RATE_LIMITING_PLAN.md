@@ -1,6 +1,6 @@
 # Unified Compute Limiting Architecture
 
-Status: implemented on `feat/unified-compute-limits`; validation in progress.
+Status: implemented; direct admin controls replace the superseded rollout-mode UI.
 
 This document is the normative v5 plan for limiting user-initiated compute,
 metered TTS usage, provider throughput, queued work, and worker execution. It
@@ -26,8 +26,8 @@ enforcement mechanisms at the boundaries that own the relevant state:
   segment already exists.
 - Every limiting area and every compute action is independently configurable in
   **Settings -> Admin** and through the runtime seed JSON.
-- Policies support `off`, `observe`, and `enforce`. Observe mode records the
-  decision that would have been made but does not reject or defer work.
+- User and provider limits have a direct enabled switch. Enabled means enforced;
+  disabled means bypassed. Worker safety limits are always enforced.
 - Existing user usage is not migrated. Deploying this change intentionally
   gives every user a fresh allowance.
 - The obsolete `user_tts_chars` and `user_job_events` tables, their scheduled
@@ -161,11 +161,10 @@ types may use discriminated unions to make invalid metric combinations
 unrepresentable.
 
 ```ts
-type LimitMode = 'off' | 'observe' | 'enforce';
 type LimitScope = 'user' | 'anonymous_device' | 'ip' | 'site';
 
 interface ComputeLimitPolicyDocument {
-  schemaVersion: 1;
+  schemaVersion: 2;
   actions: Record<WorkerOperationAction, OperationActionPolicy> & {
     tts_synthesis: TtsSynthesisActionPolicy;
   };
@@ -194,7 +193,7 @@ interface AdmissionPolicy {
 }
 
 interface OperationActionPolicy {
-  mode: LimitMode;
+  enabled: boolean;
   admission: AdmissionPolicy;
   usage: [];
   execution: {
@@ -207,7 +206,7 @@ interface OperationActionPolicy {
 }
 
 interface TtsSynthesisActionPolicy {
-  mode: LimitMode;
+  enabled: boolean;
   admission: { windows: []; active: [] };
   usage: Array<{
     scope: LimitScope;
@@ -228,7 +227,7 @@ type WorkerResource =
   | 'archive_io';
 
 interface ProviderLimitPolicy {
-  mode: LimitMode;
+  enabled: boolean;
   maxConcurrent: number;
   requestsPerMinute: number;
   charactersPerMinute: number;
@@ -241,10 +240,10 @@ Validation requirements:
 - The document must contain exactly the supported schema version and action
   keys. Unknown actions and fields are rejected.
 - Every count, duration, and byte value is a bounded positive integer.
-- An action in `enforce` mode cannot omit every admission, usage, queue, and
-  execution constraint.
+- An enabled action cannot omit every admission, usage, queue, and execution
+  constraint.
 - `tts_synthesis` character usage must use `soft_unit`.
-- Version 1 rejects usage entries on other actions until that action wires a
+- Version 2 rejects usage entries on other actions until that action wires a
   concrete measured unit at its owning boundary; their admission boundaries
   are strict.
 - Anonymous-device scopes are valid only for actions reachable by anonymous
@@ -254,54 +253,43 @@ Validation requirements:
 - The worker total and resource limits must be internally possible; an action
   cannot request more units of a resource than the worker owns.
 
-### Initial defaults and migration behavior
+### Defaults and cutover behavior
 
-The initial policy should preserve the existing enabled/disabled choices and
-numeric configuration for the two currently configurable areas:
+- Every action has an explicit direct enabled state and editable numeric values.
+- The misleading PDF "sustained equals concurrency" interpretation is removed;
+  `pdf_layout` has a separate active limit.
+- Worker execution limits always enforce safe compiled defaults, even when user
+  request limits are disabled.
+- Existing usage counters are not migrated. Existing version 1 rollout-mode
+  policy documents are not interpreted as version 2 configuration.
 
-- `tts_synthesis` derives its initial mode and four daily thresholds from
-  `disableTtsRateLimit`, `ttsDailyLimitAnonymous`,
-  `ttsDailyLimitAuthenticated`, `ttsIpDailyLimitAnonymous`, and
-  `ttsIpDailyLimitAuthenticated`.
-- `pdf_layout` derives its initial mode and start windows from
-  `disableComputeRateLimit`, `computeParseBurstMax`,
-  `computeParseBurstWindowSec`, `computeParseSustainedMax`, and
-  `computeParseSustainedWindowSec`.
-- The misleading PDF "sustained equals concurrency" interpretation is removed.
-  `pdf_layout` receives a separate active limit.
-- Every other action receives an explicit policy. New user-impacting limits
-  begin in `observe` unless the owner selects `enforce` before merge.
-- Worker execution limits always enforce safe compiled defaults, even while
-  user policies are off or observing.
-
-The migration writes the new policy document once, preserving the source as
-`admin`, `json-seed`, or default where it can do so unambiguously, and deletes
-the superseded rows. Runtime code does not read legacy keys after migration.
+The original migration wrote the first policy document and removed superseded
+rows. The schema version 2 migration removes that v5-only rollout-mode setting
+so the maintained direct-control default or runtime seed becomes authoritative.
+Runtime code does not retain a compatibility path.
 
 Exact production numbers should be finalized using current operation timings;
 the architecture does not encode unexplained constants as product truth.
 
-To keep implementation unblocked, use the following bootstrap policies. Values
-migrated from existing TTS/PDF administrator settings replace the matching
-bootstrap values. The remaining user-facing policies start in observe mode so
-their telemetry is available immediately without unexpectedly rejecting a v4
-workflow.
+The maintained bootstrap policy enables limits for expensive standalone work.
+Playback session and plan admission remain disabled by default so admission
+cannot block access to cached audio; uncached synthesis is independently
+limited at the segment boundary.
 
-| Action | Initial mode | User admission windows | User active | Site active | Queue / per-worker concurrent |
+| Action | Enabled by default | User admission windows | User active | Site active | Queue / per-worker concurrent |
 | --- | --- | --- | ---: | ---: | --- |
-| `tts_playback` | observe | 12 / 60 seconds; 60 / hour | 2 | 50 | 100 / 1 |
-| `tts_playback_plan` | observe | 12 / 60 seconds; 60 / hour | 2 | 20 | 100 / 1 |
-| `pdf_layout` | migrated, otherwise off | 8 / 60 seconds; 24 / 600 seconds | 1 | 8 | 50 / 1 |
-| `tts_playback_export` | observe | 2 / 600 seconds; 6 / day | 1 | 4 | 20 / 1 |
-| `document_preview` | observe | 30 / 600 seconds; 200 / day | 4 | 20 | 200 / 1 |
-| `document_conversion` | observe | 4 / 600 seconds; 20 / day | 1 | 8 | 50 / 1 |
-| `account_export` | observe | 2 / hour; 4 / day | 1 | 4 | 20 / 1 |
+| `tts_playback` | no | 12 / 60 seconds; 60 / hour | 2 | 50 | 100 / 1 |
+| `tts_playback_plan` | no | 12 / 60 seconds; 60 / hour | 2 | 20 | 100 / 1 |
+| `pdf_layout` | yes | 8 / 60 seconds; 24 / 600 seconds | 1 | 8 | 50 / 1 |
+| `tts_playback_export` | yes | 2 / 600 seconds; 6 / day | 1 | 4 | 20 / 1 |
+| `document_preview` | yes | 30 / 600 seconds; 200 / day | 4 | 20 | 200 / 1 |
+| `document_conversion` | yes | 4 / 600 seconds; 20 / day | 1 | 8 | 50 / 1 |
+| `account_export` | yes | 2 / hour; 4 / day | 1 | 4 | 20 / 1 |
 
-`tts_synthesis` initially inherits its mode and daily character thresholds from
-the old TTS settings. With no migrated setting, it is off and uses these values
-when enabled: anonymous user 50,000; authenticated user 500,000; anonymous IP
-100,000; authenticated IP 1,000,000. Anonymous-device scope uses the anonymous
-user threshold. All use the approved `soft_unit` boundary.
+`tts_synthesis` is enabled by default with these daily thresholds: anonymous
+user 50,000; authenticated user 500,000; anonymous IP 100,000; authenticated IP
+1,000,000. Anonymous-device scope uses the anonymous user threshold. All use
+the approved `soft_unit` boundary.
 
 Bootstrap worker execution values are deliberately close to the effective
 three-family behavior of the current default without retaining three unrelated
@@ -318,10 +306,9 @@ archive_io                  2
 ```
 
 Every operation kind starts with `maxConcurrentPerWorker = 1`. Provider limits
-start in observe mode with one concurrent request, 60 requests/minute, 100,000
-characters/minute, and a 30-second maximum wait. These are safe bootstrap and
-measurement values, not claims about every provider. Admins should enforce a
-provider default or override only after matching it to their service plan.
+are enabled with one concurrent request, 60 requests/minute, 100,000
+characters/minute, and a 30-second maximum wait. Admins should customize the
+default or a named override to match their service plan.
 
 ---
 
@@ -333,11 +320,10 @@ continuing the old mixed TTS/PDF controls.
 It contains:
 
 - A policy card for every `ComputeAction`.
-- Independent `off` / `observe` / `enforce` mode controls.
-- A compact summary of each action's configured constraints and worker limit.
-- A validated advanced policy editor covering admission windows, active limits,
-  usage allowances, queues, concurrency, priorities, queue age, resources,
-  worker totals, and provider defaults/overrides.
+- A direct enabled switch for every user and provider limiting area.
+- Named numeric controls for admission windows, active limits, usage
+  allowances, queues, concurrency, priorities, queue age, worker totals,
+  resources, and provider defaults/overrides.
 - A concise explanation that the TTS character value is a soft per-segment
   threshold and cached segments are free.
 - One clear validation error prevents an incomplete or cross-field-invalid
@@ -404,9 +390,11 @@ set of worker environment variables.
   thread counts that are fixed when a model session is created apply on the next
   model load or worker restart and are labeled accordingly in the UI.
 
-`COMPUTE_JOB_CONCURRENCY` is removed once the admin policy owns all worker and
-per-action concurrency. Environment, Compose, bootstrap, docs, and tests must be
-updated in the same change.
+`COMPUTE_JOB_CONCURRENCY` is removed because the admin policy owns all worker
+and per-action concurrency. Environment, Compose, bootstrap, docs, tests, and
+worker-loop inputs use that policy as their single source of truth. The worker
+derives its protective ONNX thread budget from the policy's worker-wide limit;
+it is not a second operator setting.
 
 ---
 
@@ -601,11 +589,9 @@ finishAdmission(input): Promise<void>;
 consumeComputeUsage(input): Promise<UsageDecision>;
 ```
 
-An admission database failure has policy-dependent behavior:
-
-- `enforce`: fail closed with a retryable 503 before creating work.
-- `observe`: log the failed observation and allow creation.
-- `off`: do not touch limiter tables.
+An admission database failure for an enabled limit fails closed with a
+retryable 503 before creating work. A disabled request limit does not touch
+counter buckets.
 
 Background preview denial does not fail the document upload. It leaves preview
 state pending/deferred so the normal on-demand ensure path can try later.
@@ -818,14 +804,13 @@ reveal HMAC scope keys, other users, site-provider details, or raw IPs.
 
 The status read model includes:
 
-- action and mode;
+- action and enabled state;
 - binding scope label without its identifier;
 - metric, used, threshold/cap, remaining, and reset time;
 - active used/limit;
-- whether a result is observed-only;
 - TTS-specific wording that its character value is a soft threshold;
-- no fake `Number.MAX_SAFE_INTEGER` values when a policy is off; use an explicit
-  mode and nullable limit instead.
+- no fake `Number.MAX_SAFE_INTEGER` values when a policy is disabled; use an
+  explicit enabled state and nullable limit instead.
 
 All rejections use `application/problem+json` and a truthful HTTP status:
 
@@ -839,8 +824,8 @@ policy version, queue depth, wait time, and reason code. User ids, provider keys
 IP addresses, device identifiers, and credentials are absent or hashed using the
 existing logging policy.
 
-Observe mode emits the same decision telemetry with `enforced: false`. This is
-how new default numbers are validated before enforcement.
+Structured decisions are emitted for allowed and rejected enabled limits. A
+disabled limit does not create misleading counter demand.
 
 ---
 
@@ -949,7 +934,7 @@ Acceptance:
 
 Acceptance:
 
-- Every operation kind has an integration test for allowed, observed, denied,
+- Every operation kind has an integration test for enabled, disabled, denied,
   reused, worker-failed, and active-limit behavior as applicable.
 - Reused artifacts and operations do not consume active capacity.
 - Preview denial does not fail upload.
@@ -979,7 +964,8 @@ Acceptance:
 - Acquire capacity before pulling work.
 - Add queue bounds, queue age, diagnostics, and policy refresh.
 - Add distributed per-provider rate/concurrency coordination and 429 cooldown.
-- Remove `COMPUTE_JOB_CONCURRENCY` and its ONNX coupling.
+- Remove `COMPUTE_JOB_CONCURRENCY`; derive the ONNX thread budget from the
+  policy-owned worker limit.
 
 Acceptance:
 

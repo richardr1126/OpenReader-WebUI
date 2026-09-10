@@ -6,9 +6,9 @@ OpenReader uses one versioned policy document for user admission, metered TTS us
 
 ## Covered work
 
-The policy has independently configurable entries for PDF layout analysis, live TTS playback, TTS plan creation, audiobook assembly, document previews, document conversion, account export, and TTS segment synthesis. Each action can be `off`, `observe`, or `enforce`.
+The policy has independently configurable entries for PDF layout analysis, live TTS playback, TTS plan creation, audiobook assembly, document previews, document conversion, account export, and TTS segment synthesis. Each user or provider limit has a direct enabled switch: enabled limits enforce their configured values, while disabled limits are bypassed.
 
-The complete policy is available in **Settings → Admin → Site features → Rate limiting**. Action modes have quick controls. The advanced editor exposes every admission window, active lease, usage threshold, queue, resource, worker, and provider value and validates the complete document before saving.
+The complete policy is available in **Settings → Admin → Site features → Rate limiting**. The form exposes every admission window, active lease, usage threshold, queue, worker resource, and provider capacity value. Named provider overrides can be added for different service plans.
 
 ## TTS character thresholds
 
@@ -31,6 +31,7 @@ Users can see their generated-character usage and reset timing in **Settings →
 - Worker concurrency, per-action queues, priorities, and named CPU/model/FFmpeg/LibreOffice/archive resources protect each worker.
 - Provider concurrency and rolling request/character limits are coordinated across worker replicas through JetStream KV.
 - Provider `429 Retry-After` responses cool down that provider's shared capacity bucket.
+- Live playback-session and plan admission limits are disabled by default so they cannot block cached audio. The separate new-generation character limits still stop uncached provider work.
 
 The application owns SQL admission and usage decisions. The worker owns local execution scheduling and provider capacity. No database two-phase commit is used.
 

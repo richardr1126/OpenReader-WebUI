@@ -6,7 +6,7 @@ import { useDocuments } from '@/contexts/DocumentContext';
 import { useAuthSession } from '@/hooks/useAuthSession';
 import { useFolders } from '@/hooks/useFolders';
 import { useUserPreferences } from '@/hooks/useUserPreferences';
-import type { PreferencesResponse } from '@/lib/client/api/user-state';
+import { putUserPreferences, type PreferencesResponse } from '@/lib/client/api/user-state';
 import { queryKeys } from '@/lib/client/query-keys';
 import type { DocumentListDocument } from '@/types/documents';
 import type { UploadBatchState } from '@/components/documents/DocumentUploader';
@@ -82,6 +82,25 @@ export function useDocumentListController() {
     });
   }, [persistPreferences, preferencesKey, queryClient]);
 
+  const persistLatestListStateOnUnmount = useCallback(() => {
+    const latest = queryClient.getQueryData<PreferencesResponse>(preferencesKey);
+    const patch = {
+      documentListState: serializeDocumentListState(
+        normalizeDocumentListState(latest?.preferences?.documentListState),
+      ),
+    };
+    // A scoped React Query mutation created during unmount can remain paused
+    // after its observer disappears, which blocks the next route's preference
+    // writes behind it. Start this final best-effort write directly and let the
+    // server timestamp ordering resolve it against newer changes.
+    void putUserPreferences(patch, {
+      clientUpdatedAtMs: Math.max(Date.now(), Number(latest?.clientUpdatedAtMs ?? 0) + 1),
+      keepalive: true,
+    }).catch((error) => {
+      console.error('Failed to persist document-list preferences during navigation:', error);
+    });
+  }, [preferencesKey, queryClient]);
+
   const updateListState = useCallback((
     patch: Partial<NormalizedDocumentListState>,
     persistImmediately = false,
@@ -113,8 +132,8 @@ export function useDocumentListController() {
     if (!preferenceWriteTimer.current) return;
     clearTimeout(preferenceWriteTimer.current);
     preferenceWriteTimer.current = null;
-    persistLatestListState();
-  }, [persistLatestListState]);
+    persistLatestListStateOnUnmount();
+  }, [persistLatestListStateOnUnmount]);
 
   useEffect(() => {
     if (isNarrow) setMobileSidebarOpen(false);

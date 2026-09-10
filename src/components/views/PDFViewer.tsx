@@ -5,7 +5,7 @@ import { Document, Page } from 'react-pdf';
 import type { Dest } from 'react-pdf/src/shared/types.js';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
-import { useTTS } from '@/contexts/TTSContext';
+import { useTTS, useTTSHighlight } from '@/contexts/TTSContext';
 import { useConfig } from '@/contexts/ConfigContext';
 import { usePDFResize } from '@/hooks/pdf/usePDFResize';
 import type { PdfDocumentState } from '@/app/(app)/pdf/[id]/usePdfDocument';
@@ -58,15 +58,17 @@ export function PDFViewer({ zoomLevel, onReady, onError, pdfState }: PDFViewerPr
 
   // TTS context
   const {
-    currentSentence,
-    currentWordIndex,
-    currentSentenceAlignment,
-    currentSegment,
     skipToLocation,
     resolvedLanguage,
     playbackPlanReady,
     playbackPlanSegmentCount,
   } = useTTS();
+  const {
+    currentSentence,
+    currentWordIndex,
+    currentSentenceAlignment,
+    currentSegment,
+  } = useTTSHighlight();
 
   const {
     highlightPattern,

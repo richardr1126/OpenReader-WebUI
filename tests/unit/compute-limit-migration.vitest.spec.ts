@@ -2,10 +2,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { describe, expect, test } from 'vitest';
-import { parseComputeLimitPolicyDocument } from '@openreader/runtime-config/compute-limits';
 
 describe('unified compute-limit migration', () => {
-  test('preserves legacy admin choices while resetting usage tables', () => {
+  test('retires legacy settings and usage tables and resets the superseded policy shape', () => {
     const sqlite = new Database(':memory:');
     sqlite.exec(`
       CREATE TABLE user (id text PRIMARY KEY);
@@ -41,6 +40,7 @@ describe('unified compute-limit migration', () => {
     for (const migrationName of [
       '0017_unified_compute_limits.sql',
       '0018_persist_admission_active_scopes.sql',
+      '0019_reset_compute_limit_policy.sql',
     ]) {
       const migration = fs.readFileSync(path.resolve(
         'packages/database/migrations/sqlite',
@@ -49,20 +49,9 @@ describe('unified compute-limit migration', () => {
       sqlite.exec(migration);
     }
 
-    const row = sqlite.prepare(
-      "SELECT value_json FROM admin_settings WHERE key = 'computeLimitPolicies'",
-    ).get() as { value_json: string };
-    const policy = parseComputeLimitPolicyDocument(JSON.parse(row.value_json));
-    expect(policy).toBeDefined();
-    expect(policy?.actions.tts_synthesis.mode).toBe('enforce');
-    expect(policy?.actions.tts_synthesis.usage.map((limit) => limit.limit)).toEqual([
-      12345, 23456, 12345, 34567, 45678,
-    ]);
-    expect(policy?.actions.pdf_layout.mode).toBe('enforce');
-    expect(policy?.actions.pdf_layout.admission.windows).toEqual([
-      { scope: 'user', limit: 3, windowSeconds: 45 },
-      { scope: 'user', limit: 9, windowSeconds: 450 },
-    ]);
+    expect(sqlite.prepare(
+      "SELECT count(*) AS count FROM admin_settings WHERE key = 'computeLimitPolicies'",
+    ).get()).toEqual({ count: 0 });
     expect(sqlite.prepare(
       "SELECT count(*) AS count FROM admin_settings WHERE key = 'disableTtsRateLimit'",
     ).get()).toEqual({ count: 0 });

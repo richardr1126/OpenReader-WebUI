@@ -385,6 +385,10 @@ describe('server-state architecture', () => {
     const playbackGrid = source('src/lib/client/tts/playback-grid.ts');
     const playbackModel = source('src/hooks/audio/useTtsPlaybackModel.ts');
     const ttsApi = source('src/lib/client/api/tts.ts');
+    const ttsPlayer = source('src/components/player/TTSPlayer.tsx');
+    const pdfViewer = source('src/components/views/PDFViewer.tsx');
+    const epubViewer = source('src/components/views/EPUBViewer.tsx');
+    const htmlViewer = source('src/components/views/HTMLViewer.tsx');
     const pdfPage = source('src/app/(app)/pdf/[id]/page.tsx');
     expect(playbackHook).toContain('createTtsPlaybackSession');
     expect(planController).not.toContain('createTtsPlaybackPlan');
@@ -580,6 +584,14 @@ describe('server-state architecture', () => {
     expect(streamSessionRoute).toContain('TTS_PLAYBACK_AHEAD_WINDOW');
     expect(streamSessionRoute).toContain('backgroundExtent');
     expect(playbackForegroundSync).toContain('subscribeTtsPlaybackEvents');
+    expect(playbackForegroundSync).toContain('{ minIntervalMs: 250 }');
+    expect(playbackForegroundSync).not.toContain('getTtsPlaybackSeekLayout');
+    expect(context).toContain('TTSPlaybackProgressContext.Provider');
+    expect(context).toContain('TTSHighlightContext.Provider');
+    expect(ttsPlayer).toContain('useTTSPlaybackProgress()');
+    expect(pdfViewer).toContain('useTTSHighlight()');
+    expect(epubViewer).toContain('useTTSHighlight()');
+    expect(htmlViewer).toContain('useTTSHighlight()');
     expect(playbackHook).toContain('usePlaybackSeek');
     expect(playbackForegroundSync).toContain('updateWorkerPlaybackCursor');
     expect(playbackSeek).not.toContain('postTtsPlaybackCursor');
@@ -664,7 +676,6 @@ describe('server-state architecture', () => {
     expect(documentNavigation).toContain('if (!preservePlaybackCursor) {');
     expect(documentNavigation).toContain('setSelectedOrdinal(resolution.ordinal)');
     expect(documentNavigation).toContain('syncActivePlaybackToOrdinal(resolution.ordinal)');
-    const epubViewer = source('src/components/views/EPUBViewer.tsx');
     expect(epubViewer).toContain('refreshRenderedPlacement({ preservePlaybackCursor: true })');
     expect(epubViewer).not.toContain('pause();\n      void refreshRenderedPlacement');
     expect(planController).toContain('setSelectedOrdinal(null)');

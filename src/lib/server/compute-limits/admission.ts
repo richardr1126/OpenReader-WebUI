@@ -36,8 +36,6 @@ export interface ComputeAdmissionDecision {
   admissionId: string | null;
   state: ComputeAdmissionState | null;
   idempotent: boolean;
-  observedOnly: boolean;
-  wouldDeny: boolean;
   retryAfterMs: number;
 }
 
@@ -186,8 +184,6 @@ export async function reserveComputeAdmission(input: {
       admissionId: existing.id,
       state: existing.state,
       idempotent: true,
-      observedOnly: false,
-      wouldDeny: false,
       retryAfterMs: 0,
     };
   }
@@ -228,10 +224,9 @@ export async function reserveComputeAdmission(input: {
       limit: activePolicy.limit,
     });
   }
-  const activeScopesJson = JSON.stringify(actionPolicy.mode === 'off' ? [] : counters
+  const activeScopesJson = JSON.stringify(!actionPolicy.enabled ? [] : counters
     .filter((counter) => counter.metric === 'active')
     .map(({ scope, scopeKey }) => ({ scope, scopeKey })));
-  let wouldDeny = false;
   try {
     await runInDbTransaction(async (conn) => {
       const matchingRows = await conn.select({
@@ -298,7 +293,7 @@ export async function reserveComputeAdmission(input: {
       });
       if (rowsAffected(inserted) === 0) return;
 
-      if (actionPolicy.mode === 'off') return;
+      if (!actionPolicy.enabled) return;
       for (const counter of counters) {
         await conn.insert(computeLimitBuckets).values({
           scopeType: counter.scope,
@@ -328,11 +323,9 @@ export async function reserveComputeAdmission(input: {
         const incrementCounter = () => conn.update(computeLimitBuckets).set({
           used: sql`${computeLimitBuckets.used} + 1`,
           updatedAt: nowMs,
-        }).where(actionPolicy.mode === 'enforce'
-          ? and(baseWhere, sql`${computeLimitBuckets.used} < ${counter.limit}`)
-          : baseWhere);
+        }).where(and(baseWhere, sql`${computeLimitBuckets.used} < ${counter.limit}`));
         let updated = await incrementCounter();
-        if (rowsAffected(updated) === 0 && counter.metric === 'active' && actionPolicy.mode === 'enforce') {
+        if (rowsAffected(updated) === 0 && counter.metric === 'active') {
           await reconcileExpiredAdmissions(
             conn,
             input.action,
@@ -343,17 +336,10 @@ export async function reserveComputeAdmission(input: {
           updated = await incrementCounter();
         }
         if (rowsAffected(updated) === 0) {
-          wouldDeny = true;
-          if (actionPolicy.mode === 'enforce') {
-            const retryAfterMs = counter.metric === 'starts'
-              ? Math.max(0, counter.windowEnd - nowMs)
-              : leaseSeconds * 1000;
-            throw new AdmissionDenied(retryAfterMs);
-          }
-        } else if (actionPolicy.mode === 'observe') {
-          const rows = await conn.select({ used: computeLimitBuckets.used })
-            .from(computeLimitBuckets).where(baseWhere).limit(1);
-          if (Number(rows[0]?.used ?? 0) > counter.limit) wouldDeny = true;
+          const retryAfterMs = counter.metric === 'starts'
+            ? Math.max(0, counter.windowEnd - nowMs)
+            : leaseSeconds * 1000;
+          throw new AdmissionDenied(retryAfterMs);
         }
       }
     });
@@ -364,8 +350,6 @@ export async function reserveComputeAdmission(input: {
       admissionId: null,
       state: null,
       idempotent: false,
-      observedOnly: false,
-      wouldDeny: true,
       retryAfterMs: error.retryAfterMs,
     };
   }
@@ -376,8 +360,6 @@ export async function reserveComputeAdmission(input: {
     admissionId: resolved?.id ?? admissionId,
     state: resolved?.state ?? 'reserved',
     idempotent: resolved?.id !== admissionId,
-    observedOnly: actionPolicy.mode === 'observe',
-    wouldDeny,
     retryAfterMs: 0,
   };
 }

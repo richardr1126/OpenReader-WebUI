@@ -17,14 +17,14 @@ export async function GET(req: NextRequest) {
   try {
     const runtimeConfig = await getResolvedRuntimeConfig();
     const policy = runtimeConfig.computeLimitPolicies;
-    const mode = policy.actions.tts_synthesis.mode;
+    const enabled = policy.actions.tts_synthesis.enabled;
     const session = await auth.api.getSession({ headers: await headers() });
     if (!session?.user) {
       const nominal = applicableUsageLimits(policy, 'tts_synthesis', {
         userId: 'unavailable',
         isAnonymous: true,
       }).find((limit) => limit.scope === 'user');
-      const limit = mode === 'off' ? null : nominal?.limit ?? null;
+      const limit = enabled ? nominal?.limit ?? null : null;
       return NextResponse.json({
         allowed: true,
         currentCount: 0,
@@ -32,12 +32,12 @@ export async function GET(req: NextRequest) {
         remainingChars: limit,
         resetTimeMs: nextUtcMidnightTimestampMs(),
         userType: 'unauthenticated',
-        mode,
+        enabled,
       }, { headers: NO_STORE_HEADERS });
     }
 
     const isAnonymous = Boolean((session.user as { isAnonymous?: boolean }).isAnonymous);
-    const device = mode === 'off' || !isAnonymous ? null : getOrCreateDeviceId(req);
+    const device = !enabled || !isAnonymous ? null : getOrCreateDeviceId(req);
     const decision = await getComputeUsage({
       policy,
       action: 'tts_synthesis',
@@ -60,7 +60,7 @@ export async function GET(req: NextRequest) {
       remainingChars: binding?.remaining ?? null,
       resetTimeMs: binding?.resetAt ?? nextUtcMidnightTimestampMs(),
       userType: isAnonymous ? 'anonymous' : 'authenticated',
-      mode,
+      enabled,
     }, { headers: NO_STORE_HEADERS });
     if (device?.didCreate) setDeviceIdCookie(response, device.deviceId);
     return response;

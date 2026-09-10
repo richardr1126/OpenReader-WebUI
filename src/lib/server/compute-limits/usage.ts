@@ -27,7 +27,6 @@ export interface ComputeUsageDecision {
   allowed: boolean;
   charged: boolean;
   idempotent: boolean;
-  observedOnly: boolean;
   buckets: ComputeUsageBucketResult[];
   retryAfterMs: number;
 }
@@ -118,24 +117,22 @@ export async function getComputeUsage(input: {
 }): Promise<ComputeUsageDecision> {
   const nowMs = input.nowMs ?? Date.now();
   const actionPolicy = input.policy.actions[input.action];
-  if (actionPolicy.mode === 'off') {
+  if (!actionPolicy.enabled) {
     return {
       allowed: true,
       charged: false,
       idempotent: false,
-      observedOnly: false,
       buckets: [],
       retryAfterMs: 0,
     };
   }
   const limits = resolveLimits({ ...input, nowMs });
   const buckets = await readBuckets(input.action, input.metric, limits);
-  const denied = actionPolicy.mode === 'enforce' && buckets.some((bucket) => bucket.used >= bucket.limit);
+  const denied = buckets.some((bucket) => bucket.used >= bucket.limit);
   return {
     allowed: !denied,
     charged: false,
     idempotent: false,
-    observedOnly: actionPolicy.mode === 'observe',
     buckets,
     retryAfterMs: denied ? Math.max(0, Math.min(...buckets
       .filter((bucket) => bucket.used >= bucket.limit)
@@ -166,12 +163,11 @@ export async function consumeComputeUsage(input: {
   }
   const nowMs = input.nowMs ?? Date.now();
   const actionPolicy = input.policy.actions[input.action];
-  if (actionPolicy.mode === 'off') {
+  if (!actionPolicy.enabled) {
     return {
       allowed: true,
       charged: false,
       idempotent: false,
-      observedOnly: false,
       buckets: [],
       retryAfterMs: 0,
     };
@@ -182,7 +178,6 @@ export async function consumeComputeUsage(input: {
       allowed: true,
       charged: false,
       idempotent: false,
-      observedOnly: actionPolicy.mode === 'observe',
       buckets: [],
       retryAfterMs: 0,
     };
@@ -232,12 +227,10 @@ export async function consumeComputeUsage(input: {
         const updated = await conn.update(computeLimitBuckets).set({
           used: sql`${computeLimitBuckets.used} + ${input.units}`,
           updatedAt: nowMs,
-        }).where(actionPolicy.mode === 'enforce'
-          ? and(baseWhere, limit.boundary === 'soft_unit'
-            ? sql`${computeLimitBuckets.used} < ${limit.limit}`
-            : sql`${computeLimitBuckets.used} + ${input.units} <= ${limit.limit}`)
-          : baseWhere);
-        if (actionPolicy.mode === 'enforce' && rowsAffected(updated) === 0) {
+        }).where(and(baseWhere, limit.boundary === 'soft_unit'
+          ? sql`${computeLimitBuckets.used} < ${limit.limit}`
+          : sql`${computeLimitBuckets.used} + ${input.units} <= ${limit.limit}`));
+        if (rowsAffected(updated) === 0) {
           throw new ComputeUsageDenied(Math.max(0, limit.windowEnd - nowMs));
         }
       }

@@ -28,8 +28,6 @@ describe('admitted compute operation creation', () => {
       admissionId: 'admission-1',
       state: 'reserved',
       idempotent: false,
-      observedOnly: false,
-      wouldDeny: false,
       retryAfterMs: 0,
     });
     admissionMocks.activate.mockReset().mockResolvedValue(undefined);

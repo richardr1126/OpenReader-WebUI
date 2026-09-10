@@ -11,7 +11,6 @@ export const COMPUTE_ACTIONS = [
 
 export type ComputeAction = typeof COMPUTE_ACTIONS[number];
 export type WorkerOperationAction = Exclude<ComputeAction, 'tts_synthesis'>;
-export type ComputeLimitMode = 'off' | 'observe' | 'enforce';
 export type ComputeLimitScope = 'user' | 'anonymous_device' | 'ip' | 'site';
 export type ComputeLimitAudience = 'anonymous' | 'authenticated' | 'all';
 export type ComputeUsageMetric = 'starts' | 'characters' | 'input_bytes' | 'files';
@@ -60,7 +59,7 @@ export interface ComputeExecutionPolicy {
 }
 
 export interface ComputeActionPolicy {
-  mode: ComputeLimitMode;
+  enabled: boolean;
   admission: {
     windows: ComputeAdmissionWindowPolicy[];
     active: ComputeActiveLimitPolicy[];
@@ -70,7 +69,7 @@ export interface ComputeActionPolicy {
 }
 
 export interface ProviderLimitPolicy {
-  mode: ComputeLimitMode;
+  enabled: boolean;
   maxConcurrent: number;
   requestsPerMinute: number;
   charactersPerMinute: number;
@@ -78,7 +77,7 @@ export interface ProviderLimitPolicy {
 }
 
 export interface ComputeLimitPolicyDocument {
-  schemaVersion: 1;
+  schemaVersion: 2;
   actions: Record<ComputeAction, ComputeActionPolicy>;
   worker: {
     maxExecutingPerWorker: number;
@@ -117,7 +116,7 @@ const admission = (
 });
 
 const providerDefaults: ProviderLimitPolicy = {
-  mode: 'observe',
+  enabled: true,
   maxConcurrent: 1,
   requestsPerMinute: 60,
   charactersPerMinute: 100_000,
@@ -125,52 +124,54 @@ const providerDefaults: ProviderLimitPolicy = {
 };
 
 export const DEFAULT_COMPUTE_LIMIT_POLICIES: ComputeLimitPolicyDocument = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   actions: {
     pdf_layout: {
-      mode: 'off',
+      enabled: true,
       admission: admission([[8, 60], [24, 600]], 1, 8, 24 * 60 * 60),
       usage: [],
       execution: execution('foreground', 50, { cpu_heavy: 1, model_inference: 1 }),
     },
     tts_playback: {
-      mode: 'observe',
+      // Playback sessions remain available for cached audio. Uncached segments
+      // are limited independently by tts_synthesis.
+      enabled: false,
       admission: admission([[12, 60], [60, 3600]], 2, 50, 30 * 60),
       usage: [],
       execution: execution('interactive', 100, {}),
     },
     tts_playback_plan: {
-      mode: 'observe',
+      enabled: false,
       admission: admission([[12, 60], [60, 3600]], 2, 20, 30 * 60),
       usage: [],
       execution: execution('foreground', 100, {}),
     },
     tts_playback_export: {
-      mode: 'observe',
+      enabled: true,
       admission: admission([[2, 600], [6, 86400]], 1, 4, 2 * 60 * 60),
       usage: [],
       execution: execution('foreground', 20, { ffmpeg: 1, archive_io: 1 }),
     },
     document_preview: {
-      mode: 'observe',
+      enabled: true,
       admission: admission([[30, 600], [200, 86400]], 4, 20, 30 * 60),
       usage: [],
       execution: execution('background', 200, { cpu_heavy: 1 }),
     },
     document_conversion: {
-      mode: 'observe',
+      enabled: true,
       admission: admission([[4, 600], [20, 86400]], 1, 8, 10 * 60),
       usage: [],
       execution: execution('foreground', 50, { cpu_heavy: 1, libreoffice: 1 }),
     },
     account_export: {
-      mode: 'observe',
+      enabled: true,
       admission: admission([[2, 3600], [4, 86400]], 1, 4, 2 * 60 * 60),
       usage: [],
       execution: execution('background', 20, { archive_io: 1 }),
     },
     tts_synthesis: {
-      mode: 'off',
+      enabled: true,
       admission: { windows: [], active: [] },
       usage: [
         { scope: 'user', audience: 'anonymous', metric: 'characters', window: 'utc_day', limit: 50_000, boundary: 'soft_unit' },
@@ -209,9 +210,6 @@ const hasExactKeys = (record: Record<string, unknown>, allowed: readonly string[
   const keys = Object.keys(record);
   return keys.length === allowed.length && keys.every((key) => allowed.includes(key));
 };
-
-const isMode = (value: unknown): value is ComputeLimitMode =>
-  value === 'off' || value === 'observe' || value === 'enforce';
 
 const isScope = (value: unknown): value is ComputeLimitScope =>
   value === 'user' || value === 'anonymous_device' || value === 'ip' || value === 'site';
@@ -277,9 +275,9 @@ function parseExecution(value: unknown): ComputeExecutionPolicy | null {
 
 function parseActionPolicy(action: ComputeAction, value: unknown): ComputeActionPolicy | null {
   if (!isRecord(value) || !hasExactKeys(value, action === 'tts_synthesis'
-    ? ['mode', 'admission', 'usage']
-    : ['mode', 'admission', 'usage', 'execution'])) return null;
-  if (!isMode(value.mode) || !isRecord(value.admission)
+    ? ['enabled', 'admission', 'usage']
+    : ['enabled', 'admission', 'usage', 'execution'])) return null;
+  if (typeof value.enabled !== 'boolean' || !isRecord(value.admission)
     || !hasExactKeys(value.admission, ['windows', 'active'])
     || !Array.isArray(value.admission.windows)
     || !Array.isArray(value.admission.active)
@@ -292,7 +290,7 @@ function parseActionPolicy(action: ComputeAction, value: unknown): ComputeAction
     if (windows.length > 0 || active.length > 0 || usage.length === 0
       || usage.some((entry) => entry?.metric !== 'characters' || entry.boundary !== 'soft_unit')) return null;
     return {
-      mode: value.mode,
+      enabled: value.enabled,
       admission: { windows: [], active: [] },
       usage: usage as ComputeUsageLimitPolicy[],
     };
@@ -303,7 +301,7 @@ function parseActionPolicy(action: ComputeAction, value: unknown): ComputeAction
   // correctly measured usage unit is wired at their owning boundary.
   if (!parsedExecution || usage.length > 0) return null;
   return {
-    mode: value.mode,
+    enabled: value.enabled,
     admission: {
       windows: windows as ComputeAdmissionWindowPolicy[],
       active: active as ComputeActiveLimitPolicy[],
@@ -315,15 +313,15 @@ function parseActionPolicy(action: ComputeAction, value: unknown): ComputeAction
 
 function parseProviderLimit(value: unknown): ProviderLimitPolicy | null {
   if (!isRecord(value) || !hasExactKeys(value, [
-    'mode', 'maxConcurrent', 'requestsPerMinute', 'charactersPerMinute', 'maxWaitSeconds',
+    'enabled', 'maxConcurrent', 'requestsPerMinute', 'charactersPerMinute', 'maxWaitSeconds',
   ])) return null;
-  if (!isMode(value.mode)
+  if (typeof value.enabled !== 'boolean'
     || !isPositiveInt(value.maxConcurrent)
     || !isPositiveInt(value.requestsPerMinute)
     || !isPositiveInt(value.charactersPerMinute)
     || !isPositiveInt(value.maxWaitSeconds)) return null;
   return {
-    mode: value.mode,
+    enabled: value.enabled,
     maxConcurrent: value.maxConcurrent,
     requestsPerMinute: value.requestsPerMinute,
     charactersPerMinute: value.charactersPerMinute,
@@ -333,7 +331,7 @@ function parseProviderLimit(value: unknown): ProviderLimitPolicy | null {
 
 export function parseComputeLimitPolicyDocument(value: unknown): ComputeLimitPolicyDocument | undefined {
   if (!isRecord(value) || !hasExactKeys(value, ['schemaVersion', 'actions', 'worker', 'providers'])
-    || value.schemaVersion !== 1 || !isRecord(value.actions)
+    || value.schemaVersion !== 2 || !isRecord(value.actions)
     || !hasExactKeys(value.actions, COMPUTE_ACTIONS) || !isRecord(value.worker)
     || !hasExactKeys(value.worker, ['maxExecutingPerWorker', 'resources', 'policyRefreshSeconds'])
     || !isPositiveInt(value.worker.maxExecutingPerWorker)
@@ -376,7 +374,7 @@ export function parseComputeLimitPolicyDocument(value: unknown): ComputeLimitPol
   }
 
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     actions,
     worker: {
       maxExecutingPerWorker: value.worker.maxExecutingPerWorker,

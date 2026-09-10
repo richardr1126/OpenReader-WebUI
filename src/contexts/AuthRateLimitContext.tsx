@@ -13,7 +13,7 @@ export interface RateLimitStatus {
   remainingChars: number | null;
   resetTimeMs: number;
   userType: 'anonymous' | 'authenticated' | 'unauthenticated';
-  mode: 'off' | 'observe' | 'enforce';
+  enabled: boolean;
 }
 
 interface AuthRateLimitContextType {
@@ -82,7 +82,7 @@ function parseRateLimitStatus(raw: unknown): RateLimitStatus | null {
       : Number(data.remainingChars),
     resetTimeMs: coerceTimestampMs(data.resetTimeMs ?? data.resetTime, nextUtcMidnightTimestampMs()),
     userType,
-    mode: data.mode === 'observe' || data.mode === 'enforce' ? data.mode : 'off',
+    enabled: data.enabled === true,
   };
 }
 
@@ -158,7 +158,7 @@ export function AuthRateLimitProvider({
   }, [refetch]);
 
   const timeUntilReset = status ? calculateTimeUntilReset(status.resetTimeMs) : '';
-  const isAtLimit = status?.mode === 'enforce'
+  const isAtLimit = status?.enabled === true
     && ((status.remainingChars !== null && status.remainingChars <= 0) || !status.allowed);
 
   const contextValue: AuthRateLimitContextType = {

@@ -25,7 +25,6 @@ import { buildQueueWaitTiming, decideRetryAction } from './worker-loop-policy';
 import { toErrorMessage } from '../infrastructure/errors';
 import { TtsCredentialBrokerClientError } from './tts-credential-broker-error';
 import {
-  cloneComputeLimitPolicyDocument,
   type ComputeLimitPolicyDocument,
   type WorkerOperationAction,
 } from '@openreader/runtime-config/compute-limits';
@@ -113,8 +112,7 @@ export function createWorkerLoopController(input: {
   orchestrator: WorkerLoopOrchestrator;
   handlers: JobHandlers;
   logger: WorkerLogger;
-  jobConcurrency: number;
-  getComputePolicy?: () => ComputeLimitPolicyDocument;
+  getComputePolicy: () => ComputeLimitPolicyDocument;
   pdfAttempts: number;
   pdfCodec: JsonCodec<QueuedJob<PdfLayoutJobRequest>>;
   ttsPlaybackCodec?: JsonCodec<QueuedJob<TtsPlaybackJobRequest>>;
@@ -132,16 +130,7 @@ export function createWorkerLoopController(input: {
     state: 'succeeded' | 'failed' | 'cancelled';
   }) => Promise<void>;
 }) {
-  const fallbackPolicy = cloneComputeLimitPolicyDocument();
-  fallbackPolicy.worker.maxExecutingPerWorker = Math.max(1, Math.floor(input.jobConcurrency));
-  for (const resource of Object.keys(fallbackPolicy.worker.resources)) {
-    fallbackPolicy.worker.resources[resource as keyof typeof fallbackPolicy.worker.resources]
-      = Math.max(1, Math.floor(input.jobConcurrency));
-  }
-  for (const policy of Object.values(fallbackPolicy.actions)) {
-    if (policy.execution) policy.execution.maxConcurrentPerWorker = Math.max(1, Math.floor(input.jobConcurrency));
-  }
-  const scheduler = new ComputeExecutionScheduler(input.getComputePolicy ?? (() => fallbackPolicy));
+  const scheduler = new ComputeExecutionScheduler(input.getComputePolicy);
   let loops: Promise<void>[] = [];
   let stopRequested = false;
   let growLoops: (() => void) | null = null;
@@ -194,7 +183,7 @@ export function createWorkerLoopController(input: {
     try {
       const decoded = work.codec.decode(work.msg.data);
       const startedAt = Date.now();
-      const maxQueueAgeMs = (input.getComputePolicy?.() ?? fallbackPolicy)
+      const maxQueueAgeMs = input.getComputePolicy()
         .actions[work.action].execution!.maxQueueAgeSeconds * 1000;
       context = {
         decoded,
@@ -481,7 +470,7 @@ export function createWorkerLoopController(input: {
       growLoops = () => {
         const desired = Math.max(
           1,
-          Math.floor((input.getComputePolicy?.() ?? fallbackPolicy).worker.maxExecutingPerWorker),
+          Math.floor(input.getComputePolicy().worker.maxExecutingPerWorker),
         );
         while (loopSlots < desired) {
           addLoopSlot(loopSlots);

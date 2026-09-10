@@ -385,7 +385,6 @@ export async function createComputeWorkerApp(options: CreateComputeWorkerAppOpti
     orchestrator,
     handlers: jobHandlers,
     logger: app.log,
-    jobConcurrency,
     getComputePolicy: () => computePolicy,
     pdfAttempts,
     pdfCodec: layoutJobCodec,

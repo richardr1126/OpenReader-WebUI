@@ -14,6 +14,20 @@ describe('compute limit policy', () => {
   it('accepts the complete default policy', () => {
     expect(parseComputeLimitPolicyDocument(DEFAULT_COMPUTE_LIMIT_POLICIES))
       .toEqual(DEFAULT_COMPUTE_LIMIT_POLICIES);
+    expect(DEFAULT_COMPUTE_LIMIT_POLICIES.schemaVersion).toBe(2);
+    expect(JSON.stringify(DEFAULT_COMPUTE_LIMIT_POLICIES)).not.toContain('"mode"');
+  });
+
+  it('rejects the superseded rollout-mode policy shape', () => {
+    const legacy = cloneComputeLimitPolicyDocument() as unknown as {
+      schemaVersion: number;
+      actions: { pdf_layout: Record<string, unknown> };
+    };
+    legacy.schemaVersion = 1;
+    legacy.actions.pdf_layout.mode = 'observe';
+    delete legacy.actions.pdf_layout.enabled;
+
+    expect(parseComputeLimitPolicyDocument(legacy)).toBeUndefined();
   });
 
   it('returns a detached clone', () => {

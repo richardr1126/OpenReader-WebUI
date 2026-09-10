@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { useTTS } from '@/contexts/TTSContext';
+import { useTTS, useTTSHighlight } from '@/contexts/TTSContext';
 import { useConfig } from '@/contexts/ConfigContext';
 import type { HtmlBlock } from '@openreader/tts/html-blocks';
 import {
@@ -33,13 +33,15 @@ export function HTMLViewer({
   const contentRef = useRef<HTMLDivElement>(null);
 
   const {
-    currentSentence,
-    currentSentenceAlignment,
-    currentWordIndex,
     resolvedLanguage,
     playbackPlanReady,
     playbackPlanSegmentCount,
   } = useTTS();
+  const {
+    currentSentence,
+    currentSentenceAlignment,
+    currentWordIndex,
+  } = useTTSHighlight();
   const { htmlHighlightEnabled, htmlWordHighlightEnabled } = useConfig();
 
   const readySegmentRef = useRef<string | null>(null);

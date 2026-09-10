@@ -26,7 +26,7 @@ describe('provider capacity coordinator', () => {
   test('serializes enforced provider calls and releases the slot', async () => {
     const policy = cloneComputeLimitPolicyDocument();
     policy.providers.defaults = {
-      mode: 'enforce',
+      enabled: true,
       maxConcurrent: 1,
       requestsPerMinute: 100,
       charactersPerMinute: 100_000,
@@ -50,9 +50,9 @@ describe('provider capacity coordinator', () => {
 
   test('uses a named provider override', async () => {
     const policy = cloneComputeLimitPolicyDocument();
-    policy.providers.defaults.mode = 'off';
+    policy.providers.defaults.enabled = false;
     policy.providers.overrides.premium = {
-      mode: 'enforce',
+      enabled: true,
       maxConcurrent: 1,
       requestsPerMinute: 1,
       charactersPerMinute: 10,
@@ -74,7 +74,7 @@ describe('provider capacity coordinator', () => {
   test('shares enforced concurrency across worker instances through JetStream KV', async () => {
     const policy = cloneComputeLimitPolicyDocument();
     policy.providers.defaults = {
-      mode: 'enforce', maxConcurrent: 1, requestsPerMinute: 100,
+      enabled: true, maxConcurrent: 1, requestsPerMinute: 100,
       charactersPerMinute: 100_000, maxWaitSeconds: 1,
     };
     const kv = new MemoryKv();
@@ -94,10 +94,10 @@ describe('provider capacity coordinator', () => {
     await releaseSecond();
   });
 
-  test('records observed distributed demand without blocking it', async () => {
+  test('bypasses disabled provider capacity without recording demand', async () => {
     const policy = cloneComputeLimitPolicyDocument();
     policy.providers.defaults = {
-      mode: 'observe', maxConcurrent: 1, requestsPerMinute: 1,
+      enabled: false, maxConcurrent: 1, requestsPerMinute: 1,
       charactersPerMinute: 100, maxWaitSeconds: 1,
     };
     const kv = new MemoryKv();
@@ -107,19 +107,15 @@ describe('provider capacity coordinator', () => {
     await releaseFirst();
     await releaseSecond();
 
-    policy.providers.defaults.mode = 'enforce';
-    const controller = new AbortController();
-    const blocked = coordinator.acquire({
-      providerRef: 'shared', characters: 1, signal: controller.signal,
-    });
-    controller.abort(new Error('observed demand retained'));
-    await expect(blocked).rejects.toThrow('observed demand retained');
+    policy.providers.defaults.enabled = true;
+    const releaseEnabled = await coordinator.acquire({ providerRef: 'shared', characters: 100 });
+    await releaseEnabled();
   });
 
   test('surfaces and logs a distributed release that exhausts CAS retries', async () => {
     const policy = cloneComputeLimitPolicyDocument();
     policy.providers.defaults = {
-      mode: 'enforce', maxConcurrent: 1, requestsPerMinute: 100,
+      enabled: true, maxConcurrent: 1, requestsPerMinute: 100,
       charactersPerMinute: 100_000, maxWaitSeconds: 1,
     };
     const base = new MemoryKv();

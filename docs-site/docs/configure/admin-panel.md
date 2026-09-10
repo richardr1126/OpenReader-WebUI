@@ -88,7 +88,7 @@ A dedicated **Rate limiting** group controls the complete compute policy and the
 | `computeLimitPolicies` | Versioned policy for all compute admission, usage, worker, resource, queue, and provider limits. |
 | `maxUploadMb` | Maximum size (MB) accepted for a single document upload. Enforced server-side and signed into the presigned S3 PUT. |
 
-Every compute action has a quick `off` / `observe` / `enforce` control. The advanced policy editor exposes all values and rejects incomplete documents. TTS synthesis uses a soft per-segment threshold: cached segments are free, a segment admitted below the threshold finishes, and the next missing segment stops.
+Every compute action has a direct enabled switch and named controls for its start windows, active work, queue, and concurrency limits. Worker resource pools and provider throughput—including named provider overrides—are edited in the same form. TTS synthesis uses a soft per-segment threshold: cached segments are free, a segment admitted below the threshold finishes, and the next missing segment stops.
 
 ## TTS upstream
 
