@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   cloneComputeLimitPolicyDocument,
@@ -16,6 +18,21 @@ describe('compute limit policy', () => {
       .toEqual(DEFAULT_COMPUTE_LIMIT_POLICIES);
     expect(DEFAULT_COMPUTE_LIMIT_POLICIES.schemaVersion).toBe(2);
     expect(JSON.stringify(DEFAULT_COMPUTE_LIMIT_POLICIES)).not.toContain('"mode"');
+  });
+
+  it('keeps the copyable architecture seed aligned with the complete default', () => {
+    const plan = readFileSync(
+      path.resolve(import.meta.dirname, '../../v5/COMPUTE_RATE_LIMITING_PLAN.md'),
+      'utf8',
+    );
+    const seedSection = plan.split('Both seed forms must support the complete policy document:')[1] ?? '';
+    const jsonBlock = seedSection.match(/```json\n([\s\S]*?)\n```/)?.[1];
+    expect(jsonBlock).toBeDefined();
+    const seed = JSON.parse(jsonBlock!) as {
+      runtimeConfig: { computeLimitPolicies: unknown };
+    };
+    expect(parseComputeLimitPolicyDocument(seed.runtimeConfig.computeLimitPolicies))
+      .toEqual(DEFAULT_COMPUTE_LIMIT_POLICIES);
   });
 
   it('rejects the superseded rollout-mode policy shape', () => {
