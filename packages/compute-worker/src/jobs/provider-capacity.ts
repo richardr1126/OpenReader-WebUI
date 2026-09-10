@@ -100,14 +100,14 @@ export class ProviderCapacityCoordinator {
       if (input.signal?.aborted) throw input.signal.reason;
       const now = Date.now();
       const limits = this.limits(input.providerRef);
-      if (limits.mode === 'off') return async () => undefined;
+      if (!limits.enabled) return async () => undefined;
       const kv = await this.getKv!();
       const entry = await kv.get(key);
       const current = compactState(
         entry?.operation === 'PUT' ? distributedCodec.decode(entry.value) : EMPTY_DISTRIBUTED_STATE,
         now,
       );
-      if (limits.mode === 'observe' || hasCapacity(current, limits, input.characters, now)) {
+      if (hasCapacity(current, limits, input.characters, now)) {
         const next: DistributedProviderState = {
           ...current,
           holders: { ...current.holders, [holderId]: now + PROVIDER_LEASE_MS },
@@ -199,7 +199,7 @@ export class ProviderCapacityCoordinator {
       if (input.signal?.aborted) throw input.signal.reason;
       const now = Date.now();
       const limits = this.limits(input.providerRef);
-      if (limits.mode === 'off') return async () => undefined;
+      if (!limits.enabled) return async () => undefined;
       const cutoff = now - 60_000;
       state.requests = state.requests.filter((at) => at > cutoff);
       state.characters = state.characters.filter((entry) => entry.at > cutoff);
@@ -207,7 +207,7 @@ export class ProviderCapacityCoordinator {
       const available = state.active < limits.maxConcurrent
         && state.requests.length < limits.requestsPerMinute
         && characters + input.characters <= limits.charactersPerMinute;
-      if (limits.mode === 'observe' || available) {
+      if (available) {
         state.active += 1;
         state.requests.push(now);
         state.characters.push({ at: now, units: input.characters });

@@ -43,7 +43,7 @@ export async function getUserPreferences(options?: { signal?: AbortSignal }): Pr
 
 export async function putUserPreferences(
   patch: SyncedPreferencesPatch,
-  options?: { signal?: AbortSignal; clientUpdatedAtMs?: number },
+  options?: { signal?: AbortSignal; clientUpdatedAtMs?: number; keepalive?: boolean },
 ): Promise<PreferencesResponse & { applied: boolean }> {
   const cleanPatch = sanitizePreferencesPatch(patch);
   const res = await fetch('/api/user/state/preferences', {
@@ -54,6 +54,7 @@ export async function putUserPreferences(
       clientUpdatedAtMs: options?.clientUpdatedAtMs ?? Date.now(),
     }),
     signal: options?.signal,
+    keepalive: options?.keepalive,
   });
 
   if (!res.ok) {

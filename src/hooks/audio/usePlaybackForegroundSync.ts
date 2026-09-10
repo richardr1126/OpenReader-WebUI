@@ -4,7 +4,6 @@ import { useCallback, useRef, type MutableRefObject } from 'react';
 import toast from 'react-hot-toast';
 
 import {
-  getTtsPlaybackSeekLayout,
   postTtsPlaybackCursor,
   subscribeTtsPlaybackEvents,
   type TtsPlaybackSeekLayout,
@@ -14,6 +13,7 @@ import type { TTSRequestHeaders } from '@/types/client';
 import { TTS_PLAYBACK_CURSOR_HEARTBEAT_MS } from '@/types/tts';
 import type { PlaybackSessionState } from '@/hooks/audio/usePlaybackProjection';
 import { createCoalescedPlaybackRefresh, createPlaybackOperationSubscription } from '@/lib/client/tts/playback-refresh';
+import type { TtsPlaybackGrid } from '@/lib/client/tts/playback-grid';
 import { useAuthRateLimit } from '@/contexts/AuthRateLimitContext';
 
 type UsePlaybackForegroundSyncInput = {
@@ -21,7 +21,7 @@ type UsePlaybackForegroundSyncInput = {
   playbackRequestHeadersRef: MutableRefObject<TTSRequestHeaders | null>;
   playbackRunIdRef: MutableRefObject<number>;
   playbackSessionRef: MutableRefObject<PlaybackSessionState | null>;
-  refreshPlaybackTimeline: (timelineUrl: string, signal?: AbortSignal) => Promise<unknown>;
+  refreshPlaybackTimeline: (timelineUrl: string, signal?: AbortSignal) => Promise<TtsPlaybackGrid>;
   setPlaybackSeekLayout: (layout: TtsPlaybackSeekLayout | null) => void;
 };
 
@@ -135,18 +135,22 @@ export function usePlaybackForegroundSync(input: UsePlaybackForegroundSyncInput)
     const refresh = createCoalescedPlaybackRefresh(async (signal) => {
       if (runId !== playbackRunIdRef.current || playbackSessionRef.current !== activeSession) return;
       const readSignal = AbortSignal.any([signal, AbortSignal.timeout(30_000)]);
-      await Promise.allSettled([
-        refreshPlaybackTimeline(activeSession.timelineUrl, readSignal),
-        activeSession.seekLayoutUrl
-          ? getTtsPlaybackSeekLayout(activeSession.seekLayoutUrl, readSignal).then((layout) => {
-            if (!readSignal.aborted && runId === playbackRunIdRef.current
-              && playbackSessionRef.current === activeSession) setPlaybackSeekLayout(layout);
-          })
-          : Promise.resolve(),
-      ]);
-    });
+      const timeline = await refreshPlaybackTimeline(activeSession.timelineUrl, readSignal);
+      if (readSignal.aborted || runId !== playbackRunIdRef.current
+        || playbackSessionRef.current !== activeSession) return;
+      setPlaybackSeekLayout({
+        planId: activeSession.planId,
+        sessionId: timeline.sessionId,
+        startOrdinal: timeline.startOrdinal,
+        generationStartOrdinal: timeline.generationStartOrdinal,
+        status: timeline.status,
+        durationMs: timeline.durationMs,
+        segments: timeline.segments,
+      });
+    }, { minIntervalMs: 250 });
     playbackRefreshRef.current = refresh;
     refresh.request();
+    let lastRefreshSnapshotKey = '';
     const events = createPlaybackOperationSubscription<TtsPlaybackEventSnapshot>({
       subscribe: (operationId, onSnapshot) => subscribeTtsPlaybackEvents(activeSession.sessionId, { onSnapshot }, operationId),
       onSnapshot: (snapshot) => {
@@ -175,6 +179,15 @@ export function usePlaybackForegroundSync(input: UsePlaybackForegroundSyncInput)
           return;
         }
         toast.dismiss(MODEL_DOWNLOAD_TOAST_ID);
+        const refreshSnapshotKey = [
+          snapshot.status,
+          snapshot.completedThroughOrdinal ?? '',
+          snapshot.completedCount ?? '',
+          snapshot.plannedCount ?? '',
+          snapshot.stopReason ?? '',
+        ].join(':');
+        if (refreshSnapshotKey === lastRefreshSnapshotKey) return;
+        lastRefreshSnapshotKey = refreshSnapshotKey;
         refresh.request();
       },
     });

@@ -298,7 +298,7 @@ export function useTtsPlayback(input: UseTtsPlaybackInput) {
     try {
       const plan = controller.getPlaybackPlan();
       if (runId !== playbackRunIdRef.current) return;
-      if (!plan?.planObjectKey) {
+      if (!plan?.planId || !plan.planObjectKey) {
         throw new Error('The bootstrap playback plan is not ready');
       }
       const sessionRequest = controller.buildPlaybackSessionRequest();
@@ -334,9 +334,9 @@ export function useTtsPlayback(input: UseTtsPlaybackInput) {
       playbackSessionRef.current = {
         sessionId: session.sessionId,
         sessionInstanceId: session.sessionInstanceId,
+        planId: plan.planId,
         audioUrl: session.audioUrl,
         timelineUrl: session.timelineUrl,
-        seekLayoutUrl: session.seekLayoutUrl,
       };
       latestSeekLayoutRef.current = null;
       setPlaybackSeekLayout(null);

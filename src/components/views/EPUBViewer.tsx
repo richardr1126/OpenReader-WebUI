@@ -2,7 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useCallback, useState } from 'react';
 import type { Book, NavItem, Rendition } from 'epubjs';
-import { useTTS } from '@/contexts/TTSContext';
+import { useTTS, useTTSHighlight } from '@/contexts/TTSContext';
 import { useConfig } from '@/contexts/ConfigContext';
 import { useEPUBTheme } from '@/hooks/epub/useEPUBTheme';
 import { useEPUBResize } from '@/hooks/epub/useEPUBResize';
@@ -115,10 +115,12 @@ export function EPUBViewer({ className = '', epubState, onReady, onError }: EPUB
   } = epubState;
   const {
     registerLocationChangeHandler,
+  } = useTTS();
+  const {
     currentSegment,
     currentSentenceAlignment,
     currentWordIndex
-  } = useTTS();
+  } = useTTSHighlight();
   const { epubTheme, epubHighlightEnabled, epubWordHighlightEnabled } = useConfig();
   const [activeRendition, setActiveRendition] = useState<Rendition>();
   useEPUBTheme(epubTheme, activeRendition);

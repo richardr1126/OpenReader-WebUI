@@ -147,6 +147,28 @@ describe('playback read-model delivery under network delay', () => {
     refresh.stop();
   });
 
+  test('bounds fast SSE refreshes while preserving the latest trailing read', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    try {
+      const load = vi.fn(async () => undefined);
+      const refresh = createCoalescedPlaybackRefresh(load, { minIntervalMs: 250 });
+      refresh.request();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(load).toHaveBeenCalledTimes(1);
+
+      vi.setSystemTime(1_100);
+      for (let i = 0; i < 20; i++) refresh.request();
+      await vi.advanceTimersByTimeAsync(149);
+      expect(load).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(load).toHaveBeenCalledTimes(2);
+      refresh.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test('stopping aborts the active refresh and discards queued events', async () => {
     const slow = deferred<void>();
     const load = vi.fn(() => slow.promise);

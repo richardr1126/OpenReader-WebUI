@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { useTTS } from '@/contexts/TTSContext';
+import { useTTS, useTTSPlaybackProgress } from '@/contexts/TTSContext';
 import { measurePlaybackBuffer } from '@openreader/tts/playback-buffer';
 import {
   PlayIcon,
@@ -36,11 +36,13 @@ export default function TTSPlayer({ currentPage, numPages, isPlaybackReady = tru
     setVoiceAndRestart,
     availableVoices,
     skipToLocation,
+    seekPlaybackTo,
+  } = useTTS();
+  const {
     playbackTimeSec,
     playbackDurationSec,
     playbackSeekLayout,
-    seekPlaybackTo,
-  } = useTTS();
+  } = useTTSPlaybackProgress();
   const [previewSec, setPreviewSec] = useState<number | null>(null);
   const shownSec = previewSec ?? playbackTimeSec;
   const canSeek = playbackDurationSec > 0 && Boolean(playbackSeekLayout);

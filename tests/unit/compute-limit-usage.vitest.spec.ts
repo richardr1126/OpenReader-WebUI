@@ -16,7 +16,7 @@ let finishComputeAdmission: typeof import('@/lib/server/compute-limits/admission
 
 function policy(boundary: 'strict' | 'soft_unit'): ComputeLimitPolicyDocument {
   const value = cloneComputeLimitPolicyDocument();
-  value.actions.tts_synthesis.mode = 'enforce';
+  value.actions.tts_synthesis.enabled = true;
   value.actions.tts_synthesis.usage = [{
     scope: 'user',
     audience: 'authenticated',
@@ -136,7 +136,7 @@ describe('compute usage limits', () => {
 describe('compute admission limits', () => {
   test('atomically admits only one active job and releases its gauge', async () => {
     const admissionPolicy = cloneComputeLimitPolicyDocument();
-    admissionPolicy.actions.pdf_layout.mode = 'enforce';
+    admissionPolicy.actions.pdf_layout.enabled = true;
     admissionPolicy.actions.pdf_layout.admission.windows = [];
     admissionPolicy.actions.pdf_layout.admission.active = [
       { scope: 'user', limit: 1, leaseSeconds: 60 },
@@ -163,7 +163,7 @@ describe('compute admission limits', () => {
 
   test('reclaims a terminal stable request key as a newly charged admission', async () => {
     const admissionPolicy = cloneComputeLimitPolicyDocument();
-    admissionPolicy.actions.document_preview.mode = 'enforce';
+    admissionPolicy.actions.document_preview.enabled = true;
     admissionPolicy.actions.document_preview.admission.windows = [
       { scope: 'user', windowSeconds: 3_600, limit: 2 },
     ];
@@ -194,13 +194,13 @@ describe('compute admission limits', () => {
 
     expect(reused).toMatchObject({ allowed: true, idempotent: false, state: 'reserved' });
     expect(reused.admissionId).not.toBe(first.admissionId);
-    expect(blocked).toMatchObject({ allowed: false, wouldDeny: true });
+    expect(blocked).toMatchObject({ allowed: false });
     await finishComputeAdmission({ admissionId: reused.admissionId!, state: 'finished' });
   });
 
   test('completion decrements only the active scopes charged at admission time', async () => {
     const offPolicy = cloneComputeLimitPolicyDocument();
-    offPolicy.actions.account_export.mode = 'off';
+    offPolicy.actions.account_export.enabled = false;
     offPolicy.actions.account_export.admission.windows = [];
     offPolicy.actions.account_export.admission.active = [
       { scope: 'user', limit: 1, leaseSeconds: 60 },
@@ -214,7 +214,7 @@ describe('compute admission limits', () => {
     });
 
     const enforcedPolicy = cloneComputeLimitPolicyDocument();
-    enforcedPolicy.actions.account_export.mode = 'enforce';
+    enforcedPolicy.actions.account_export.enabled = true;
     enforcedPolicy.actions.account_export.admission.windows = [];
     enforcedPolicy.actions.account_export.admission.active = [
       { scope: 'user', limit: 1, leaseSeconds: 60 },
@@ -234,7 +234,7 @@ describe('compute admission limits', () => {
     });
 
     expect(charged.allowed).toBe(true);
-    expect(blocked).toMatchObject({ allowed: false, wouldDeny: true });
+    expect(blocked).toMatchObject({ allowed: false });
     await finishComputeAdmission({ admissionId: charged.admissionId!, state: 'finished' });
   });
 });

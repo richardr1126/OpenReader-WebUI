@@ -13,10 +13,10 @@
     "ttsUpstreamMaxRetries": 2,
     "ttsUpstreamTimeoutMs": 285000,
     "computeLimitPolicies": {
-      "schemaVersion": 1,
+      "schemaVersion": 2,
       "actions": {
         "pdf_layout": {
-          "mode": "off",
+          "enabled": true,
           "admission": {
             "windows": [
               { "scope": "user", "limit": 8, "windowSeconds": 60 },
@@ -37,7 +37,7 @@
           }
         },
         "tts_playback": {
-          "mode": "observe",
+          "enabled": false,
           "admission": {
             "windows": [
               { "scope": "user", "limit": 12, "windowSeconds": 60 },
@@ -58,7 +58,7 @@
           }
         },
         "tts_playback_plan": {
-          "mode": "observe",
+          "enabled": false,
           "admission": {
             "windows": [
               { "scope": "user", "limit": 12, "windowSeconds": 60 },
@@ -79,7 +79,7 @@
           }
         },
         "tts_playback_export": {
-          "mode": "observe",
+          "enabled": true,
           "admission": {
             "windows": [
               { "scope": "user", "limit": 2, "windowSeconds": 600 },
@@ -100,7 +100,7 @@
           }
         },
         "document_preview": {
-          "mode": "observe",
+          "enabled": true,
           "admission": {
             "windows": [
               { "scope": "user", "limit": 30, "windowSeconds": 600 },
@@ -121,7 +121,7 @@
           }
         },
         "document_conversion": {
-          "mode": "observe",
+          "enabled": true,
           "admission": {
             "windows": [
               { "scope": "user", "limit": 4, "windowSeconds": 600 },
@@ -142,7 +142,7 @@
           }
         },
         "account_export": {
-          "mode": "observe",
+          "enabled": true,
           "admission": {
             "windows": [
               { "scope": "user", "limit": 2, "windowSeconds": 3600 },
@@ -163,7 +163,7 @@
           }
         },
         "tts_synthesis": {
-          "mode": "off",
+          "enabled": true,
           "admission": { "windows": [], "active": [] },
           "usage": [
             { "scope": "user", "audience": "anonymous", "metric": "characters", "window": "utc_day", "limit": 50000, "boundary": "soft_unit" },
@@ -188,7 +188,7 @@
       },
       "providers": {
         "defaults": {
-          "mode": "observe",
+          "enabled": true,
           "maxConcurrent": 1,
           "requestsPerMinute": 60,
           "charactersPerMinute": 100000,

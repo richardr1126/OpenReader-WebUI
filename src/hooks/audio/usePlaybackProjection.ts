@@ -17,9 +17,9 @@ import { createPlaybackTimelineLoader } from '@/lib/client/tts/playback-refresh'
 export type PlaybackSessionState = {
   sessionId: string;
   sessionInstanceId: string;
+  planId: string;
   audioUrl: string;
   timelineUrl: string;
-  seekLayoutUrl?: string;
 };
 
 const WORD_HIGHLIGHT_LEAD_SEC = 0.12;
@@ -128,7 +128,7 @@ export function usePlaybackProjection(input: UsePlaybackProjectionInput) {
     audio.currentTime = documentTimeToMediaTime(target, base);
   }, [playbackSessionRef]);
 
-  const refreshPlaybackTimeline = useCallback(async (timelineUrl: string, signal?: AbortSignal) => {
+  const refreshPlaybackTimeline = useCallback(async (timelineUrl: string, signal?: AbortSignal): Promise<TtsPlaybackGrid> => {
     return timelineLoaderRef.current!.refresh(timelineUrl, signal);
   }, []);
 

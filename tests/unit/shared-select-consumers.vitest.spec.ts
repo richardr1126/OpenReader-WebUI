@@ -6,6 +6,7 @@ const STANDARD_SELECT_CONSUMERS = [
   'src/components/settings/ProviderSettingsPanel.tsx',
   'src/components/documents/DocumentSettings.tsx',
   'src/components/admin/AdminFeaturesPanel.tsx',
+  'src/components/admin/ComputeLimitsEditor.tsx',
   'src/components/admin/AdminProvidersPanel.tsx',
 ];
 
