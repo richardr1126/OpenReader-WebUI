@@ -11,9 +11,6 @@ import { Header } from '@/components/Header';
 import { AudiobookExportModal } from '@/components/AudiobookExportModal';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import TTSPlayer from '@/components/player/TTSPlayer';
-import { RateLimitPauseButton } from '@/components/player/RateLimitPauseButton';
-import { RateLimitBanner } from '@/components/auth/RateLimitBanner';
-import { useAuthRateLimit } from '@/contexts/AuthRateLimitContext';
 import { useFeatureFlag } from '@/contexts/RuntimeConfigContext';
 import {
   ReaderShell,
@@ -88,7 +85,6 @@ function PdfReader({
     stop,
     setPdfSkipBlockKinds,
   } = useTTS();
-  const { isAtLimit } = useAuthRateLimit();
   const [zoomLevel, setZoomLevel] = useState<number>(100);
   const [activeSidebar, setActiveSidebar] = useState<null | 'settings' | 'audiobook'>(null);
   const [showForceReparseConfirm, setShowForceReparseConfirm] = useState(false);
@@ -139,7 +135,7 @@ function PdfReader({
       window.clearTimeout(settleT1);
       window.clearTimeout(settleT2);
     };
-  }, [rendererReady, isAtLimit, activeSidebar]);
+  }, [rendererReady, activeSidebar]);
 
   const handleZoomIn = () => setZoomLevel(prev => Math.min(prev + 10, 300));
   const handleZoomOut = () => setZoomLevel(prev => Math.max(prev - 10, 50));
@@ -223,14 +219,7 @@ function PdfReader({
           documentId={routeDocumentId}
         />
       )}
-      {isAtLimit ? (
-        <div className="sticky bottom-0 z-30 w-full border-t border-line-soft bg-surface" data-app-ttsbar>
-          <div className="px-2 md:px-3 pt-1 pb-[max(0.375rem,env(safe-area-inset-bottom))] flex items-center justify-center gap-1 min-h-10">
-            <RateLimitPauseButton />
-            <RateLimitBanner />
-          </div>
-        </div>
-      ) : rendererReady ? (
+      {rendererReady ? (
         <TTSPlayer currentPage={currDocPage} numPages={currDocPages} isPlaybackReady={isPlaybackReady} />
       ) : null}
       <DocumentSettings

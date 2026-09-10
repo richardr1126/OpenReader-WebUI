@@ -231,6 +231,7 @@ export function createPlaybackSessionController(
         planObjectKey: requestBody.planObjectKey,
         expiresAt: requestBody.expiresAt ?? now + DEFAULT_TTS_PLAYBACK_SESSION_TTL_MS,
         lastError: null,
+        stopReason: null,
         updatedAt: now,
       }).catch((error) => {
         app.log.warn(

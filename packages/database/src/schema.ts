@@ -8,8 +8,9 @@ const usePostgres = !!process.env.POSTGRES_URL;
 
 export const documents = usePostgres ? postgresSchema.documents : sqliteSchema.documents;
 export const userFolders = usePostgres ? postgresSchema.userFolders : sqliteSchema.userFolders;
-export const userTtsChars = usePostgres ? postgresSchema.userTtsChars : sqliteSchema.userTtsChars;
-export const userJobEvents = usePostgres ? postgresSchema.userJobEvents : sqliteSchema.userJobEvents;
+export const computeLimitAdmissions = usePostgres ? postgresSchema.computeLimitAdmissions : sqliteSchema.computeLimitAdmissions;
+export const computeLimitBuckets = usePostgres ? postgresSchema.computeLimitBuckets : sqliteSchema.computeLimitBuckets;
+export const computeLimitEvents = usePostgres ? postgresSchema.computeLimitEvents : sqliteSchema.computeLimitEvents;
 export const userPreferences = usePostgres ? postgresSchema.userPreferences : sqliteSchema.userPreferences;
 export const userOnboarding = usePostgres ? postgresSchema.userOnboarding : sqliteSchema.userOnboarding;
 export const documentSettings = usePostgres ? postgresSchema.documentSettings : sqliteSchema.documentSettings;

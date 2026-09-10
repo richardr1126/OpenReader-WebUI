@@ -12,6 +12,8 @@ import {
   headDocumentPreview,
   isMissingBlobError,
 } from '@/lib/server/documents/previews-blobstore';
+import { getResolvedRuntimeConfig } from '@/lib/server/runtime-config';
+import { createAdmittedComputeOperation } from '@/lib/server/compute-limits/run-admitted';
 
 type PreviewStatus = 'queued' | 'processing' | 'ready' | 'failed';
 
@@ -31,6 +33,7 @@ export type PreviewableDocumentType = 'pdf' | 'epub';
 
 export type PreviewSourceDocument = {
   id: string;
+  userId: string;
   type: string;
   lastModified: number;
 };
@@ -276,9 +279,16 @@ async function resolveWorkerPreview(
   const resolved = await client.resolveDocumentPreview(base);
   if (resolved.artifact) return resolved;
   if (resolved.operation && (resolved.operation.status === 'queued' || resolved.operation.status === 'running')) return resolved;
-  const operation = await client.createDocumentPreviewOperation({
-    ...base,
-    targetWidth: DOCUMENT_PREVIEW_WIDTH,
+  const runtimeConfig = await getResolvedRuntimeConfig();
+  const operation = await createAdmittedComputeOperation({
+    policy: runtimeConfig.computeLimitPolicies,
+    action: 'document_preview',
+    requestKey: `${doc.id}:${doc.lastModified}:${DOCUMENT_PREVIEW_VARIANT}`,
+    subject: { userId: doc.userId, isAnonymous: false },
+    create: () => client.createDocumentPreviewOperation({
+      ...base,
+      targetWidth: DOCUMENT_PREVIEW_WIDTH,
+    }),
   });
   return {
     artifact: null,

@@ -8,14 +8,11 @@ import {
   type ReaderRendererProps,
 } from '@/components/reader/ReaderShell';
 import { DocumentSettings } from '@/components/documents/DocumentSettings';
-import { RateLimitPauseButton } from '@/components/player/RateLimitPauseButton';
 import { Header } from '@/components/Header';
 import { useTTS } from "@/contexts/TTSContext";
 import TTSPlayer from '@/components/player/TTSPlayer';
 import { DocumentHeaderMenu } from '@/components/documents/DocumentHeaderMenu';
-import { RateLimitBanner } from '@/components/auth/RateLimitBanner';
 import { AudiobookExportModal } from '@/components/AudiobookExportModal';
-import { useAuthRateLimit } from '@/contexts/AuthRateLimitContext';
 import { useFeatureFlag } from '@/contexts/RuntimeConfigContext';
 import { ButtonLink } from '@/components/ui';
 import { serializeReaderPosition } from '@/lib/shared/reader-position';
@@ -68,7 +65,6 @@ function HtmlReader({
     payload.settings,
   );
   const language = documentSettings.language ?? 'auto';
-  const { isAtLimit } = useAuthRateLimit();
   const [activeSidebar, setActiveSidebar] = useState<null | 'settings' | 'audiobook'>(null);
   const [containerHeight, setContainerHeight] = useState<string>('auto');
   const [padPct, setPadPct] = useState<number>(50); // 0..100 (50 = 50% default width)
@@ -184,16 +180,9 @@ function HtmlReader({
           documentId={routeDocumentId}
         />
       )}
-      {rendererReady && (isAtLimit ? (
-        <div className="sticky bottom-0 z-30 w-full border-t border-line-soft bg-surface" data-app-ttsbar>
-          <div className="px-2 md:px-3 pt-1 pb-[max(0.375rem,env(safe-area-inset-bottom))] flex items-center justify-center gap-1 min-h-10">
-            <RateLimitPauseButton />
-            <RateLimitBanner />
-          </div>
-        </div>
-      ) : (
+      {rendererReady && (
         <TTSPlayer isPlaybackReady={isPlaybackReady} hasReadableContent={sentences.length > 0} />
-      ))}
+      )}
       <DocumentSettings
         html
         isOpen={rendererReady && activeSidebar === 'settings'}

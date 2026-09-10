@@ -20,11 +20,6 @@ export interface RuntimeConfig {
   enableAudiobookExport: boolean;
   enableDocxConversion: boolean;
   showAllProviderModels: boolean;
-  disableTtsRateLimit: boolean;
-  ttsDailyLimitAnonymous: number;
-  ttsDailyLimitAuthenticated: number;
-  ttsIpDailyLimitAnonymous: number;
-  ttsIpDailyLimitAuthenticated: number;
   ttsCacheMaxSizeBytes: number;
   ttsCacheTtlMs: number;
   ttsUpstreamMaxRetries: number;
@@ -41,11 +36,6 @@ const RUNTIME_DEFAULTS: RuntimeConfig = {
   enableAudiobookExport: true,
   enableDocxConversion: true,
   showAllProviderModels: true,
-  disableTtsRateLimit: true,
-  ttsDailyLimitAnonymous: 50_000,
-  ttsDailyLimitAuthenticated: 500_000,
-  ttsIpDailyLimitAnonymous: 100_000,
-  ttsIpDailyLimitAuthenticated: 1_000_000,
   ttsCacheMaxSizeBytes: 256 * 1024 * 1024,
   ttsCacheTtlMs: 1000 * 60 * 30,
   ttsUpstreamMaxRetries: 2,

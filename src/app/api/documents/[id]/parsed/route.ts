@@ -10,9 +10,12 @@ import { pdfParseSnapshotFromWorkerState } from '@/lib/server/pdf-parse/snapshot
 import { isS3Configured } from '@/lib/server/storage/s3';
 import { createRequestLogger } from '@/lib/server/logger';
 import { errorResponse } from '@/lib/server/errors/next-response';
-import { checkJobRate, getPdfLayoutRateConfig, recordJobEvent } from '@/lib/server/rate-limit/job-rate-limiter';
-import { buildComputeRateLimitedResponse } from '@/lib/server/rate-limit/problem-response';
 import { getResolvedRuntimeConfig } from '@/lib/server/runtime-config';
+import {
+  ComputeAdmissionLimitedError,
+  createAdmittedComputeOperation,
+} from '@/lib/server/compute-limits/run-admitted';
+import { getClientIp } from '@/lib/server/rate-limit/request-ip';
 
 export const dynamic = 'force-dynamic';
 
@@ -76,21 +79,36 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       return NextResponse.json({ error: 'Document is not a PDF' }, { status: 400 });
     }
 
-    const rateConfig = getPdfLayoutRateConfig(await getResolvedRuntimeConfig());
-    const rateDecision = await checkJobRate(authCtxOrRes.userId, 'pdf_layout', rateConfig);
-    if (!rateDecision.allowed) {
-      return buildComputeRateLimitedResponse({ decision: rateDecision, pathname: req.nextUrl.pathname });
-    }
-
-    const workerState = await createOrReuseCurrentPdfParseOperation({
-      documentId: id,
-      namespace: null,
-      forceToken: randomUUID(),
+    const runtimeConfig = await getResolvedRuntimeConfig();
+    const forceToken = randomUUID();
+    const workerState = await createAdmittedComputeOperation({
+      policy: runtimeConfig.computeLimitPolicies,
+      action: 'pdf_layout',
+      requestKey: `${id}:replace:${forceToken}`,
+      subject: {
+        userId: authCtxOrRes.userId,
+        isAnonymous: Boolean(authCtxOrRes.user?.isAnonymous),
+        ip: getClientIp(req),
+      },
+      create: () => createOrReuseCurrentPdfParseOperation({
+        documentId: id,
+        namespace: null,
+        forceToken,
+      }),
     });
-    await recordJobEvent(authCtxOrRes.userId, 'pdf_layout', workerState.opId, rateConfig);
 
     return NextResponse.json(pdfParseSnapshotFromWorkerState(workerState), { status: 202 });
   } catch (error) {
+    if (error instanceof ComputeAdmissionLimitedError) {
+      return NextResponse.json({
+        error: error.message,
+        code: error.code,
+        retryAfterMs: error.retryAfterMs,
+      }, {
+        status: 429,
+        headers: { 'Retry-After': String(Math.max(1, Math.ceil(error.retryAfterMs / 1000))) },
+      });
+    }
     return errorResponse(error, {
       logger,
       event: 'documents.parsed.ensure_failed',

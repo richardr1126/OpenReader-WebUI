@@ -1,4 +1,5 @@
 import { createHmac } from 'node:crypto';
+import { isIP } from 'node:net';
 import { TtsCredentialBrokerClientError } from '../jobs/tts-credential-broker-error';
 
 const DEFAULT_TIMEOUT_MS = 5_000;
@@ -18,9 +19,7 @@ function permitsPlainHttp(url: URL): boolean {
   const hostname = url.hostname.toLowerCase();
   return hostname === 'localhost'
     || hostname === '[::1]'
-    || hostname === 'host.docker.internal'
-    || /^127(?:\.\d{1,3}){3}$/.test(hostname)
-    || !hostname.includes('.');
+    || (hostname.startsWith('127.') && isIP(hostname) === 4);
 }
 
 export function getTtsCredentialBrokerConfig(): TtsCredentialBrokerConfig {
@@ -49,6 +48,20 @@ export function getTtsCredentialBrokerConfig(): TtsCredentialBrokerConfig {
     token,
     timeoutMs: readPositiveInt(process.env.COMPUTE_CREDENTIAL_BROKER_TIMEOUT_MS, DEFAULT_TIMEOUT_MS),
   };
+}
+
+export function getComputeLimitBrokerConfig(): TtsCredentialBrokerConfig {
+  const config = getTtsCredentialBrokerConfig();
+  const url = new URL(config.url);
+  url.pathname = '/api/internal/compute/limits/consume';
+  return { ...config, url };
+}
+
+export function getComputeLimitCompletionBrokerConfig(): TtsCredentialBrokerConfig {
+  const config = getTtsCredentialBrokerConfig();
+  const url = new URL(config.url);
+  url.pathname = '/api/internal/compute/limits/complete';
+  return { ...config, url };
 }
 
 export function requireTtsSegmentTextHashSecret(): string {

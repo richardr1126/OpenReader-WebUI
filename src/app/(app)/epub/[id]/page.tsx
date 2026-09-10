@@ -11,11 +11,8 @@ import { DocumentSettings } from '@/components/documents/DocumentSettings';
 import { Header } from '@/components/Header';
 import { useTTS } from "@/contexts/TTSContext";
 import TTSPlayer from '@/components/player/TTSPlayer';
-import { RateLimitPauseButton } from '@/components/player/RateLimitPauseButton';
 import { DocumentHeaderMenu } from '@/components/documents/DocumentHeaderMenu';
 import { AudiobookExportModal } from '@/components/AudiobookExportModal';
-import { RateLimitBanner } from '@/components/auth/RateLimitBanner';
-import { useAuthRateLimit } from '@/contexts/AuthRateLimitContext';
 import { useFeatureFlag } from '@/contexts/RuntimeConfigContext';
 import { ButtonLink } from '@/components/ui';
 import { mergeDocumentSettings } from '@/lib/shared/document-settings';
@@ -67,7 +64,6 @@ function EpubReader({
     payload.settings,
   );
   const language = documentSettings.language ?? 'auto';
-  const { isAtLimit } = useAuthRateLimit();
   const [activeSidebar, setActiveSidebar] = useState<null | 'settings' | 'audiobook'>(null);
   const [containerHeight, setContainerHeight] = useState<string | null>(null);
   const [padPct, setPadPct] = useState<number>(100); // 0..100 (100 = full width, 0 = max padding)
@@ -108,7 +104,7 @@ function EpubReader({
       window.clearTimeout(settleT1);
       window.clearTimeout(settleT2);
     };
-  }, [rendererReady, isAtLimit, activeSidebar]);
+  }, [rendererReady, activeSidebar]);
 
   // Nudge EPUB renderer to reflow on horizontal padding changes
   useEffect(() => {
@@ -183,16 +179,7 @@ function EpubReader({
           documentId={routeDocumentId || ''}
         />
       )}
-      {isAtLimit ? (
-        <div className="sticky bottom-0 z-30 w-full border-t border-line-soft bg-surface" data-app-ttsbar>
-          <div className="px-2 md:px-3 pt-1 pb-[max(0.375rem,env(safe-area-inset-bottom))] flex items-center justify-center gap-1 min-h-10">
-            <RateLimitPauseButton />
-            <RateLimitBanner />
-          </div>
-        </div>
-      ) : (
-        <TTSPlayer isPlaybackReady={isPlaybackReady} hasReadableContent={sentences.length > 0} />
-      )}
+      <TTSPlayer isPlaybackReady={isPlaybackReady} hasReadableContent={sentences.length > 0} />
       <DocumentSettings
         epub
         isOpen={rendererReady && activeSidebar === 'settings'}

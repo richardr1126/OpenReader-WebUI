@@ -10,11 +10,19 @@ import {
   Select,
   Button,
   Input,
+  Textarea,
 } from '@/components/ui';
 import { type TtsProviderId } from '@openreader/tts/provider-catalog';
 import { useSharedProviders, type SharedProviderEntry } from '@/hooks/useSharedProviders';
 import { queryKeys } from '@/lib/client/query-keys';
 import { useAuthSession } from '@/hooks/useAuthSession';
+import {
+  COMPUTE_ACTIONS,
+  cloneComputeLimitPolicyDocument,
+  parseComputeLimitPolicyDocument,
+  type ComputeAction,
+  type ComputeLimitMode,
+} from '@openreader/runtime-config/compute-limits';
 
 type RuntimeConfigSource = 'json-seed' | 'env-seed' | 'admin' | 'default';
 
@@ -50,6 +58,19 @@ const PLAYBACK_BACKGROUND_EXTENT_OPTIONS: PlaybackBackgroundExtentOption[] = [
   },
 ];
 
+const COMPUTE_ACTION_LABELS: Record<ComputeAction, string> = {
+  pdf_layout: 'PDF layout analysis',
+  tts_playback: 'Live TTS playback',
+  tts_playback_plan: 'TTS plan creation',
+  tts_playback_export: 'Audiobook assembly',
+  document_preview: 'Document previews',
+  document_conversion: 'Document conversion',
+  account_export: 'Account export',
+  tts_synthesis: 'TTS segment synthesis',
+};
+
+const COMPUTE_LIMIT_MODES: ComputeLimitMode[] = ['off', 'observe', 'enforce'];
+
 async function fetchAdminSettings(): Promise<SettingsResponse> {
   const res = await fetch('/api/admin/settings');
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -76,11 +97,15 @@ export function AdminFeaturesPanel() {
   });
   const [draft, setDraft] = useState<Record<string, unknown>>({});
   const [dirty, setDirty] = useState<Set<string>>(new Set());
+  const [policyText, setPolicyText] = useState('');
+  const [policyError, setPolicyError] = useState<string | null>(null);
   const { providers: sharedProviders } = useSharedProviders();
 
   useEffect(() => {
     if (!data) return;
     setDraft({ ...data.values });
+    setPolicyText(JSON.stringify(data.values.computeLimitPolicies, null, 2));
+    setPolicyError(null);
     setDirty(new Set());
   }, [data]);
 
@@ -152,6 +177,8 @@ export function AdminFeaturesPanel() {
   const discardAll = () => {
     if (!data) return;
     setDraft({ ...data.values });
+    setPolicyText(JSON.stringify(data.values.computeLimitPolicies, null, 2));
+    setPolicyError(null);
     setDirty(new Set());
   };
 
@@ -179,8 +206,6 @@ export function AdminFeaturesPanel() {
     } as ProviderOption
     : fallbackShared;
   const selectedProviderOption = effectiveSelectedProvider;
-  const shouldRenderRateLimitInputs = draft.disableTtsRateLimit === false;
-  const shouldRenderComputeRateLimitInputs = draft.disableComputeRateLimit === false;
   const playbackBackgroundExtentValue: PlaybackBackgroundExtent =
     draft.ttsPlaybackBackgroundExtent === 'document' ? 'document' : 'section';
   const playbackBackgroundExtentOption = PLAYBACK_BACKGROUND_EXTENT_OPTIONS.find(
@@ -190,6 +215,37 @@ export function AdminFeaturesPanel() {
   const handleProviderChange = (opt: ProviderOption) => {
     updateDraft('defaultTtsProvider', opt.id);
   };
+
+  const handlePolicyChange = (raw: string) => {
+    setPolicyText(raw);
+    try {
+      const parsed = parseComputeLimitPolicyDocument(JSON.parse(raw) as unknown);
+      if (!parsed) {
+        setPolicyError('The policy is incomplete or contains an invalid field or value.');
+        return;
+      }
+      setPolicyError(null);
+      updateDraft('computeLimitPolicies', parsed);
+    } catch {
+      setPolicyError('Enter valid JSON before saving.');
+    }
+  };
+
+  const updateComputePolicy = (
+    mutate: (policy: NonNullable<ReturnType<typeof parseComputeLimitPolicyDocument>>) => void,
+  ) => {
+    const current = parseComputeLimitPolicyDocument(draft.computeLimitPolicies);
+    if (!current) return;
+    const next = cloneComputeLimitPolicyDocument(current);
+    mutate(next);
+    const parsed = parseComputeLimitPolicyDocument(next);
+    if (!parsed) return;
+    setPolicyText(JSON.stringify(parsed, null, 2));
+    setPolicyError(null);
+    updateDraft('computeLimitPolicies', parsed);
+  };
+
+  const computePolicy = parseComputeLimitPolicyDocument(draft.computeLimitPolicies);
 
   const renderSource = (key: string) => {
     const source = data?.sources?.[key] ?? 'default';
@@ -269,138 +325,98 @@ export function AdminFeaturesPanel() {
 
       <Section
         title="Rate limiting"
-        subtitle="Daily TTS quotas, PDF parsing throttle, and upload size."
+        subtitle="One validated policy for every compute action, plus upload size."
         action={<Badge tone="foreground">Limits</Badge>}
       >
-        <ToggleRow
-          label="Disable TTS daily rate limiting"
-          description="When on, per-user/IP daily character quotas are not enforced."
-          checked={Boolean(draft.disableTtsRateLimit)}
-          onChange={(checked) => updateDraft('disableTtsRateLimit', checked)}
-          right={renderSource('disableTtsRateLimit')}
-          variant="flat"
-        />
-        {shouldRenderRateLimitInputs ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 px-0.5 py-1.5">
-            <div className="space-y-1">
-              <div className="flex items-center justify-between gap-2">
-                <label className="text-xs font-medium text-foreground">Anonymous per-user daily limit</label>
-                {renderSource('ttsDailyLimitAnonymous')}
-              </div>
-              <Input
-                type="number"
-                min={1}
-                step={1}
-                value={String(draft.ttsDailyLimitAnonymous ?? '')}
-                onChange={(event) => updatePositiveIntDraft('ttsDailyLimitAnonymous', event.target.value)}
-              />
+        <div className="space-y-2 px-0.5 py-1.5 border-b border-offbase">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium text-foreground">Compute limit policy</p>
+              <p className="text-xs text-muted mt-0.5">
+                Controls admission, active work, queues, worker resources, provider capacity, and per-segment TTS usage. Use <code>off</code>, <code>observe</code>, or <code>enforce</code> per action.
+              </p>
             </div>
-            <div className="space-y-1">
-              <div className="flex items-center justify-between gap-2">
-                <label className="text-xs font-medium text-foreground">Authenticated per-user daily limit</label>
-                {renderSource('ttsDailyLimitAuthenticated')}
-              </div>
-              <Input
-                type="number"
-                min={1}
-                step={1}
-                value={String(draft.ttsDailyLimitAuthenticated ?? '')}
-                onChange={(event) => updatePositiveIntDraft('ttsDailyLimitAuthenticated', event.target.value)}
-              />
-            </div>
-            <div className="space-y-1">
-              <div className="flex items-center justify-between gap-2">
-                <label className="text-xs font-medium text-foreground">Anonymous IP daily backstop</label>
-                {renderSource('ttsIpDailyLimitAnonymous')}
-              </div>
-              <Input
-                type="number"
-                min={1}
-                step={1}
-                value={String(draft.ttsIpDailyLimitAnonymous ?? '')}
-                onChange={(event) => updatePositiveIntDraft('ttsIpDailyLimitAnonymous', event.target.value)}
-              />
-            </div>
-            <div className="space-y-1">
-              <div className="flex items-center justify-between gap-2">
-                <label className="text-xs font-medium text-foreground">Authenticated IP daily backstop</label>
-                {renderSource('ttsIpDailyLimitAuthenticated')}
-              </div>
-              <Input
-                type="number"
-                min={1}
-                step={1}
-                value={String(draft.ttsIpDailyLimitAuthenticated ?? '')}
-                onChange={(event) => updatePositiveIntDraft('ttsIpDailyLimitAuthenticated', event.target.value)}
-              />
-            </div>
+            <div className="shrink-0">{renderSource('computeLimitPolicies')}</div>
           </div>
-        ) : null}
-
-        <ToggleRow
-          label="Disable PDF parsing rate limiting"
-          description="When on, per-user limits on starting PDF layout parses are not enforced."
-          checked={Boolean(draft.disableComputeRateLimit)}
-          onChange={(checked) => updateDraft('disableComputeRateLimit', checked)}
-          right={renderSource('disableComputeRateLimit')}
-          variant="flat"
-        />
-        {shouldRenderComputeRateLimitInputs ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 px-0.5 py-1.5">
-            <div className="space-y-1">
-              <div className="flex items-center justify-between gap-2">
-                <label className="text-xs font-medium text-foreground">Burst limit (parses)</label>
-                {renderSource('computeParseBurstMax')}
-              </div>
-              <Input
-                type="number"
-                min={1}
-                step={1}
-                value={String(draft.computeParseBurstMax ?? '')}
-                onChange={(event) => updatePositiveIntDraft('computeParseBurstMax', event.target.value)}
-              />
+          {computePolicy ? (
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {COMPUTE_ACTIONS.map((action) => {
+                const actionPolicy = computePolicy.actions[action];
+                const constraintCount = actionPolicy.admission.windows.length
+                  + actionPolicy.admission.active.length
+                  + actionPolicy.usage.length;
+                return (
+                  <div key={action} className="rounded-md border border-offbase bg-background px-2.5 py-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="truncate text-xs font-medium text-foreground">
+                          {COMPUTE_ACTION_LABELS[action]}
+                        </p>
+                        <p className="mt-0.5 text-[11px] text-muted">
+                          {constraintCount} {constraintCount === 1 ? 'limit' : 'limits'}
+                          {actionPolicy.execution
+                            ? ` · ${actionPolicy.execution.maxConcurrentPerWorker} per worker`
+                            : ' · soft segment threshold'}
+                        </p>
+                      </div>
+                      <div
+                        className="flex shrink-0 overflow-hidden rounded border border-offbase"
+                        role="group"
+                        aria-label={`${COMPUTE_ACTION_LABELS[action]} mode`}
+                      >
+                        {COMPUTE_LIMIT_MODES.map((mode) => (
+                          <button
+                            key={mode}
+                            type="button"
+                            aria-pressed={actionPolicy.mode === mode}
+                            className={`px-1.5 py-1 text-[10px] capitalize transition-colors ${
+                              actionPolicy.mode === mode
+                                ? 'bg-foreground text-background'
+                                : 'bg-background text-muted hover:text-foreground'
+                            }`}
+                            onClick={() => updateComputePolicy((policy) => {
+                              policy.actions[action].mode = mode;
+                            })}
+                          >
+                            {mode}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-            <div className="space-y-1">
-              <div className="flex items-center justify-between gap-2">
-                <label className="text-xs font-medium text-foreground">Burst window (seconds)</label>
-                {renderSource('computeParseBurstWindowSec')}
-              </div>
-              <Input
-                type="number"
-                min={1}
-                step={1}
-                value={String(draft.computeParseBurstWindowSec ?? '')}
-                onChange={(event) => updatePositiveIntDraft('computeParseBurstWindowSec', event.target.value)}
-              />
+          ) : null}
+          {computePolicy ? (
+            <div className="flex flex-wrap gap-x-4 gap-y-1 rounded-md bg-surface-sunken px-2.5 py-2 text-[11px] text-muted">
+              <span><strong className="font-medium text-foreground">Worker:</strong> {computePolicy.worker.maxExecutingPerWorker} executing</span>
+              <span><strong className="font-medium text-foreground">Policy refresh:</strong> {computePolicy.worker.policyRefreshSeconds}s</span>
+              <span><strong className="font-medium text-foreground">Provider:</strong> {computePolicy.providers.defaults.mode}</span>
             </div>
-            <div className="space-y-1">
-              <div className="flex items-center justify-between gap-2">
-                <label className="text-xs font-medium text-foreground">Sustained limit (parses)</label>
-                {renderSource('computeParseSustainedMax')}
-              </div>
-              <Input
-                type="number"
-                min={1}
-                step={1}
-                value={String(draft.computeParseSustainedMax ?? '')}
-                onChange={(event) => updatePositiveIntDraft('computeParseSustainedMax', event.target.value)}
+          ) : null}
+          <p className="text-xs text-muted">
+            TTS synthesis checks each uncached segment. A segment that starts below the threshold finishes in full; the next segment stops.
+          </p>
+          <details className="group rounded-md border border-offbase">
+            <summary className="cursor-pointer select-none px-2.5 py-2 text-xs font-medium text-foreground">
+              Advanced policy editor
+            </summary>
+            <div className="space-y-2 border-t border-offbase p-2.5">
+              <p className="text-[11px] text-muted">
+                Edit every admission window, active lease, usage threshold, queue, resource, worker, and provider limit. The complete document is validated before it can be saved.
+              </p>
+              <Textarea
+                aria-label="Compute limit policy JSON"
+                className="min-h-96 font-mono text-xs"
+                spellCheck={false}
+                value={policyText}
+                onChange={(event) => handlePolicyChange(event.target.value)}
               />
+              {policyError ? <p className="text-xs text-danger" role="alert">{policyError}</p> : null}
             </div>
-            <div className="space-y-1">
-              <div className="flex items-center justify-between gap-2">
-                <label className="text-xs font-medium text-foreground">Sustained window (seconds)</label>
-                {renderSource('computeParseSustainedWindowSec')}
-              </div>
-              <Input
-                type="number"
-                min={1}
-                step={1}
-                value={String(draft.computeParseSustainedWindowSec ?? '')}
-                onChange={(event) => updatePositiveIntDraft('computeParseSustainedWindowSec', event.target.value)}
-              />
-            </div>
-          </div>
-        ) : null}
+          </details>
+        </div>
 
         <div className="px-0.5 pt-1 pb-2 border-b border-offbase last:border-b-0">
           <div className="flex items-center gap-2.5">
@@ -588,7 +604,7 @@ export function AdminFeaturesPanel() {
           </Button>
           <Button
             onClick={saveAll}
-            disabled={dirty.size === 0 || saving}
+            disabled={dirty.size === 0 || saving || Boolean(policyError)}
             variant="primary"
             size="sm"
           >

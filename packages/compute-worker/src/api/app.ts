@@ -12,6 +12,7 @@ import {
   getComputeOpStaleMs,
   getAvailableCpuCores,
   getOnnxThreadsPerJob,
+  configureComputeJobConcurrency,
   buildLoggerConfig,
   normalizeNatsReplicas,
   readBoolEnv,
@@ -55,6 +56,10 @@ import {
 import { createTtsPlaybackStorage } from '../playback/storage';
 import { createJobHandlers } from '../jobs/handlers';
 import { createWorkerLoopController, type QueuedJob } from '../jobs/worker-loop';
+import { fetchComputeLimitPolicy } from '../jobs/compute-limit-policy-broker';
+import { notifyComputeAdmissionTerminal } from '../jobs/compute-limit-broker';
+import { cloneComputeLimitPolicyDocument } from '@openreader/runtime-config/compute-limits';
+import { ProviderCapacityCoordinator } from '../jobs/provider-capacity';
 import { createNatsSessionManager } from '../infrastructure/nats-session';
 import {
   ACCOUNT_EXPORT_JOBS_SUBJECT,
@@ -130,7 +135,24 @@ export async function createComputeWorkerApp(options: CreateComputeWorkerAppOpti
   const natsUrl = requireEnv('NATS_URL');
   const timeoutConfig = getComputeTimeoutConfig();
 
-  const jobConcurrency = readPositiveIntEnv('COMPUTE_JOB_CONCURRENCY', 1);
+  let computePolicy = cloneComputeLimitPolicyDocument();
+  if (!disableWorkers) {
+    try {
+      computePolicy = await fetchComputeLimitPolicy();
+    } catch (error) {
+      computePolicy.worker.maxExecutingPerWorker = 1;
+      for (const resource of Object.keys(computePolicy.worker.resources)) {
+        computePolicy.worker.resources[resource as keyof typeof computePolicy.worker.resources] = 1;
+      }
+      for (const action of Object.values(computePolicy.actions)) {
+        if (action.execution) action.execution.maxConcurrentPerWorker = 1;
+      }
+      console.error('[compute-worker] Initial compute policy fetch failed; using conservative limits until refresh', error);
+    }
+  }
+  const jobConcurrency = computePolicy.worker.maxExecutingPerWorker;
+  configureComputeJobConcurrency(jobConcurrency);
+  let computePolicyRefreshTimer: ReturnType<typeof setTimeout> | null = null;
   const whisperTimeoutMs = timeoutConfig.whisperTimeoutMs;
   const pdfTimeoutMs = timeoutConfig.pdfTimeoutMs;
   const pdfHardCapMs = timeoutConfig.pdfHardCapMs;
@@ -340,6 +362,11 @@ export async function createComputeWorkerApp(options: CreateComputeWorkerAppOpti
     },
   });
 
+  const providerCapacity = new ProviderCapacityCoordinator(
+    () => computePolicy,
+    async () => (await ensureConnected()).kv,
+    app.log,
+  );
   const jobHandlers = createJobHandlers({
     storage,
     playbackStorage,
@@ -348,6 +375,10 @@ export async function createComputeWorkerApp(options: CreateComputeWorkerAppOpti
     ttsPlaybackSegmentTimeoutMs,
     s3Prefix,
     logger: app.log,
+    acquireProviderCapacity: (input) => providerCapacity.acquire(input),
+    coolDownProviderCapacity: (providerRef, retryAfterSeconds) => (
+      providerCapacity.coolDown(providerRef, retryAfterSeconds)
+    ),
   });
 
   const workerLoops = createWorkerLoopController({
@@ -355,6 +386,7 @@ export async function createComputeWorkerApp(options: CreateComputeWorkerAppOpti
     handlers: jobHandlers,
     logger: app.log,
     jobConcurrency,
+    getComputePolicy: () => computePolicy,
     pdfAttempts,
     pdfCodec: layoutJobCodec,
     ttsPlaybackCodec: ttsPlaybackJobCodec,
@@ -369,7 +401,22 @@ export async function createComputeWorkerApp(options: CreateComputeWorkerAppOpti
     onInFlightJobsChanged: (delta) => {
       inFlightJobs = Math.max(0, inFlightJobs + delta);
     },
+    onOperationTerminal: notifyComputeAdmissionTerminal,
   });
+
+  const scheduleComputePolicyRefresh = (): void => {
+    if (disableWorkers || stopping) return;
+    computePolicyRefreshTimer = setTimeout(() => {
+      void fetchComputeLimitPolicy().then((nextPolicy) => {
+        computePolicy = nextPolicy;
+        configureComputeJobConcurrency(nextPolicy.worker.maxExecutingPerWorker);
+        workerLoops.policyChanged();
+      }).catch((error) => {
+        app.log.error({ error: String(error) }, 'compute policy refresh failed');
+      }).finally(scheduleComputePolicyRefresh);
+    }, computePolicy.worker.policyRefreshSeconds * 1000);
+  };
+  scheduleComputePolicyRefresh();
 
   sessionManager = createNatsSessionManager({
     connectOptions: connectOpts,
@@ -409,6 +456,7 @@ export async function createComputeWorkerApp(options: CreateComputeWorkerAppOpti
   const close = async (): Promise<void> => {
     if (stopping) return;
     stopping = true;
+    if (computePolicyRefreshTimer) clearTimeout(computePolicyRefreshTimer);
     await app.close();
     await sessionManager.close();
   };

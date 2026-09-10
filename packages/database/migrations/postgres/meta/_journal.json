@@ -120,6 +120,20 @@
       "when": 1787932380436,
       "tag": "0016_account_identity_issuer",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1788896371423,
+      "tag": "0017_unified_compute_limits",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1789000698349,
+      "tag": "0018_persist_admission_active_scopes",
+      "breakpoints": true
     }
   ]
 }

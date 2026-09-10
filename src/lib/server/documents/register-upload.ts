@@ -63,6 +63,7 @@ export async function registerUploadedDocument(input: RegisterUploadedDocumentIn
     await enqueueDocumentPreview(
       {
         id: input.documentId,
+        userId: input.userId,
         type: input.type,
         lastModified: input.lastModified,
       },

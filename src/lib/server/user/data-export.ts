@@ -1,4 +1,4 @@
-export const ACCOUNT_EXPORT_SCHEMA_VERSION = 4;
+export const ACCOUNT_EXPORT_SCHEMA_VERSION = 5;
 
 type ExportDocument = {
   id: string;
@@ -26,8 +26,8 @@ export type UserExportManifest = {
     folders: unknown[];
     onboarding: unknown | null;
     readingHistory: unknown[];
-    ttsUsage: unknown[];
-    jobEvents: unknown[];
+    computeLimitAdmissions: unknown[];
+    computeLimitEvents: unknown[];
     documentSettings: unknown[];
     authSessions: unknown[];
     linkedAccounts: unknown[];
@@ -54,8 +54,8 @@ export type BuildUserExportManifestInput = {
   folders?: unknown[];
   onboarding?: unknown | null;
   readingHistory: unknown[];
-  ttsUsage: unknown[];
-  jobEvents: unknown[];
+  computeLimitAdmissions: unknown[];
+  computeLimitEvents: unknown[];
   documentSettings: unknown[];
   authSessions: unknown[];
   linkedAccounts: unknown[];
@@ -86,8 +86,8 @@ export function buildUserExportManifest(input: BuildUserExportManifestInput): Us
     folders = [],
     onboarding = null,
     readingHistory,
-    ttsUsage,
-    jobEvents,
+    computeLimitAdmissions,
+    computeLimitEvents,
     documentSettings,
     authSessions,
     linkedAccounts,
@@ -119,8 +119,8 @@ export function buildUserExportManifest(input: BuildUserExportManifestInput): Us
       folders,
       onboarding,
       readingHistory,
-      ttsUsage,
-      jobEvents,
+      computeLimitAdmissions,
+      computeLimitEvents,
       documentSettings,
       authSessions,
       linkedAccounts,

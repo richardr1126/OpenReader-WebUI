@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, real, primaryKey, index, foreignKey, check } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, real, primaryKey, index, uniqueIndex, foreignKey, check } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
 import { user } from './schema_auth_sqlite';
 
@@ -43,32 +43,58 @@ export const documents = sqliteTable('documents', {
 // They are created/migrated via `@better-auth/cli migrate` and should NOT be
 // defined here. Only application-specific tables belong in this file.
 
-export const userTtsChars = sqliteTable("user_tts_chars", {
-  // Also stores device:* and ip:* backstop buckets, so this cannot reference user.id.
-  userId: text('user_id').notNull(),
-  date: text('date').notNull(), // SQLite doesn't have native DATE type, text YYYY-MM-DD is standard
-  charCount: integer('char_count').default(0),
-  createdAt: integer('created_at').default(SQLITE_NOW_MS),
-  updatedAt: integer('updated_at').default(SQLITE_NOW_MS),
+export const computeLimitAdmissions = sqliteTable('compute_limit_admissions', {
+  id: text('id').primaryKey(),
+  requestKey: text('request_key').notNull(),
+  userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
+  isAnonymous: integer('is_anonymous', { mode: 'boolean' }).notNull(),
+  action: text('action').notNull(),
+  state: text('state').notNull(),
+  operationId: text('operation_id'),
+  deviceScopeKey: text('device_scope_key'),
+  ipScopeKey: text('ip_scope_key'),
+  activeScopesJson: text('active_scopes_json').notNull().default('[]'),
+  policyVersion: integer('policy_version').notNull(),
+  createdAt: integer('created_at').notNull(),
+  activatedAt: integer('activated_at'),
+  finishedAt: integer('finished_at'),
+  leaseExpiresAt: integer('lease_expires_at').notNull(),
 }, (table) => [
-  primaryKey({ columns: [table.userId, table.date] }),
-  index('idx_user_tts_chars_date').on(table.date),
+  uniqueIndex('compute_limit_admissions_request_unique').on(table.userId, table.action, table.requestKey),
+  index('compute_limit_admissions_user_active').on(table.userId, table.action, table.state, table.leaseExpiresAt),
+  index('compute_limit_admissions_action_active').on(table.action, table.state, table.leaseExpiresAt),
+  index('compute_limit_admissions_operation').on(table.operationId),
+  check('compute_limit_admissions_state_valid', sql`${table.state} in ('reserved', 'active', 'finished', 'cancelled')`),
 ]);
 
-// Generic per-user job-creation ledger for rate/concurrency limiting of
-// expensive compute operations (e.g. PDF layout parsing). One row per created
-// worker op. A trailing-window COUNT over (user_id, action) enforces both a
-// short-window burst cap and a wider sustained/concurrency cap; because the
-// worker bounds each op by a hard cap, "ops created in the last hard-cap
-// window" is an upper bound on in-flight ops. Old rows are pruned opportunistically.
-export const userJobEvents = sqliteTable('user_job_events', {
+export const computeLimitBuckets = sqliteTable('compute_limit_buckets', {
+  scopeType: text('scope_type').notNull(),
+  scopeKey: text('scope_key').notNull(),
+  action: text('action').notNull(),
+  metric: text('metric').notNull(),
+  windowStart: integer('window_start').notNull(),
+  windowEnd: integer('window_end').notNull(),
+  used: integer('used').notNull().default(0),
+  updatedAt: integer('updated_at').notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.scopeType, table.scopeKey, table.action, table.metric, table.windowStart] }),
+  index('compute_limit_buckets_expiry').on(table.windowEnd, table.metric),
+  check('compute_limit_buckets_used_nonnegative', sql`${table.used} >= 0`),
+]);
+
+export const computeLimitEvents = sqliteTable('compute_limit_events', {
+  eventKey: text('event_key').primaryKey(),
+  admissionId: text('admission_id').references(() => computeLimitAdmissions.id, { onDelete: 'set null' }),
   userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
   action: text('action').notNull(),
-  opId: text('op_id').notNull(),
-  createdAt: integer('created_at').notNull().default(SQLITE_NOW_MS),
+  metric: text('metric').notNull(),
+  units: integer('units').notNull(),
+  policyVersion: integer('policy_version').notNull(),
+  createdAt: integer('created_at').notNull(),
 }, (table) => [
-  primaryKey({ columns: [table.userId, table.action, table.opId] }),
-  index('idx_user_job_events_user_action_created').on(table.userId, table.action, table.createdAt),
+  index('compute_limit_events_user_action_created').on(table.userId, table.action, table.createdAt),
+  index('compute_limit_events_created').on(table.createdAt),
+  check('compute_limit_events_units_positive', sql`${table.units} > 0`),
 ]);
 
 export const userPreferences = sqliteTable('user_preferences', {

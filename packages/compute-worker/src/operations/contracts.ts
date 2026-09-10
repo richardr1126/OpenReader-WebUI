@@ -1,4 +1,5 @@
 import type { ParsedPdfDocument } from '../api/types';
+import type { WorkerOperationAction } from '@openreader/runtime-config/compute-limits';
 
 export type {
   TTSAudioBuffer,
@@ -309,6 +310,7 @@ export interface TtsPlaybackProgress {
   completedCount: number;
   plannedCount: number;
   phase?: 'downloading_model' | 'generating';
+  stopReason?: 'usage_limit';
   downloadedBytes?: number;
   totalBytes?: number;
 }
@@ -344,6 +346,22 @@ export type WorkerOperationKind =
   | 'document_preview'
   | 'document_conversion'
   | 'account_export';
+
+/**
+ * The two exhaustive sides keep worker operation kinds and the shared compute
+ * policy vocabulary in lockstep. Adding either one fails type checking until
+ * its counterpart and mapping are declared.
+ */
+export const WORKER_OPERATION_COMPUTE_ACTION = {
+  pdf_layout: 'pdf_layout',
+  tts_playback: 'tts_playback',
+  tts_playback_plan: 'tts_playback_plan',
+  tts_playback_export: 'tts_playback_export',
+  document_preview: 'document_preview',
+  document_conversion: 'document_conversion',
+  account_export: 'account_export',
+} as const satisfies Record<WorkerOperationKind, WorkerOperationAction>
+  & Record<WorkerOperationAction, WorkerOperationKind>;
 
 /**
  * Per-kind operation policy. The exhaustive Record forces every new operation

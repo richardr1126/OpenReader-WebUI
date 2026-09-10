@@ -4,7 +4,7 @@ import { Metadata, Viewport } from "next";
 import { Figtree } from "next/font/google";
 import { ConsentAwareAnalytics } from "@/components/ConsentAwareAnalytics";
 import { CookieConsentBanner } from "@/components/CookieConsentBanner";
-import { getResolvedRuntimeConfig } from "@/lib/server/runtime-config";
+import { getResolvedRuntimeConfig, publicRuntimeConfig } from "@/lib/server/runtime-config";
 import { tryGetOrigin } from "@/lib/shared/urls";
 import pkg from "../../package.json";
 
@@ -61,7 +61,7 @@ function jsonEmbedSafe(value: unknown): string {
 export default async function RootLayout({ children }: { children: ReactNode }) {
   const runtimeConfig = await getResolvedRuntimeConfig();
   const runtimeConfigWithAppVersion = {
-    ...runtimeConfig,
+    ...publicRuntimeConfig(runtimeConfig),
     appVersion: pkg.version,
   };
   const runtimeConfigInit = `window.__RUNTIME_CONFIG__=${jsonEmbedSafe(runtimeConfigWithAppVersion)};`;

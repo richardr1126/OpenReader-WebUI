@@ -14,6 +14,7 @@ import type { TTSRequestHeaders } from '@/types/client';
 import { TTS_PLAYBACK_CURSOR_HEARTBEAT_MS } from '@/types/tts';
 import type { PlaybackSessionState } from '@/hooks/audio/usePlaybackProjection';
 import { createCoalescedPlaybackRefresh, createPlaybackOperationSubscription } from '@/lib/client/tts/playback-refresh';
+import { useAuthRateLimit } from '@/contexts/AuthRateLimitContext';
 
 type UsePlaybackForegroundSyncInput = {
   playbackCursorOrdinalRef: MutableRefObject<number | null>;
@@ -32,6 +33,7 @@ type PlaybackOperationSubscription = {
 const MODEL_DOWNLOAD_TOAST_ID = 'tts-model-download';
 
 export function usePlaybackForegroundSync(input: UsePlaybackForegroundSyncInput) {
+  const { refresh: refreshComputeUsage } = useAuthRateLimit();
   const {
     playbackCursorOrdinalRef,
     playbackRequestHeadersRef,
@@ -46,6 +48,7 @@ export function usePlaybackForegroundSync(input: UsePlaybackForegroundSyncInput)
   const playbackRefreshRef = useRef<ReturnType<typeof createCoalescedPlaybackRefresh> | null>(null);
   const playbackCursorWriteRef = useRef(false);
   const pendingCursorOrdinalRef = useRef<number | null>(null);
+  const usageLimitRefreshRunRef = useRef<number | null>(null);
 
   const setWorkerPlaybackActive = useCallback((playbackActive: boolean, requireAcknowledgement = false) => {
     const session = playbackSessionRef.current;
@@ -128,6 +131,7 @@ export function usePlaybackForegroundSync(input: UsePlaybackForegroundSyncInput)
     if (!activeSession) return;
 
     stopPlaybackForegroundSync();
+    usageLimitRefreshRunRef.current = null;
     const refresh = createCoalescedPlaybackRefresh(async (signal) => {
       if (runId !== playbackRunIdRef.current || playbackSessionRef.current !== activeSession) return;
       const readSignal = AbortSignal.any([signal, AbortSignal.timeout(30_000)]);
@@ -147,6 +151,10 @@ export function usePlaybackForegroundSync(input: UsePlaybackForegroundSyncInput)
       subscribe: (operationId, onSnapshot) => subscribeTtsPlaybackEvents(activeSession.sessionId, { onSnapshot }, operationId),
       onSnapshot: (snapshot) => {
         if (runId !== playbackRunIdRef.current) return;
+        if (snapshot.stopReason === 'usage_limit' && usageLimitRefreshRunRef.current !== runId) {
+          usageLimitRefreshRunRef.current = runId;
+          void refreshComputeUsage();
+        }
         if (snapshot.status === 'failed') {
           toast.dismiss(MODEL_DOWNLOAD_TOAST_ID);
           return;
@@ -178,6 +186,7 @@ export function usePlaybackForegroundSync(input: UsePlaybackForegroundSyncInput)
   }, [
     playbackRunIdRef,
     playbackSessionRef,
+    refreshComputeUsage,
     refreshPlaybackTimeline,
     setPlaybackSeekLayout,
     stopPlaybackForegroundSync,

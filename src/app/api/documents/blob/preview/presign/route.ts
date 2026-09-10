@@ -19,6 +19,7 @@ export async function GET(req: NextRequest) {
     const preview = await ensureDocumentPreview(
       {
         id: doc.id,
+        userId: doc.userId,
         type: doc.type,
         lastModified: Number(doc.lastModified),
       },

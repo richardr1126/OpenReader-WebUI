@@ -7,6 +7,8 @@
     "src"
   ],
   "exports": {
+    "./compute-limits": "./src/compute-limits.ts",
+    "./compute-limit-broker": "./src/compute-limit-broker.ts",
     "./storage-transport": "./src/storage-transport.mjs"
   }
 }

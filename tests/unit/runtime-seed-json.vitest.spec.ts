@@ -1,10 +1,12 @@
 import { eq, inArray, not } from 'drizzle-orm';
 import { describe, expect, test } from 'vitest';
+import { readFileSync } from 'node:fs';
 
 import { db } from '@openreader/database';
 import { adminProviders, adminSettings } from '@openreader/database/schema';
 import { RUNTIME_KEYS, seedRuntimeConfigFromValues } from '../../src/lib/server/admin/settings';
 import { __seedInternals } from '../../src/lib/server/admin/seed';
+import { cloneComputeLimitPolicyDocument } from '@openreader/runtime-config/compute-limits';
 
 type SettingRow = {
   key: string;
@@ -142,6 +144,13 @@ async function hasNonTestProviderRows(testSlugs: string[]): Promise<boolean> {
 }
 
 describe('runtime seed JSON parsing', () => {
+  test('keeps the shipped full seed example valid and complete', () => {
+    const raw = readFileSync('examples/openreader-seed.json', 'utf8');
+    const parsed = __seedInternals.parseRuntimeSeedDocument(raw);
+    expect(Object.keys(parsed.seed.runtimeConfig ?? {}).sort()).toEqual([...RUNTIME_KEYS].sort());
+    expect(parsed.seed.runtimeConfig?.computeLimitPolicies).toEqual(cloneComputeLimitPolicyDocument());
+  });
+
   test('rejects malformed JSON input', () => {
     expect(() => __seedInternals.parseRuntimeSeedDocument('{not json')).toThrow(/invalid/i);
   });
@@ -254,20 +263,11 @@ describe('runtime config JSON seeding', () => {
       enableAudiobookExport: false,
       enableDocxConversion: false,
       showAllProviderModels: false,
-      disableTtsRateLimit: false,
-      ttsDailyLimitAnonymous: 12345,
-      ttsDailyLimitAuthenticated: 23456,
-      ttsIpDailyLimitAnonymous: 34567,
-      ttsIpDailyLimitAuthenticated: 45678,
       ttsCacheMaxSizeBytes: 16 * 1024 * 1024,
       ttsCacheTtlMs: 600_000,
       ttsUpstreamMaxRetries: 3,
       ttsUpstreamTimeoutMs: 120_000,
-      disableComputeRateLimit: false,
-      computeParseBurstMax: 4,
-      computeParseBurstWindowSec: 30,
-      computeParseSustainedMax: 12,
-      computeParseSustainedWindowSec: 300,
+      computeLimitPolicies: cloneComputeLimitPolicyDocument(),
       maxUploadMb: 150,
       ttsPlaybackBackgroundExtent: 'document',
     };
@@ -294,6 +294,7 @@ describe('runtime config JSON seeding', () => {
     expect(RUNTIME_KEYS.length).toBeGreaterThan(0);
     expect(RUNTIME_KEYS).toContain('defaultTtsProvider');
     expect(RUNTIME_KEYS).toContain('ttsUpstreamTimeoutMs');
+    expect(RUNTIME_KEYS).toContain('computeLimitPolicies');
   });
 });
 

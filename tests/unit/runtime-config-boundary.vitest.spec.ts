@@ -29,7 +29,6 @@ const documentedEnvironmentVariables = [
   'COMPUTE_CREDENTIAL_BROKER_TIMEOUT_MS',
   'COMPUTE_CREDENTIAL_BROKER_TOKEN',
   'COMPUTE_CREDENTIAL_BROKER_URL',
-  'COMPUTE_JOB_CONCURRENCY',
   'COMPUTE_JOB_STATES_MAX_BYTES',
   'COMPUTE_JOBS_STREAM_MAX_BYTES',
   'COMPUTE_LOG_LEVEL',
@@ -122,6 +121,16 @@ describe('shared runtime configuration boundary', () => {
     expect(bootstrap).toContain('env.S3_BROWSER_TRANSPORT = resolved.mode');
   });
 
+  test('keeps compute-limit policy details out of the browser runtime config', () => {
+    const layout = source('src/app/layout.tsx');
+    const serverRuntime = source('src/lib/server/runtime-config.ts');
+    const clientRuntime = source('src/contexts/RuntimeConfigContext.tsx');
+
+    expect(layout).toContain('publicRuntimeConfig(runtimeConfig)');
+    expect(serverRuntime).toContain("Omit<ResolvedRuntimeConfig, 'computeLimitPolicies'>");
+    expect(clientRuntime).not.toContain('computeLimitPolicies');
+  });
+
   test('keeps the active environment inventory and deployment examples canonical', () => {
     const reference = source('docs-site/docs/reference/environment-variables.md');
     const rootExample = source('.env.example');
@@ -156,7 +165,10 @@ describe('shared runtime configuration boundary', () => {
     expect(fullWorker).not.toContain('AUTH_SECRET:');
     expect(fullWorker).not.toContain('POSTGRES_URL:');
     expect(fullWorker).not.toContain('SQLITE_DB_PATH:');
-    expect(fullWorker).toContain('COMPUTE_CREDENTIAL_BROKER_URL: http://openreader:3003/api/internal/compute/tts-credentials');
+    expect(fullCompose).toContain('COMPUTE_WORKER_URL: http://127.0.0.1:8081');
+    expect(fullCompose).toContain('- "8081:8081"');
+    expect(fullWorker).toContain('network_mode: "service:openreader"');
+    expect(fullWorker).toContain('COMPUTE_CREDENTIAL_BROKER_URL: http://127.0.0.1:3003/api/internal/compute/tts-credentials');
     expect(fullWorker).toContain('COMPUTE_CREDENTIAL_BROKER_TOKEN:');
     expect(playwrightWorkflow).toContain('TTS_PLAYBACK_TOKEN_SECRET:');
     for (const slimCompose of slimComposeFiles) {

@@ -32,6 +32,8 @@ import { errorResponse } from '@/lib/server/errors/next-response';
 import { errorToLog, serverLogger } from '@/lib/server/logger';
 import { isS3Configured } from '@/lib/server/storage/s3';
 import type { BaseDocument, DocumentType } from '@/types/documents';
+import { getResolvedRuntimeConfig } from '@/lib/server/runtime-config';
+import { createAdmittedComputeOperation } from '@/lib/server/compute-limits/run-admitted';
 
 export const dynamic = 'force-dynamic';
 
@@ -245,9 +247,16 @@ async function finalizeDocx(input: {
     };
   }
 
+  const runtimeConfig = await getResolvedRuntimeConfig();
   const operation: ComputeOperation | null = resolved.operation?.status === 'failed'
     ? resolved.operation
-    : await client.createDocumentConversionOperation(conversionRequest);
+    : await createAdmittedComputeOperation({
+      policy: runtimeConfig.computeLimitPolicies,
+      action: 'document_conversion',
+      requestKey: `${conversionRequest.conversionId}:${temp.lastModified}`,
+      subject: { userId: input.userId, isAnonymous: false },
+      create: () => client.createDocumentConversionOperation(conversionRequest),
+    });
   if (operation?.status === 'failed') {
     return {
       kind: 'failed',

@@ -395,6 +395,8 @@ export interface paths {
                                     plannedCount: number;
                                     /** @enum {string} */
                                     phase?: "downloading_model" | "generating";
+                                    /** @enum {string} */
+                                    stopReason?: "usage_limit";
                                     downloadedBytes?: number;
                                     totalBytes?: number;
                                 } | {
@@ -418,6 +420,8 @@ export interface paths {
                                 plannedCount: number;
                                 /** @enum {string} */
                                 phase?: "downloading_model" | "generating";
+                                /** @enum {string} */
+                                stopReason?: "usage_limit";
                                 downloadedBytes?: number;
                                 totalBytes?: number;
                             } | null;
@@ -1316,6 +1320,8 @@ export interface paths {
                                 plannedCount: number;
                                 /** @enum {string} */
                                 phase?: "downloading_model" | "generating";
+                                /** @enum {string} */
+                                stopReason?: "usage_limit";
                                 downloadedBytes?: number;
                                 totalBytes?: number;
                             } | {
@@ -1468,6 +1474,8 @@ export interface paths {
                                 plannedCount: number;
                                 /** @enum {string} */
                                 phase?: "downloading_model" | "generating";
+                                /** @enum {string} */
+                                stopReason?: "usage_limit";
                                 downloadedBytes?: number;
                                 totalBytes?: number;
                             } | {
@@ -1617,6 +1625,8 @@ export interface paths {
                                 plannedCount: number;
                                 /** @enum {string} */
                                 phase?: "downloading_model" | "generating";
+                                /** @enum {string} */
+                                stopReason?: "usage_limit";
                                 downloadedBytes?: number;
                                 totalBytes?: number;
                             } | {
@@ -1789,6 +1799,8 @@ export interface paths {
                                 plannedCount: number;
                                 /** @enum {string} */
                                 phase?: "downloading_model" | "generating";
+                                /** @enum {string} */
+                                stopReason?: "usage_limit";
                                 downloadedBytes?: number;
                                 totalBytes?: number;
                             } | {
@@ -1952,6 +1964,8 @@ export interface paths {
                                 plannedCount: number;
                                 /** @enum {string} */
                                 phase?: "downloading_model" | "generating";
+                                /** @enum {string} */
+                                stopReason?: "usage_limit";
                                 downloadedBytes?: number;
                                 totalBytes?: number;
                             } | {
@@ -2101,6 +2115,8 @@ export interface paths {
                                 plannedCount: number;
                                 /** @enum {string} */
                                 phase?: "downloading_model" | "generating";
+                                /** @enum {string} */
+                                stopReason?: "usage_limit";
                                 downloadedBytes?: number;
                                 totalBytes?: number;
                             } | {
@@ -2268,6 +2284,8 @@ export interface paths {
                                     plannedCount: number;
                                     /** @enum {string} */
                                     phase?: "downloading_model" | "generating";
+                                    /** @enum {string} */
+                                    stopReason?: "usage_limit";
                                     downloadedBytes?: number;
                                     totalBytes?: number;
                                 } | {
@@ -2425,6 +2443,8 @@ export interface paths {
                                 plannedCount: number;
                                 /** @enum {string} */
                                 phase?: "downloading_model" | "generating";
+                                /** @enum {string} */
+                                stopReason?: "usage_limit";
                                 downloadedBytes?: number;
                                 totalBytes?: number;
                             } | {
@@ -2601,6 +2621,8 @@ export interface paths {
                                     plannedCount: number;
                                     /** @enum {string} */
                                     phase?: "downloading_model" | "generating";
+                                    /** @enum {string} */
+                                    stopReason?: "usage_limit";
                                     downloadedBytes?: number;
                                     totalBytes?: number;
                                 } | {
@@ -2751,6 +2773,8 @@ export interface paths {
                                     plannedCount: number;
                                     /** @enum {string} */
                                     phase?: "downloading_model" | "generating";
+                                    /** @enum {string} */
+                                    stopReason?: "usage_limit";
                                     downloadedBytes?: number;
                                     totalBytes?: number;
                                 } | {
@@ -2928,6 +2952,8 @@ export interface paths {
                                     plannedCount: number;
                                     /** @enum {string} */
                                     phase?: "downloading_model" | "generating";
+                                    /** @enum {string} */
+                                    stopReason?: "usage_limit";
                                     downloadedBytes?: number;
                                     totalBytes?: number;
                                 } | {
@@ -3099,6 +3125,8 @@ export interface paths {
                                     plannedCount: number;
                                     /** @enum {string} */
                                     phase?: "downloading_model" | "generating";
+                                    /** @enum {string} */
+                                    stopReason?: "usage_limit";
                                     downloadedBytes?: number;
                                     totalBytes?: number;
                                 } | {
@@ -3237,6 +3265,8 @@ export interface paths {
                                 plannedCount: number;
                                 /** @enum {string} */
                                 phase?: "downloading_model" | "generating";
+                                /** @enum {string} */
+                                stopReason?: "usage_limit";
                                 downloadedBytes?: number;
                                 totalBytes?: number;
                             } | {
@@ -3601,6 +3631,8 @@ export interface components {
                 plannedCount: number;
                 /** @enum {string} */
                 phase?: "downloading_model" | "generating";
+                /** @enum {string} */
+                stopReason?: "usage_limit";
                 downloadedBytes?: number;
                 totalBytes?: number;
             } | {
@@ -3693,6 +3725,8 @@ export interface components {
                     plannedCount: number;
                     /** @enum {string} */
                     phase?: "downloading_model" | "generating";
+                    /** @enum {string} */
+                    stopReason?: "usage_limit";
                     downloadedBytes?: number;
                     totalBytes?: number;
                 } | {
@@ -3788,6 +3822,8 @@ export interface components {
                     plannedCount: number;
                     /** @enum {string} */
                     phase?: "downloading_model" | "generating";
+                    /** @enum {string} */
+                    stopReason?: "usage_limit";
                     downloadedBytes?: number;
                     totalBytes?: number;
                 } | {
@@ -3905,6 +3941,8 @@ export interface components {
                     plannedCount: number;
                     /** @enum {string} */
                     phase?: "downloading_model" | "generating";
+                    /** @enum {string} */
+                    stopReason?: "usage_limit";
                     downloadedBytes?: number;
                     totalBytes?: number;
                 } | {
@@ -4021,6 +4059,8 @@ export interface components {
                     plannedCount: number;
                     /** @enum {string} */
                     phase?: "downloading_model" | "generating";
+                    /** @enum {string} */
+                    stopReason?: "usage_limit";
                     downloadedBytes?: number;
                     totalBytes?: number;
                 } | {
@@ -4133,6 +4173,8 @@ export interface components {
                     plannedCount: number;
                     /** @enum {string} */
                     phase?: "downloading_model" | "generating";
+                    /** @enum {string} */
+                    stopReason?: "usage_limit";
                     downloadedBytes?: number;
                     totalBytes?: number;
                 } | {
@@ -4244,6 +4286,8 @@ export interface components {
                     plannedCount: number;
                     /** @enum {string} */
                     phase?: "downloading_model" | "generating";
+                    /** @enum {string} */
+                    stopReason?: "usage_limit";
                     downloadedBytes?: number;
                     totalBytes?: number;
                 } | {

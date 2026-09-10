@@ -4,13 +4,107 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
-import { DownloadIcon } from '@/components/icons/Icons';
+import { DownloadIcon, RefreshIcon, SpeedometerIcon } from '@/components/icons/Icons';
 import { Button, ChoiceTile } from '@/components/ui';
-import { useAuthConfig } from '@/contexts/AuthRateLimitContext';
+import { formatCharCount, useAuthConfig, useAuthRateLimit } from '@/contexts/AuthRateLimitContext';
 import { useRuntimeConfig } from '@/contexts/RuntimeConfigContext';
 import { useAuthSession } from '@/hooks/useAuthSession';
 import { getAuthClient } from '@/lib/client/auth-client';
 import { useAccountExport } from './useAccountExport';
+
+function TtsUsageCard() {
+  const {
+    status,
+    loading,
+    error,
+    refresh,
+    isAtLimit,
+    timeUntilReset,
+  } = useAuthRateLimit();
+  const hasLimit = Boolean(
+    status
+    && status.mode !== 'off'
+    && status.limit !== null,
+  );
+  const limit = status?.limit ?? null;
+  const usedPercent = hasLimit && status && limit !== null
+    ? Math.min(100, Math.round((status.currentCount / Math.max(1, limit)) * 100))
+    : 0;
+
+  return (
+    <section className="overflow-hidden rounded-lg border border-line bg-background" aria-labelledby="tts-usage-heading">
+      <div className="flex items-start gap-3 p-4">
+        <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-accent-wash text-accent">
+          <SpeedometerIcon className="h-5 w-5" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <h4 id="tts-usage-heading" className="text-sm font-medium text-foreground">TTS generation</h4>
+              <p className="mt-0.5 text-xs text-soft">
+                Only newly generated segments count. Replaying cached audio is always free.
+              </p>
+            </div>
+            <Button
+              variant="ghost"
+              size="xs"
+              onClick={() => void refresh()}
+              disabled={loading}
+              aria-label="Refresh TTS usage"
+              className="gap-1"
+            >
+              <RefreshIcon className={`h-3 w-3 ${loading ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
+          </div>
+
+          {error && !status ? (
+            <p className="mt-3 text-xs text-danger">Usage is temporarily unavailable.</p>
+          ) : loading && !status ? (
+            <div className="mt-3 h-12 animate-pulse rounded-md bg-surface-sunken" aria-label="Loading TTS usage" />
+          ) : hasLimit && status && limit !== null ? (
+            <div className="mt-3 space-y-2">
+              <div className="flex items-baseline justify-between gap-3 text-xs">
+                <span className="font-medium text-foreground">
+                  {formatCharCount(status.currentCount)} of {formatCharCount(limit)} characters
+                </span>
+                <span className="text-soft">{usedPercent}%</span>
+              </div>
+              <div
+                className="h-2 overflow-hidden rounded-full bg-surface-sunken"
+                role="progressbar"
+                aria-label="Daily TTS generation usage"
+                aria-valuemin={0}
+                aria-valuemax={limit}
+                aria-valuenow={Math.min(status.currentCount, limit)}
+              >
+                <div
+                  className={`h-full rounded-full transition-[width] duration-slow ${isAtLimit ? 'bg-accent' : 'bg-secondary-accent'}`}
+                  style={{ width: `${usedPercent}%` }}
+                />
+              </div>
+              <div className="flex flex-wrap justify-between gap-x-3 gap-y-1 text-xs text-soft">
+                <span>
+                  {isAtLimit
+                    ? 'New generation pauses at the next uncached segment.'
+                    : status.mode === 'observe' && usedPercent >= 100
+                      ? 'Threshold reached; generation continues in tracking mode.'
+                      : `${formatCharCount(status.remainingChars ?? 0)} characters remaining.`}
+                </span>
+                <span>{status.mode === 'observe' ? 'Tracking only' : `Resets in ${timeUntilReset}`}</span>
+              </div>
+            </div>
+          ) : (
+            <div className="mt-3 rounded-md border border-line-soft bg-surface-sunken px-3 py-2">
+              <p className="text-xs font-medium text-foreground">No TTS generation limit</p>
+              <p className="mt-0.5 text-xs text-soft">Your administrator is not limiting generated characters.</p>
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
 
 export function AccountSettingsPanel() {
   const runtimeConfig = useRuntimeConfig();
@@ -66,6 +160,8 @@ export function AccountSettingsPanel() {
             )}
           </div>
         </div>
+
+        {session?.user && <TtsUsageCard />}
 
         {session?.user && (
           <ChoiceTile

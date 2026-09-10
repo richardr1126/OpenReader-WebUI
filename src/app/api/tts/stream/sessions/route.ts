@@ -17,7 +17,14 @@ import { getRuntimeConfig } from '@/lib/server/admin/settings';
 import { TTS_PLAYBACK_AHEAD_WINDOW } from '@/types/tts';
 import { createRequestLogger } from '@/lib/server/logger';
 import { errorResponse } from '@/lib/server/errors/next-response';
-import { checkTtsPlaybackQuota } from '@/lib/server/tts/playback-quota';
+import { getClientIp } from '@/lib/server/rate-limit/request-ip';
+import { getOrCreateDeviceId, setDeviceIdCookie } from '@/lib/server/rate-limit/device-id';
+import {
+  activateComputeAdmission,
+  buildTtsPlaybackAdmissionRequestKey,
+  finishComputeAdmission,
+  reserveComputeAdmission,
+} from '@/lib/server/compute-limits/admission';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -92,16 +99,6 @@ export async function POST(request: NextRequest) {
     const now = Date.now();
     const expiresAt = now + TTS_PLAYBACK_SESSION_TTL_MS;
     const { settingsHash, settingsJson, planning } = await buildTtsPlaybackPlanningInput(parsed, scope);
-    const quotaResponse = await checkTtsPlaybackQuota({
-      request,
-      scope,
-      documentId: parsed.documentId,
-      settingsHash,
-      planObjectKey,
-      runtimeConfig,
-    });
-    if (quotaResponse) return quotaResponse;
-
     const sessionId = buildTtsPlaybackCanonicalSessionId({
       storageUserId: scope.storageUserId,
       documentId: parsed.documentId,
@@ -110,6 +107,37 @@ export async function POST(request: NextRequest) {
       settingsHash,
       planObjectKey,
       purpose: parsed.generationExtent === 'document' ? 'export-document' : 'live',
+    });
+    const device = scope.isAnonymousUser ? getOrCreateDeviceId(request) : null;
+    const admission = await reserveComputeAdmission({
+      policy: runtimeConfig.computeLimitPolicies,
+      action: 'tts_playback',
+      requestKey: buildTtsPlaybackAdmissionRequestKey(sessionId, now),
+      subject: {
+        userId: scope.userId,
+        isAnonymous: scope.isAnonymousUser,
+        deviceId: device?.deviceId ?? null,
+        ip: getClientIp(request),
+      },
+    });
+    if (!admission.allowed || !admission.admissionId) {
+      return NextResponse.json({
+        error: 'Compute work is temporarily limited. Please try again shortly.',
+        code: 'COMPUTE_ADMISSION_RATE_LIMITED',
+        retryAfterMs: admission.retryAfterMs,
+      }, {
+        status: 429,
+        headers: { 'Retry-After': String(Math.max(1, Math.ceil(admission.retryAfterMs / 1000))) },
+      });
+    }
+    const playbackLeaseSeconds = Math.max(
+      60,
+      ...runtimeConfig.computeLimitPolicies.actions.tts_playback.admission.active
+        .map((limit) => limit.leaseSeconds),
+    );
+    await activateComputeAdmission({
+      admissionId: admission.admissionId,
+      leaseSeconds: playbackLeaseSeconds,
     });
     const client = new ComputeWorkerClient();
     const preparedGenerationRunId = parsed.generationExtent === 'document'
@@ -134,13 +162,26 @@ export async function POST(request: NextRequest) {
       ...(parsed.generationExtent === 'document' ? { generationExtent: 'document' as const } : {}),
       planning,
     };
-    const prepared = preparedGenerationRunId === null ? null
-      : await client.prepareTtsPlaybackSession({
-        ...workerRequest,
-        generationRunId: preparedGenerationRunId,
-      }, { signal: request.signal });
-    const operation = parsed.generationExtent === 'document'
-      ? await client.createTtsPlaybackOperation(workerRequest, { signal: request.signal }) : null;
+    let prepared;
+    let operation;
+    try {
+      prepared = preparedGenerationRunId === null ? null
+        : await client.prepareTtsPlaybackSession({
+          ...workerRequest,
+          generationRunId: preparedGenerationRunId,
+        }, { signal: request.signal });
+      operation = parsed.generationExtent === 'document'
+        ? await client.createTtsPlaybackOperation(workerRequest, { signal: request.signal }) : null;
+      await activateComputeAdmission({
+        admissionId: admission.admissionId,
+        operationId: operation?.opId ?? null,
+        leaseSeconds: playbackLeaseSeconds,
+      });
+    } catch (error) {
+      await finishComputeAdmission({ admissionId: admission.admissionId, state: 'cancelled' })
+        .catch(() => undefined);
+      throw error;
+    }
 
     const responseBase = {
       sessionId,
@@ -153,7 +194,7 @@ export async function POST(request: NextRequest) {
         : '',
       expiresAt,
     };
-    return NextResponse.json({
+    const response = NextResponse.json({
       ...responseBase,
       audioUrl: buildWorkerAudioUrl({
         sessionId,
@@ -163,6 +204,8 @@ export async function POST(request: NextRequest) {
         expiresAt,
       }),
     }, { status: 202 });
+    if (device?.didCreate) setDeviceIdCookie(response, device.deviceId);
+    return response;
   } catch (error) {
     return errorResponse(error, {
       logger,

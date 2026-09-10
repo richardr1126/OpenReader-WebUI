@@ -5,13 +5,13 @@ import { buildAccountExportArtifactId } from '@openreader/tts/playback-scope';
 import { db } from '@openreader/database';
 import {
   documents,
+  computeLimitAdmissions,
+  computeLimitEvents,
   documentSettings,
   userDocumentProgress,
-  userJobEvents,
   userPreferences,
   userFolders,
   userOnboarding,
-  userTtsChars,
 } from '@openreader/database/schema';
 import * as authSchemaSqlite from '@openreader/database/schema-auth-sqlite';
 import * as authSchemaPostgres from '@openreader/database/schema-auth-postgres';
@@ -27,6 +27,8 @@ import {
 } from '@/lib/server/user/data-export';
 import { auth } from '@/lib/server/auth/auth';
 import { nowTimestampMs } from '@/lib/shared/timestamps';
+import { getResolvedRuntimeConfig } from '@/lib/server/runtime-config';
+import { createAdmittedComputeOperation } from '@/lib/server/compute-limits/run-admitted';
 
 export const dynamic = 'force-dynamic';
 
@@ -118,8 +120,8 @@ export async function POST(req: NextRequest) {
     const [
       prefs,
       progress,
-      ttsUsage,
-      jobEvents,
+      limitAdmissions,
+      limitEvents,
       perDocumentSettings,
       userDocs,
       folders,
@@ -131,16 +133,20 @@ export async function POST(req: NextRequest) {
         .from(userDocumentProgress)
         .where(eq(userDocumentProgress.userId, userId))
         .orderBy(desc(userDocumentProgress.updatedAt)),
-      db
-        .select()
-        .from(userTtsChars)
-        .where(eq(userTtsChars.userId, userId))
-        .orderBy(desc(userTtsChars.date)),
-      db
-        .select()
-        .from(userJobEvents)
-        .where(eq(userJobEvents.userId, userId))
-        .orderBy(desc(userJobEvents.createdAt)),
+      db.select({
+        id: computeLimitAdmissions.id,
+        action: computeLimitAdmissions.action,
+        state: computeLimitAdmissions.state,
+        operationId: computeLimitAdmissions.operationId,
+        createdAt: computeLimitAdmissions.createdAt,
+        activatedAt: computeLimitAdmissions.activatedAt,
+        finishedAt: computeLimitAdmissions.finishedAt,
+      }).from(computeLimitAdmissions)
+        .where(eq(computeLimitAdmissions.userId, userId))
+        .orderBy(desc(computeLimitAdmissions.createdAt)),
+      db.select().from(computeLimitEvents)
+        .where(eq(computeLimitEvents.userId, userId))
+        .orderBy(desc(computeLimitEvents.createdAt)),
       db
         .select()
         .from(documentSettings)
@@ -196,8 +202,8 @@ export async function POST(req: NextRequest) {
       folders,
       onboarding: onboarding[0] ?? null,
       readingHistory: progress,
-      ttsUsage,
-      jobEvents,
+      computeLimitAdmissions: limitAdmissions,
+      computeLimitEvents: limitEvents,
       documentSettings: perDocumentSettings,
       authSessions,
       linkedAccounts,
@@ -237,14 +243,24 @@ export async function POST(req: NextRequest) {
       manifestHash,
     });
     if (!resolved.artifact && (!resolved.operation || resolved.operation.status === 'failed' || resolved.operation.status === 'succeeded')) {
-      await client.createAccountExportOperation({
-        artifactId,
-        userId,
-        storageUserId,
-        namespace,
-        schemaVersion: ACCOUNT_EXPORT_SCHEMA_VERSION,
-        manifestHash,
-        manifestObjectKey,
+      const runtimeConfig = await getResolvedRuntimeConfig();
+      await createAdmittedComputeOperation({
+        policy: runtimeConfig.computeLimitPolicies,
+        action: 'account_export',
+        requestKey: artifactId,
+        subject: {
+          userId,
+          isAnonymous: Boolean((session.user as { isAnonymous?: boolean }).isAnonymous),
+        },
+        create: () => client.createAccountExportOperation({
+          artifactId,
+          userId,
+          storageUserId,
+          namespace,
+          schemaVersion: ACCOUNT_EXPORT_SCHEMA_VERSION,
+          manifestHash,
+          manifestObjectKey,
+        }),
       });
       resolved = await client.resolveAccountExport({
         artifactId,

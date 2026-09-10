@@ -262,6 +262,7 @@ describe('server-state architecture', () => {
       '/api/admin/tasks/[key]/run',
       '/api/admin/tasks/tick',
       '/api/auth/[...all]',
+      '/api/compute-limits/status',
       '/api/documents',
       '/api/documents/[id]/opened',
       '/api/documents/[id]/parsed',
@@ -281,10 +282,12 @@ describe('server-state architecture', () => {
       '/api/documents/import-url',
       '/api/folders',
       '/api/folders/[id]',
+      '/api/internal/compute/limits/complete',
+      '/api/internal/compute/limits/consume',
+      '/api/internal/compute/limits/policy',
       '/api/internal/compute/tts-credentials',
       '/api/local-library',
       '/api/local-library/content',
-      '/api/rate-limit/status',
       '/api/tts/export/download',
       '/api/tts/export/events',
       '/api/tts/export/resolve',
@@ -348,7 +351,7 @@ describe('server-state architecture', () => {
     expect(sourceFiles.map((file) => readFileSync(file, 'utf8')).join('\n')).not.toContain('queryKeys.ttsManifest');
     expect(sourceFiles.map((file) => readFileSync(file, 'utf8')).join('\n')).not.toContain('/api/tts/segments/manifest');
     expect(source('src/components/documents/DocumentSettings.tsx')).toContain("'/api/tts/segments/clear'");
-    expect(source('src/contexts/AuthRateLimitContext.tsx')).toContain('queryKeys.rateLimit');
+    expect(source('src/contexts/AuthRateLimitContext.tsx')).toContain('queryKeys.computeLimits');
     expect(source('src/components/admin/AdminProvidersPanel.tsx')).toContain('queryKeys.admin(sessionId');
   });
 

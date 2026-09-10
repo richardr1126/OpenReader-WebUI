@@ -9,4 +9,10 @@ export interface JobHandlerContext {
   ttsPlaybackSegmentTimeoutMs: number;
   s3Prefix: string;
   logger?: { warn(data: unknown, message?: string): void };
+  acquireProviderCapacity?: (input: {
+    providerRef: string;
+    characters: number;
+    signal?: AbortSignal;
+  }) => Promise<() => Promise<void>>;
+  coolDownProviderCapacity?: (providerRef: string, retryAfterSeconds: number) => Promise<void>;
 }

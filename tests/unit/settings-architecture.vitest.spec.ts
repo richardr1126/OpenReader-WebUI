@@ -49,4 +49,22 @@ describe('settings ownership', () => {
     expect(accountExport).toContain('sourceRef.current?.close()');
     expect(accountExport).toContain('useEffect(() => closeSource, [closeSource])');
   });
+
+  test('shows TTS generation usage without replacing cached playback controls', () => {
+    const account = source('src/components/settings/AccountSettingsPanel.tsx');
+    const readers = [
+      source('src/app/(app)/epub/[id]/page.tsx'),
+      source('src/app/(app)/pdf/[id]/page.tsx'),
+      source('src/app/(app)/html/[id]/page.tsx'),
+    ];
+
+    expect(account).toContain('Daily TTS generation usage');
+    expect(account).toContain('Replaying cached audio is always free.');
+    expect(account).toContain('New generation pauses at the next uncached segment.');
+    for (const reader of readers) {
+      expect(reader).toContain('<TTSPlayer');
+      expect(reader).not.toContain('isAtLimit');
+      expect(reader).not.toContain('RateLimitPauseButton');
+    }
+  });
 });

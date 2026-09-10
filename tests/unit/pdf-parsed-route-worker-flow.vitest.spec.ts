@@ -4,8 +4,7 @@ import { NextRequest } from 'next/server';
 const hoisted = vi.hoisted(() => ({
   db: null as { select: ReturnType<typeof vi.fn> } | null,
   createOperation: vi.fn(),
-  checkJobRate: vi.fn(),
-  recordJobEvent: vi.fn(),
+  createAdmitted: vi.fn(),
 }));
 
 vi.mock('@openreader/database', () => ({
@@ -19,16 +18,15 @@ vi.mock('@/lib/server/auth/auth', () => ({
 vi.mock('@/lib/server/pdf-parse/operation', () => ({
   createOrReuseCurrentPdfParseOperation: hoisted.createOperation,
 }));
-vi.mock('@/lib/server/rate-limit/job-rate-limiter', () => ({
-  checkJobRate: hoisted.checkJobRate,
-  getPdfLayoutRateConfig: vi.fn(() => ({})),
-  recordJobEvent: hoisted.recordJobEvent,
-}));
-vi.mock('@/lib/server/rate-limit/problem-response', () => ({
-  buildComputeRateLimitedResponse: vi.fn(() => new Response('rate limited', { status: 429 })),
+vi.mock('@/lib/server/compute-limits/run-admitted', () => ({
+  ComputeAdmissionLimitedError: class ComputeAdmissionLimitedError extends Error {
+    code = 'COMPUTE_ADMISSION_RATE_LIMITED';
+    retryAfterMs = 1_000;
+  },
+  createAdmittedComputeOperation: hoisted.createAdmitted,
 }));
 vi.mock('@/lib/server/runtime-config', () => ({
-  getResolvedRuntimeConfig: vi.fn(async () => ({})),
+  getResolvedRuntimeConfig: vi.fn(async () => ({ computeLimitPolicies: {} })),
 }));
 vi.mock('@/lib/server/documents/blobstore', () => ({
   isValidDocumentId: vi.fn(() => true),
@@ -65,10 +63,8 @@ describe('POST /api/documents/[id]/parsed', () => {
       status: 'queued',
       subject: { kind: 'pdf_layout', documentId: 'doc-1', namespace: null },
     });
-    hoisted.checkJobRate.mockReset();
-    hoisted.checkJobRate.mockResolvedValue({ allowed: true });
-    hoisted.recordJobEvent.mockReset();
-    hoisted.recordJobEvent.mockResolvedValue(undefined);
+    hoisted.createAdmitted.mockReset();
+    hoisted.createAdmitted.mockImplementation(async (input: { create: () => Promise<unknown> }) => input.create());
   });
 
   test('requires an explicit replacement command', async () => {
@@ -96,16 +92,15 @@ describe('POST /api/documents/[id]/parsed', () => {
       documentId: 'doc-1',
       forceToken: expect.any(String),
     }));
-    expect(hoisted.recordJobEvent).toHaveBeenCalledWith(
-      'user-1',
-      'pdf_layout',
-      'parse-op',
-      {},
-    );
+    expect(hoisted.createAdmitted).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'pdf_layout',
+      requestKey: expect.stringContaining('doc-1:replace:'),
+    }));
   });
 
   test('does not create an operation when rate limited', async () => {
-    hoisted.checkJobRate.mockResolvedValue({ allowed: false });
+    const { ComputeAdmissionLimitedError } = await import('@/lib/server/compute-limits/run-admitted');
+    hoisted.createAdmitted.mockRejectedValue(new ComputeAdmissionLimitedError(1_000));
     const { POST } = await import('../../src/app/api/documents/[id]/parsed/route');
     const response = await POST(request({ replace: true }), {
       params: Promise.resolve({ id: 'doc-1' }),

@@ -159,10 +159,7 @@ const createAuth = () => betterAuth({
               }, 'Anonymous user linked to account');
 
               // Lazy-load heavy modules only when account linking actually happens
-              const [{ rateLimiter }, claimData] = await Promise.all([
-                import('@/lib/server/rate-limit/rate-limiter'),
-                import('@/lib/server/user/claim-data'),
-              ]);
+              const claimData = await import('@/lib/server/user/claim-data');
 
               const transferred = await claimData.claimAnonymousData(
                 newUser.user.id,
@@ -170,7 +167,6 @@ const createAuth = () => betterAuth({
                 null,
                 { cleanupLegacySources: false },
               );
-              await rateLimiter.transferAnonymousUsage(anonymousUser.user.id, newUser.user.id);
               const { deleteUserStorageData } = await import('@/lib/server/user/data-cleanup');
               await deleteUserStorageData(anonymousUser.user.id, null);
               serverLogger.info({

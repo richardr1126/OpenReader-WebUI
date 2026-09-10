@@ -71,4 +71,4 @@ from a remote worker.
 
 - [Admin Panel](./admin-panel) — DB-backed shared providers with encrypted keys
 - [TTS Environment Variables](../reference/environment-variables#tts-provider-and-request-behavior)
-- [TTS Rate Limiting](./tts-rate-limiting)
+- [Compute Rate Limiting](./compute-rate-limiting)

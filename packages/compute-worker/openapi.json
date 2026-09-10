@@ -1054,6 +1054,12 @@
                       "generating"
                     ]
                   },
+                  "stopReason": {
+                    "type": "string",
+                    "enum": [
+                      "usage_limit"
+                    ]
+                  },
                   "downloadedBytes": {
                     "type": "number"
                   },
@@ -1476,6 +1482,12 @@
                         "enum": [
                           "downloading_model",
                           "generating"
+                        ]
+                      },
+                      "stopReason": {
+                        "type": "string",
+                        "enum": [
+                          "usage_limit"
                         ]
                       },
                       "downloadedBytes": {
@@ -1925,6 +1937,12 @@
                             "enum": [
                               "downloading_model",
                               "generating"
+                            ]
+                          },
+                          "stopReason": {
+                            "type": "string",
+                            "enum": [
+                              "usage_limit"
                             ]
                           },
                           "downloadedBytes": {
@@ -2466,6 +2484,12 @@
                             "enum": [
                               "downloading_model",
                               "generating"
+                            ]
+                          },
+                          "stopReason": {
+                            "type": "string",
+                            "enum": [
+                              "usage_limit"
                             ]
                           },
                           "downloadedBytes": {
@@ -3023,6 +3047,12 @@
                               "generating"
                             ]
                           },
+                          "stopReason": {
+                            "type": "string",
+                            "enum": [
+                              "usage_limit"
+                            ]
+                          },
                           "downloadedBytes": {
                             "type": "number"
                           },
@@ -3556,6 +3586,12 @@
                               "generating"
                             ]
                           },
+                          "stopReason": {
+                            "type": "string",
+                            "enum": [
+                              "usage_limit"
+                            ]
+                          },
                           "downloadedBytes": {
                             "type": "number"
                           },
@@ -4076,6 +4112,12 @@
                             "enum": [
                               "downloading_model",
                               "generating"
+                            ]
+                          },
+                          "stopReason": {
+                            "type": "string",
+                            "enum": [
+                              "usage_limit"
                             ]
                           },
                           "downloadedBytes": {
@@ -5074,6 +5116,12 @@
                                         "generating"
                                       ]
                                     },
+                                    "stopReason": {
+                                      "type": "string",
+                                      "enum": [
+                                        "usage_limit"
+                                      ]
+                                    },
                                     "downloadedBytes": {
                                       "type": "number"
                                     },
@@ -5190,6 +5238,12 @@
                               "enum": [
                                 "downloading_model",
                                 "generating"
+                              ]
+                            },
+                            "stopReason": {
+                              "type": "string",
+                              "enum": [
+                                "usage_limit"
                               ]
                             },
                             "downloadedBytes": {
@@ -6669,6 +6723,12 @@
                                 "generating"
                               ]
                             },
+                            "stopReason": {
+                              "type": "string",
+                              "enum": [
+                                "usage_limit"
+                              ]
+                            },
                             "downloadedBytes": {
                               "type": "number"
                             },
@@ -7188,6 +7248,12 @@
                                 "generating"
                               ]
                             },
+                            "stopReason": {
+                              "type": "string",
+                              "enum": [
+                                "usage_limit"
+                              ]
+                            },
                             "downloadedBytes": {
                               "type": "number"
                             },
@@ -7703,6 +7769,12 @@
                               "enum": [
                                 "downloading_model",
                                 "generating"
+                              ]
+                            },
+                            "stopReason": {
+                              "type": "string",
+                              "enum": [
+                                "usage_limit"
                               ]
                             },
                             "downloadedBytes": {
@@ -8317,6 +8389,12 @@
                                 "generating"
                               ]
                             },
+                            "stopReason": {
+                              "type": "string",
+                              "enum": [
+                                "usage_limit"
+                              ]
+                            },
                             "downloadedBytes": {
                               "type": "number"
                             },
@@ -8888,6 +8966,12 @@
                                 "generating"
                               ]
                             },
+                            "stopReason": {
+                              "type": "string",
+                              "enum": [
+                                "usage_limit"
+                              ]
+                            },
                             "downloadedBytes": {
                               "type": "number"
                             },
@@ -9397,6 +9481,12 @@
                               "enum": [
                                 "downloading_model",
                                 "generating"
+                              ]
+                            },
+                            "stopReason": {
+                              "type": "string",
+                              "enum": [
+                                "usage_limit"
                               ]
                             },
                             "downloadedBytes": {
@@ -9990,6 +10080,12 @@
                                         "generating"
                                       ]
                                     },
+                                    "stopReason": {
+                                      "type": "string",
+                                      "enum": [
+                                        "usage_limit"
+                                      ]
+                                    },
                                     "downloadedBytes": {
                                       "type": "number"
                                     },
@@ -10536,6 +10632,12 @@
                               "enum": [
                                 "downloading_model",
                                 "generating"
+                              ]
+                            },
+                            "stopReason": {
+                              "type": "string",
+                              "enum": [
+                                "usage_limit"
                               ]
                             },
                             "downloadedBytes": {
@@ -11156,6 +11258,12 @@
                                         "generating"
                                       ]
                                     },
+                                    "stopReason": {
+                                      "type": "string",
+                                      "enum": [
+                                        "usage_limit"
+                                      ]
+                                    },
                                     "downloadedBytes": {
                                       "type": "number"
                                     },
@@ -11678,6 +11786,12 @@
                                       "enum": [
                                         "downloading_model",
                                         "generating"
+                                      ]
+                                    },
+                                    "stopReason": {
+                                      "type": "string",
+                                      "enum": [
+                                        "usage_limit"
                                       ]
                                     },
                                     "downloadedBytes": {
@@ -12331,6 +12445,12 @@
                                         "generating"
                                       ]
                                     },
+                                    "stopReason": {
+                                      "type": "string",
+                                      "enum": [
+                                        "usage_limit"
+                                      ]
+                                    },
                                     "downloadedBytes": {
                                       "type": "number"
                                     },
@@ -12963,6 +13083,12 @@
                                         "generating"
                                       ]
                                     },
+                                    "stopReason": {
+                                      "type": "string",
+                                      "enum": [
+                                        "usage_limit"
+                                      ]
+                                    },
                                     "downloadedBytes": {
                                       "type": "number"
                                     },
@@ -13434,6 +13560,12 @@
                               "enum": [
                                 "downloading_model",
                                 "generating"
+                              ]
+                            },
+                            "stopReason": {
+                              "type": "string",
+                              "enum": [
+                                "usage_limit"
                               ]
                             },
                             "downloadedBytes": {
