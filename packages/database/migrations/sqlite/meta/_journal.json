@@ -127,6 +127,13 @@
       "when": 1788896351222,
       "tag": "0017_unified_compute_limits",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1789000673954,
+      "tag": "0018_persist_admission_active_scopes",
+      "breakpoints": true
     }
   ]
 }

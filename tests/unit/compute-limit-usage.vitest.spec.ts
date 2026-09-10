@@ -46,6 +46,7 @@ beforeAll(async () => {
       operation_id text,
       device_scope_key text,
       ip_scope_key text,
+      active_scopes_json text not null default '[]',
       policy_version integer not null,
       created_at integer not null,
       activated_at integer,
@@ -195,5 +196,45 @@ describe('compute admission limits', () => {
     expect(reused.admissionId).not.toBe(first.admissionId);
     expect(blocked).toMatchObject({ allowed: false, wouldDeny: true });
     await finishComputeAdmission({ admissionId: reused.admissionId!, state: 'finished' });
+  });
+
+  test('completion decrements only the active scopes charged at admission time', async () => {
+    const offPolicy = cloneComputeLimitPolicyDocument();
+    offPolicy.actions.account_export.mode = 'off';
+    offPolicy.actions.account_export.admission.windows = [];
+    offPolicy.actions.account_export.admission.active = [
+      { scope: 'user', limit: 1, leaseSeconds: 60 },
+    ];
+    const subject = { userId: 'user-1', isAnonymous: false };
+    const uncharged = await reserveComputeAdmission({
+      policy: offPolicy,
+      action: 'account_export',
+      requestKey: 'export-while-off',
+      subject,
+    });
+
+    const enforcedPolicy = cloneComputeLimitPolicyDocument();
+    enforcedPolicy.actions.account_export.mode = 'enforce';
+    enforcedPolicy.actions.account_export.admission.windows = [];
+    enforcedPolicy.actions.account_export.admission.active = [
+      { scope: 'user', limit: 1, leaseSeconds: 60 },
+    ];
+    const charged = await reserveComputeAdmission({
+      policy: enforcedPolicy,
+      action: 'account_export',
+      requestKey: 'export-while-enforced',
+      subject,
+    });
+    await finishComputeAdmission({ admissionId: uncharged.admissionId!, state: 'finished' });
+    const blocked = await reserveComputeAdmission({
+      policy: enforcedPolicy,
+      action: 'account_export',
+      requestKey: 'export-still-blocked',
+      subject,
+    });
+
+    expect(charged.allowed).toBe(true);
+    expect(blocked).toMatchObject({ allowed: false, wouldDeny: true });
+    await finishComputeAdmission({ admissionId: charged.admissionId!, state: 'finished' });
   });
 });

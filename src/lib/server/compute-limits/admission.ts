@@ -21,6 +21,8 @@ export type ComputeAdmissionState = 'reserved' | 'active' | 'finished' | 'cancel
 const TTS_PLAYBACK_ADMISSION_WINDOW_MS = 30 * 60 * 1000;
 const INLINE_EXPIRY_RECONCILIATION_LIMIT = 10;
 
+type ChargedActiveScope = { scope: ComputeLimitScope; scopeKey: string };
+
 export function buildTtsPlaybackAdmissionRequestKey(sessionId: string, nowMs: number): string {
   return `tts-session:${sessionId}:${Math.floor(nowMs / TTS_PLAYBACK_ADMISSION_WINDOW_MS)}`;
 }
@@ -57,6 +59,20 @@ function rowsAffected(value: unknown): number {
   return 0;
 }
 
+function parseChargedActiveScopes(value: string): ChargedActiveScope[] {
+  const parsed = JSON.parse(value) as unknown;
+  if (!Array.isArray(parsed) || !parsed.every((entry) => (
+    entry && typeof entry === 'object'
+      && ['user', 'anonymous_device', 'ip', 'site'].includes(
+        String((entry as Record<string, unknown>).scope),
+      )
+      && typeof (entry as Record<string, unknown>).scopeKey === 'string'
+  ))) {
+    throw new Error('Compute admission active scopes are invalid');
+  }
+  return parsed as ChargedActiveScope[];
+}
+
 async function decrementActiveGauge(conn: DbTransactionConnection, input: {
   scope: ComputeLimitScope;
   scopeKey: string;
@@ -76,21 +92,11 @@ async function decrementActiveGauge(conn: DbTransactionConnection, input: {
 }
 
 async function decrementAdmissionActiveGauges(conn: DbTransactionConnection, input: {
-  userId: string;
-  deviceScopeKey: string | null;
-  ipScopeKey: string | null;
+  activeScopesJson: string;
   action: ComputeAction;
   nowMs: number;
 }): Promise<void> {
-  const scopes: Array<{ scope: ComputeLimitScope; scopeKey: string }> = [
-    { scope: 'user', scopeKey: deriveComputeScopeKey('user', input.userId) },
-    { scope: 'site', scopeKey: 'site' },
-  ];
-  if (input.deviceScopeKey) {
-    scopes.push({ scope: 'anonymous_device', scopeKey: input.deviceScopeKey });
-  }
-  if (input.ipScopeKey) scopes.push({ scope: 'ip', scopeKey: input.ipScopeKey });
-  for (const scope of scopes) {
+  for (const scope of parseChargedActiveScopes(input.activeScopesJson)) {
     await decrementActiveGauge(conn, { ...scope, action: input.action, nowMs: input.nowMs });
   }
 }
@@ -104,9 +110,7 @@ async function reconcileExpiredAdmissions(
 ): Promise<void> {
   const expired = await conn.select({
     id: computeLimitAdmissions.id,
-    userId: computeLimitAdmissions.userId,
-    deviceScopeKey: computeLimitAdmissions.deviceScopeKey,
-    ipScopeKey: computeLimitAdmissions.ipScopeKey,
+    activeScopesJson: computeLimitAdmissions.activeScopesJson,
   }).from(computeLimitAdmissions).where(and(
     eq(computeLimitAdmissions.action, action),
     inArray(computeLimitAdmissions.state, ['reserved', 'active']),
@@ -116,9 +120,7 @@ async function reconcileExpiredAdmissions(
 
   for (const row of expired as Array<{
     id: string;
-    userId: string;
-    deviceScopeKey: string | null;
-    ipScopeKey: string | null;
+    activeScopesJson: string;
   }>) {
     const updated = await conn.update(computeLimitAdmissions).set({
       state: 'cancelled',
@@ -130,9 +132,7 @@ async function reconcileExpiredAdmissions(
     ));
     if (rowsAffected(updated) === 0) continue;
     await decrementAdmissionActiveGauges(conn, {
-      userId: row.userId,
-      deviceScopeKey: row.deviceScopeKey,
-      ipScopeKey: row.ipScopeKey,
+      activeScopesJson: row.activeScopesJson,
       action,
       nowMs,
     });
@@ -195,15 +195,49 @@ export async function reserveComputeAdmission(input: {
   const actionPolicy = input.policy.actions[input.action];
   const leaseSeconds = Math.max(60, ...actionPolicy.admission.active.map((limit) => limit.leaseSeconds));
   const admissionId = randomUUID();
+  const counters: Array<{
+    scope: ComputeLimitScope;
+    scopeKey: string;
+    metric: 'starts' | 'active';
+    windowStart: number;
+    windowEnd: number;
+    limit: number;
+  }> = [];
+  for (const windowPolicy of actionPolicy.admission.windows) {
+    const scope = resolveComputeScope(windowPolicy.scope, input.subject);
+    if (!scope) continue;
+    const window = fixedWindow(nowMs, windowPolicy.windowSeconds);
+    counters.push({
+      scope: scope.scope,
+      scopeKey: scope.key,
+      metric: 'starts',
+      windowStart: window.startMs,
+      windowEnd: window.endMs,
+      limit: windowPolicy.limit,
+    });
+  }
+  for (const activePolicy of actionPolicy.admission.active) {
+    const scope = resolveComputeScope(activePolicy.scope, input.subject);
+    if (!scope) continue;
+    counters.push({
+      scope: scope.scope,
+      scopeKey: scope.key,
+      metric: 'active',
+      windowStart: 0,
+      windowEnd: 0,
+      limit: activePolicy.limit,
+    });
+  }
+  const activeScopesJson = JSON.stringify(actionPolicy.mode === 'off' ? [] : counters
+    .filter((counter) => counter.metric === 'active')
+    .map(({ scope, scopeKey }) => ({ scope, scopeKey })));
   let wouldDeny = false;
   try {
     await runInDbTransaction(async (conn) => {
       const matchingRows = await conn.select({
         id: computeLimitAdmissions.id,
-        userId: computeLimitAdmissions.userId,
         state: computeLimitAdmissions.state,
-        deviceScopeKey: computeLimitAdmissions.deviceScopeKey,
-        ipScopeKey: computeLimitAdmissions.ipScopeKey,
+        activeScopesJson: computeLimitAdmissions.activeScopesJson,
         leaseExpiresAt: computeLimitAdmissions.leaseExpiresAt,
       }).from(computeLimitAdmissions).where(and(
         eq(computeLimitAdmissions.userId, input.subject.userId),
@@ -223,9 +257,7 @@ export async function reserveComputeAdmission(input: {
         ));
         if (rowsAffected(expired) > 0) {
           await decrementAdmissionActiveGauges(conn, {
-            userId: String(matching.userId),
-            deviceScopeKey: matching.deviceScopeKey,
-            ipScopeKey: matching.ipScopeKey,
+            activeScopesJson: String(matching.activeScopesJson),
             action: input.action,
             nowMs,
           });
@@ -251,6 +283,7 @@ export async function reserveComputeAdmission(input: {
         ipScopeKey: input.subject.ip
           ? deriveComputeScopeKey('ip', input.subject.ip)
           : input.subject.ipScopeKey ?? null,
+        activeScopesJson,
         policyVersion: computePolicyVersion(input.policy),
         createdAt: nowMs,
         activatedAt: null,
@@ -266,40 +299,6 @@ export async function reserveComputeAdmission(input: {
       if (rowsAffected(inserted) === 0) return;
 
       if (actionPolicy.mode === 'off') return;
-      const counters: Array<{
-        scope: ComputeLimitScope;
-        scopeKey: string;
-        metric: 'starts' | 'active';
-        windowStart: number;
-        windowEnd: number;
-        limit: number;
-      }> = [];
-      for (const windowPolicy of actionPolicy.admission.windows) {
-        const scope = resolveComputeScope(windowPolicy.scope, input.subject);
-        if (!scope) continue;
-        const window = fixedWindow(nowMs, windowPolicy.windowSeconds);
-        counters.push({
-          scope: scope.scope,
-          scopeKey: scope.key,
-          metric: 'starts',
-          windowStart: window.startMs,
-          windowEnd: window.endMs,
-          limit: windowPolicy.limit,
-        });
-      }
-      for (const activePolicy of actionPolicy.admission.active) {
-        const scope = resolveComputeScope(activePolicy.scope, input.subject);
-        if (!scope) continue;
-        counters.push({
-          scope: scope.scope,
-          scopeKey: scope.key,
-          metric: 'active',
-          windowStart: 0,
-          windowEnd: 0,
-          limit: activePolicy.limit,
-        });
-      }
-
       for (const counter of counters) {
         await conn.insert(computeLimitBuckets).values({
           scopeType: counter.scope,
@@ -423,10 +422,8 @@ export async function finishComputeAdmission(input: {
   const nowMs = input.nowMs ?? Date.now();
   await runInDbTransaction(async (conn) => {
     const rows = await conn.select({
-      userId: computeLimitAdmissions.userId,
       action: computeLimitAdmissions.action,
-      deviceScopeKey: computeLimitAdmissions.deviceScopeKey,
-      ipScopeKey: computeLimitAdmissions.ipScopeKey,
+      activeScopesJson: computeLimitAdmissions.activeScopesJson,
     }).from(computeLimitAdmissions).where(and(
       eq(computeLimitAdmissions.id, input.admissionId),
       inArray(computeLimitAdmissions.state, ['reserved', 'active']),
@@ -443,9 +440,7 @@ export async function finishComputeAdmission(input: {
     if (rowsAffected(updated) === 0) return;
     const action = admission.action as ComputeAction;
     await decrementAdmissionActiveGauges(conn, {
-      userId: String(admission.userId),
-      deviceScopeKey: admission.deviceScopeKey,
-      ipScopeKey: admission.ipScopeKey,
+      activeScopesJson: String(admission.activeScopesJson),
       action,
       nowMs,
     });

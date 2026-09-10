@@ -432,6 +432,7 @@ limits and the opaque subject through which a worker consumes metered usage.
 | `operation_id` | text, nullable | Worker operation after creation |
 | `device_scope_key` | text, nullable | HMAC-derived anonymous device bucket identity |
 | `ip_scope_key` | text, nullable | HMAC-derived IP bucket identity |
+| `active_scopes_json` | text JSON | Exact active bucket scopes charged to this admission, including an empty array |
 | `policy_version` | integer | Policy used when the admission was created |
 | `created_at` | epoch milliseconds | Attempt time |
 | `activated_at` | epoch milliseconds, nullable | When real work/session became active |

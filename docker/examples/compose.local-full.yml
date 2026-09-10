@@ -19,7 +19,7 @@ services:
       USE_ANONYMOUS_AUTH_SESSIONS: ${USE_ANONYMOUS_AUTH_SESSIONS:-false}
       COMPUTE_CREDENTIAL_BROKER_TOKEN: ${COMPUTE_CREDENTIAL_BROKER_TOKEN:-local-credential-broker-token}
       POSTGRES_URL: postgres://openreader:openreader@postgres:5432/openreader
-      COMPUTE_WORKER_URL: http://compute-worker:8081
+      COMPUTE_WORKER_URL: http://127.0.0.1:8081
       COMPUTE_WORKER_PUBLIC_URL: ${COMPUTE_WORKER_PUBLIC_URL:-http://localhost:8081}
       COMPUTE_WORKER_TOKEN: ${COMPUTE_WORKER_TOKEN:-local-compute-token}
       TTS_PLAYBACK_TOKEN_SECRET: ${TTS_PLAYBACK_TOKEN_SECRET:-local-tts-playback-token-secret}
@@ -54,6 +54,7 @@ services:
       - openreader-docstore:/app/docstore
     ports:
       - "3003:3003"
+      - "8081:8081"
 
   kokoro-tts:
     image: ghcr.io/remsky/kokoro-fastapi-cpu:v0.2.4
@@ -109,7 +110,10 @@ services:
     build:
       context: ../..
       dockerfile: packages/compute-worker/Dockerfile
+    network_mode: "service:openreader"
     depends_on:
+      openreader:
+        condition: service_started
       nats:
         condition: service_started
       seaweedfs:
@@ -119,7 +123,7 @@ services:
       COMPUTE_WORKER_HOST: 0.0.0.0
       PORT: 8081
       COMPUTE_WORKER_TOKEN: ${COMPUTE_WORKER_TOKEN:-local-compute-token}
-      COMPUTE_CREDENTIAL_BROKER_URL: http://openreader:3003/api/internal/compute/tts-credentials
+      COMPUTE_CREDENTIAL_BROKER_URL: http://127.0.0.1:3003/api/internal/compute/tts-credentials
       COMPUTE_CREDENTIAL_BROKER_TOKEN: ${COMPUTE_CREDENTIAL_BROKER_TOKEN:-local-credential-broker-token}
       TTS_PLAYBACK_TOKEN_SECRET: ${TTS_PLAYBACK_TOKEN_SECRET:-local-tts-playback-token-secret}
       S3_INTERNAL_ENDPOINT: http://seaweedfs:8333
@@ -130,9 +134,6 @@ services:
       S3_FORCE_PATH_STYLE: "true"
       S3_PREFIX: ${S3_PREFIX:-openreader}
       COMPUTE_PREWARM_MODELS: ${COMPUTE_PREWARM_MODELS:-false}
-    ports:
-      - "8081:8081"
-
 volumes:
   openreader-docstore:
   seaweedfs-data:

@@ -53,6 +53,7 @@ export const computeLimitAdmissions = sqliteTable('compute_limit_admissions', {
   operationId: text('operation_id'),
   deviceScopeKey: text('device_scope_key'),
   ipScopeKey: text('ip_scope_key'),
+  activeScopesJson: text('active_scopes_json').notNull().default('[]'),
   policyVersion: integer('policy_version').notNull(),
   createdAt: integer('created_at').notNull(),
   activatedAt: integer('activated_at'),

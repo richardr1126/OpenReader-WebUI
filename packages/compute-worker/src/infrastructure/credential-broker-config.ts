@@ -19,8 +19,6 @@ function permitsPlainHttp(url: URL): boolean {
   const hostname = url.hostname.toLowerCase();
   return hostname === 'localhost'
     || hostname === '[::1]'
-    || hostname === 'host.docker.internal'
-    || hostname === 'openreader'
     || (hostname.startsWith('127.') && isIP(hostname) === 4);
 }
 

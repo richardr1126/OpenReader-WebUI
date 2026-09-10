@@ -165,7 +165,10 @@ describe('shared runtime configuration boundary', () => {
     expect(fullWorker).not.toContain('AUTH_SECRET:');
     expect(fullWorker).not.toContain('POSTGRES_URL:');
     expect(fullWorker).not.toContain('SQLITE_DB_PATH:');
-    expect(fullWorker).toContain('COMPUTE_CREDENTIAL_BROKER_URL: http://openreader:3003/api/internal/compute/tts-credentials');
+    expect(fullCompose).toContain('COMPUTE_WORKER_URL: http://127.0.0.1:8081');
+    expect(fullCompose).toContain('- "8081:8081"');
+    expect(fullWorker).toContain('network_mode: "service:openreader"');
+    expect(fullWorker).toContain('COMPUTE_CREDENTIAL_BROKER_URL: http://127.0.0.1:3003/api/internal/compute/tts-credentials');
     expect(fullWorker).toContain('COMPUTE_CREDENTIAL_BROKER_TOKEN:');
     expect(playwrightWorkflow).toContain('TTS_PLAYBACK_TOKEN_SECRET:');
     for (const slimCompose of slimComposeFiles) {

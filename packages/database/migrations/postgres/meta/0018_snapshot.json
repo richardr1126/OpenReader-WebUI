@@ -1,6 +1,6 @@
 {
-  "id": "90aef2b1-671b-49f9-a7b8-b4735cfe46e2",
-  "prevId": "6bcab98a-fef0-4702-a940-dde8c1696514",
+  "id": "9e6e5302-4edc-484f-891b-65f734057f80",
+  "prevId": "90aef2b1-671b-49f9-a7b8-b4735cfe46e2",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -202,6 +202,13 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "active_scopes_json": {
+          "name": "active_scopes_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'"
         },
         "policy_version": {
           "name": "policy_version",

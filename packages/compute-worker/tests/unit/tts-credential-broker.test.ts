@@ -190,14 +190,14 @@ describe('TTS credential broker client', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  test('permits only explicit local HTTP broker hosts', () => {
-    process.env.COMPUTE_CREDENTIAL_BROKER_URL =
-      'http://openreader:3003/api/internal/compute/tts-credentials';
-    expect(readTtsCredentialBrokerConfig().url.hostname).toBe('openreader');
-
+  test('permits HTTP only on loopback broker hosts', () => {
     process.env.COMPUTE_CREDENTIAL_BROKER_URL =
       'http://127.0.0.1:3003/api/internal/compute/tts-credentials';
     expect(readTtsCredentialBrokerConfig().url.hostname).toBe('127.0.0.1');
+
+    process.env.COMPUTE_CREDENTIAL_BROKER_URL =
+      'http://openreader:3003/api/internal/compute/tts-credentials';
+    expect(() => readTtsCredentialBrokerConfig()).toThrow(TtsCredentialBrokerClientError);
   });
 
   test('derives a stable domain-separated text fingerprint key from the playback secret', () => {

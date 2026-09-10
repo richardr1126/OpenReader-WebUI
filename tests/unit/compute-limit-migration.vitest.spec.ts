@@ -38,10 +38,16 @@ describe('unified compute-limit migration', () => {
       insert.run(key, JSON.stringify(value), 'admin');
     }
 
-    const migration = fs.readFileSync(path.resolve(
-      'packages/database/migrations/sqlite/0017_unified_compute_limits.sql',
-    ), 'utf8').replaceAll('--> statement-breakpoint', '');
-    sqlite.exec(migration);
+    for (const migrationName of [
+      '0017_unified_compute_limits.sql',
+      '0018_persist_admission_active_scopes.sql',
+    ]) {
+      const migration = fs.readFileSync(path.resolve(
+        'packages/database/migrations/sqlite',
+        migrationName,
+      ), 'utf8').replaceAll('--> statement-breakpoint', '');
+      sqlite.exec(migration);
+    }
 
     const row = sqlite.prepare(
       "SELECT value_json FROM admin_settings WHERE key = 'computeLimitPolicies'",
@@ -63,6 +69,9 @@ describe('unified compute-limit migration', () => {
     expect(sqlite.prepare(
       "SELECT count(*) AS count FROM sqlite_master WHERE type = 'table' AND name IN ('user_job_events', 'user_tts_chars')",
     ).get()).toEqual({ count: 0 });
+    expect(sqlite.prepare(
+      "SELECT name, \"notnull\" AS required, dflt_value AS defaultValue FROM pragma_table_info('compute_limit_admissions') WHERE name = 'active_scopes_json'",
+    ).get()).toEqual({ name: 'active_scopes_json', required: 1, defaultValue: "'[]'" });
     sqlite.close();
   });
 });
